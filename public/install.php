@@ -235,17 +235,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $stmt->execute([':k' => $key, ':v' => $val]);
             }
 
-            // Write TiCore/.env with correct paths
-            $envContent = "APP_NAME=iNetPanel\n"
-                        . "APP_VERSION=1.0\n"
-                        . "APP_ENV=production\n"
-                        . "APP_DEBUG=false\n"
-                        . "APP_URL=http://localhost\n\n"
-                        . "DB_DRIVER=sqlite\n"
-                        . "DB_PATH=../db/inetpanel.db\n\n"
-                        . "TICORE_VERSION=1.0\n";
-            file_put_contents($projectRoot . '/TiCore/.env', $envContent);
-
             // Write lock file — prevents install.php from being accessed again
             file_put_contents($lockFile, date('Y-m-d H:i:s'));
 

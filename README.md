@@ -123,6 +123,7 @@ Settings → Updates → enable **Panel Auto-Update** and set a time.
 
 ### CLI update
 ```bash
+# Run on your server as root:
 php /var/www/inetpanel/scripts/panel_update.php --force
 ```
 
@@ -138,14 +139,21 @@ inetpanel/
 ├── api/                 # AJAX API endpoints (JSON responses)
 ├── conf/                # Configuration (Config.php)
 ├── db/                  # SQLite database (gitignored)
-├── public/              # Web root (index.php, install.php, assets)
+├── public/              # ← Web root (lighttpd docroot — only this directory is served)
+│   ├── index.php        #   Front controller / router
+│   ├── install.php      #   Setup wizard (blocked after install)
+│   └── assets/          #   CSS, JS, images
 ├── scripts/
 │   ├── system/          # Bash system scripts (deployed to /root/scripts/ on update)
-│   ├── panel_update.php # Self-update script
-│   └── ddns_update.php  # DDNS cron script
+│   ├── panel_update.php # Self-update script (CLI only — not web-accessible)
+│   └── ddns_update.php  # DDNS cron script (CLI only — not web-accessible)
 ├── src/                 # Admin page views
 └── themes/default/      # Layout templates (header, sidebar, footer, login)
 ```
+
+> **Security note:** Only `public/` is served by lighttpd (`server.document-root = "/var/www/inetpanel/public"`).
+> `TiCore/`, `api/`, `src/`, and `scripts/` are sibling directories — they are completely
+> unreachable via HTTP and are only ever loaded by PHP internally through `require_once`.
 
 ---
 
@@ -162,3 +170,7 @@ inetpanel/
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
+---
+
+Created by [Tuxxin](https://tuxxin.com) — [inetpanel.tuxxin.com](https://inetpanel.tuxxin.com)
