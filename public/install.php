@@ -181,11 +181,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             // Cloudflare Setup
-            $cfEnabled = ($_POST['dns_mode'] === 'cloudflare') ? 1 : 0;
-            $tunnelId = null;
-            if ($cfEnabled) {
-                $tunnelId = "inetpanel-" . preg_replace('/[^a-zA-Z0-9_]/', '', $_POST['hostname']);
-            }
+            $cfEnabled   = ($_POST['dns_mode'] === 'cloudflare') ? 1 : 0;
+            $cfAccountId = trim($_POST['cf_account_id'] ?? '');
 
             // Settings
             $ddnsEnabled  = isset($_POST['ddns_enabled'])  && $_POST['ddns_enabled']  === '1' ? '1' : '0';
@@ -193,7 +190,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $ddnsHostname = trim($_POST['ddns_hostname'] ?? '');
             $ddnsZoneId   = trim($_POST['ddns_zone_id']  ?? '');
             $ddnsInterval = (int)($_POST['ddns_interval'] ?? 5);
-            $wgPort       = (int)($_POST['wg_port']    ?? 51820);
+            $wgPort       = (int)($_POST['wg_port']    ?? 1443);
             $wgSubnet     = trim($_POST['wg_subnet']   ?? '10.10.0.0/24');
             $wgEndpoint   = trim($_POST['wg_endpoint'] ?? '');
 
@@ -208,7 +205,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 'cf_enabled'        => $cfEnabled,
                 'cf_email'          => ($cfEnabled) ? $_POST['cf_email'] : '',
                 'cf_api_key'        => ($cfEnabled) ? $_POST['cf_key']   : '',
-                'cf_tunnel_id'      => $tunnelId ?? '',
+                'cf_account_id'     => $cfAccountId,
+                'cf_tunnel_id'      => '',
+                'cf_tunnel_token'   => '',
                 // DDNS
                 'cf_ddns_enabled'   => $ddnsEnabled,
                 'cf_ddns_hostname'  => $ddnsHostname,
@@ -249,6 +248,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             // Write lock file — prevents install.php from being accessed again
             file_put_contents($lockFile, date('Y-m-d H:i:s'));
+
+            // Create Cloudflare Zero Trust Tunnel if CF is enabled + account ID provided
+            if ($cfEnabled && $cfAccountId) {
+                $tunnelName = 'inetpanel-' . preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['hostname'] ?? 'panel');
+                $cfEmail  = $_POST['cf_email'] ?? '';
+                $cfApiKey = $_POST['cf_key']   ?? '';
+
+                // Helper: make a CF API request
+                $cfRequest = function(string $method, string $path, ?array $body = null) use ($cfEmail, $cfApiKey): array {
+                    $ch = curl_init('https://api.cloudflare.com/client/v4' . $path);
+                    curl_setopt_array($ch, [
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_TIMEOUT        => 20,
+                        CURLOPT_CUSTOMREQUEST  => $method,
+                        CURLOPT_HTTPHEADER     => [
+                            'X-Auth-Email: ' . $cfEmail,
+                            'X-Auth-Key: '   . $cfApiKey,
+                            'Content-Type: application/json',
+                        ],
+                    ]);
+                    if ($body !== null) {
+                        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
+                    }
+                    $raw = curl_exec($ch);
+                    curl_close($ch);
+                    $decoded = json_decode($raw, true);
+                    return is_array($decoded) ? $decoded : ['success' => false];
+                };
+
+                // Create tunnel
+                $createResp = $cfRequest('POST', "/accounts/{$cfAccountId}/cfd_tunnel", [
+                    'name'          => $tunnelName,
+                    'tunnel_secret' => base64_encode(random_bytes(32)),
+                    'config_src'    => 'cloudflare',
+                ]);
+
+                if (!empty($createResp['result']['id'])) {
+                    $tunnelId = $createResp['result']['id'];
+
+                    // Get cloudflared token
+                    $tokenResp = $cfRequest('GET', "/accounts/{$cfAccountId}/cfd_tunnel/{$tunnelId}/token");
+                    $tunnelToken = $tokenResp['result'] ?? '';
+
+                    // Save to settings
+                    $stmt = $db->prepare("UPDATE settings SET value = :v WHERE key = :k");
+                    $stmt->execute([':v' => $tunnelId,    ':k' => 'cf_tunnel_id']);
+                    $stmt->execute([':v' => $tunnelToken, ':k' => 'cf_tunnel_token']);
+
+                    // Install cloudflared as a systemd service
+                    if ($tunnelToken) {
+                        exec('sudo /root/scripts/cloudflared_setup.sh --action install --token ' . escapeshellarg($tunnelToken) . ' 2>&1');
+                    }
+                }
+            }
 
             // Set up DDNS cron if enabled
             if ($ddnsEnabled === '1' && $ddnsInterval > 0) {
@@ -478,6 +531,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     <label class="form-label">Global API Key</label>
                     <input type="text" class="form-control" id="cfApiKey" placeholder="Enter Global API Key">
                 </div>
+                <div class="mb-3">
+                    <label class="form-label">Account ID</label>
+                    <input type="text" class="form-control" id="cfAccountId" placeholder="32-character Account ID">
+                    <div class="form-text">Found in the Cloudflare dashboard sidebar on any domain overview page.</div>
+                </div>
                 
                 <div class="alert alert-danger d-none" id="cfErrorMsg"></div>
                 <div class="alert alert-success d-none" id="cfSuccessMsg"><i class="fas fa-check-circle me-2"></i> Connection Verified!</div>
@@ -549,7 +607,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </div>
                 <div class="row g-2 mb-2">
                     <div class="col-5">
-                        <input type="number" class="form-control form-control-sm" id="wgPort" value="51820" placeholder="VPN Port">
+                        <input type="number" class="form-control form-control-sm" id="wgPort" value="1443" placeholder="VPN Port">
                     </div>
                     <div class="col-7">
                         <input type="text" class="form-control form-control-sm" id="wgSubnet" value="10.10.0.0/24" placeholder="VPN Subnet">
@@ -614,7 +672,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         username: '', password: '', hostname: '', timezone: '',
         dns_mode: 'cloudflare', cf_email: '', cf_key: '',
         ddns_enabled: '0', ddns_hostname: '', ddns_zone_id: '', ddns_interval: '5',
-        wg_enabled: '0', wg_port: '51820', wg_subnet: '10.10.0.0/24', wg_endpoint: ''
+        wg_enabled: '0', wg_port: '1443', wg_subnet: '10.10.0.0/24', wg_endpoint: '', cf_account_id: ''
     };
 
     function toggleDDNS(on) {
@@ -730,8 +788,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 const req = await fetch('install.php', { method:'POST', body:fd });
                 const res = await req.json();
                 if(res.success) {
-                    installData.cf_email = document.getElementById('cfEmail').value;
-                    installData.cf_key = document.getElementById('cfApiKey').value;
+                    installData.cf_email      = document.getElementById('cfEmail').value;
+                    installData.cf_key        = document.getElementById('cfApiKey').value;
+                    installData.cf_account_id = document.getElementById('cfAccountId').value;
                     runInstallation();
                 } else {
                     document.getElementById('cfErrorMsg').textContent = res.message;

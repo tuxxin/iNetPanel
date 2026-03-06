@@ -4,11 +4,20 @@ A self-hosted web hosting control panel for Debian 12. Manage Apache virtual hos
 
 ---
 
+## The Story
+
+I've always wanted to build a cPanel-like system for home hosting — a proper control panel that gives you full ownership over your server without the cost or complexity of commercial solutions. Before AI-assisted development, the ongoing upkeep and breadth of a project like this simply wasn't feasible as an open-source effort. With the help of AI, it has finally come to fruition.
+
+iNetPanel is the result: a capable, modern hosting panel built for people who want to self-host seriously — with Cloudflare integration, VPN-secured access, and automated management that doesn't require a team to maintain.
+
+---
+
 ## Features
 
 - **Account Management** — Create and delete hosting accounts (Apache vhost + PHP-FPM pool + Linux user + FTP) from the panel
 - **Multi-PHP** — Install and switch between multiple PHP versions (5.6–8.4) per domain using sury.org packages
 - **SSH Key Manager** — Import, generate, and delete SSH keys for any hosting account or the root user without touching the command line
+- **Cloudflare Zero Trust Tunnel** — Automatic tunnel created at install; each new hosting account gets a published public hostname routed through the tunnel (no open ports required)
 - **Cloudflare DNS** — Full DNS record management via Cloudflare API (A, CNAME, MX, TXT, etc.)
 - **Email Forwarding** — Manage Cloudflare Email Routing rules per domain
 - **Cloudflare DDNS** — Automatically update a DNS A record when your server's IP changes

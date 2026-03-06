@@ -72,6 +72,17 @@ switch ($action) {
             if (DB::setting('wg_auto_peer', '0') === '1') {
                 Shell::run('wg_peer', ['--add', '--name' => $domain]);
             }
+            // Add Cloudflare Zero Trust tunnel public hostname
+            if ($port && DB::setting('cf_enabled', '0') === '1') {
+                $tunnelId  = DB::setting('cf_tunnel_id',  '');
+                $accountId = DB::setting('cf_account_id', '');
+                if ($tunnelId && $accountId) {
+                    try {
+                        $cf = new CloudflareAPI();
+                        $cf->addTunnelHostname($accountId, $tunnelId, $domain, "http://localhost:{$port}");
+                    } catch (Throwable) {}
+                }
+            }
         }
 
         echo json_encode($result);
@@ -98,6 +109,17 @@ switch ($action) {
             DB::delete('domains',      'domain_name = ?', [$domain]);
             DB::delete('account_ports', 'domain_name = ?', [$domain]);
             DB::delete('wg_peers',     'domain_name = ?', [$domain]);
+            // Remove Cloudflare Zero Trust tunnel public hostname
+            if (DB::setting('cf_enabled', '0') === '1') {
+                $tunnelId  = DB::setting('cf_tunnel_id',  '');
+                $accountId = DB::setting('cf_account_id', '');
+                if ($tunnelId && $accountId) {
+                    try {
+                        $cf = new CloudflareAPI();
+                        $cf->removeTunnelHostname($accountId, $tunnelId, $domain);
+                    } catch (Throwable) {}
+                }
+            }
         }
 
         echo json_encode($result);

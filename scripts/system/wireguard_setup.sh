@@ -9,7 +9,7 @@
 # - Restricts SSH/FTP to WireGuard subnet only (CSF or iptables)
 # - Enables wg-quick@wg0 systemd service
 #
-# Usage: inetp wireguard_setup --port 51820 --subnet 10.10.0.0/24 --endpoint hostname_or_ip
+# Usage: inetp wireguard_setup --port 1443 --subnet 10.10.0.0/24 --endpoint hostname_or_ip
 # ==============================================================================
 
 WG_CONF="/etc/wireguard/wg0.conf"
@@ -19,7 +19,7 @@ PANEL_DB="/var/www/inetpanel/db/inetpanel.db"
 BOLD='\033[1m'; GREEN='\033[1;32m'; RED='\033[1;31m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
 # --- Parse flags ---
-WG_PORT=51820
+WG_PORT=1443
 WG_SUBNET="10.10.0.0/24"
 WG_ENDPOINT=""
 

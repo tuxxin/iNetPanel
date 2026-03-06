@@ -109,6 +109,156 @@ class CloudflareAPI
     }
 
     // -------------------------------------------------------------------------
+    // Zero Trust Tunnels
+    // -------------------------------------------------------------------------
+
+    /**
+     * Create a named Cloudflare Zero Trust tunnel.
+     * Returns the full API response; result.id is the tunnel UUID.
+     */
+    public function createTunnel(string $accountId, string $name): array
+    {
+        return $this->request('POST', "/accounts/{$accountId}/cfd_tunnel", [
+            'name'         => $name,
+            'tunnel_secret' => base64_encode(random_bytes(32)),
+            'config_src'   => 'cloudflare',
+        ]);
+    }
+
+    /**
+     * Retrieve the cloudflared connector token for a tunnel.
+     * Returns the raw token string, or false on failure.
+     */
+    public function getTunnelToken(string $accountId, string $tunnelId): string|false
+    {
+        $result = $this->request('GET', "/accounts/{$accountId}/cfd_tunnel/{$tunnelId}/token");
+        $token = $result['result'] ?? '';
+        return is_string($token) && $token !== '' ? $token : false;
+    }
+
+    /**
+     * Get the current ingress configuration for a tunnel.
+     */
+    public function getTunnelConfig(string $accountId, string $tunnelId): array
+    {
+        return $this->request('GET', "/accounts/{$accountId}/cfd_tunnel/{$tunnelId}/configurations");
+    }
+
+    /**
+     * Replace the full ingress configuration for a tunnel.
+     */
+    public function updateTunnelConfig(string $accountId, string $tunnelId, array $ingress): array
+    {
+        return $this->request('PUT', "/accounts/{$accountId}/cfd_tunnel/{$tunnelId}/configurations", [
+            'config' => ['ingress' => $ingress],
+        ]);
+    }
+
+    /**
+     * Add a public hostname to a tunnel, routing it to a local service.
+     * Also creates the CNAME DNS record in the matching CF zone (if found).
+     *
+     * @param string $hostname  e.g. "client1.com"
+     * @param string $service   e.g. "http://localhost:1080"
+     */
+    public function addTunnelHostname(string $accountId, string $tunnelId, string $hostname, string $service): array
+    {
+        // Get current ingress rules
+        $config  = $this->getTunnelConfig($accountId, $tunnelId);
+        $ingress = $config['result']['config']['ingress'] ?? [['service' => 'http_status:404']];
+
+        // Remove any existing entry for this hostname (prevent duplicates)
+        $ingress = array_values(array_filter($ingress, fn($r) => ($r['hostname'] ?? '') !== $hostname));
+
+        // Ensure catch-all is last; insert new rule before it
+        $catchAll = array_pop($ingress) ?? ['service' => 'http_status:404'];
+        $ingress[] = ['hostname' => $hostname, 'service' => $service];
+        $ingress[] = $catchAll;
+
+        $result = $this->updateTunnelConfig($accountId, $tunnelId, $ingress);
+
+        // Auto-create CNAME DNS record if the zone is in this CF account
+        $this->upsertTunnelCname($tunnelId, $hostname);
+
+        return $result;
+    }
+
+    /**
+     * Remove a public hostname from a tunnel and delete its CNAME DNS record.
+     */
+    public function removeTunnelHostname(string $accountId, string $tunnelId, string $hostname): array
+    {
+        $config  = $this->getTunnelConfig($accountId, $tunnelId);
+        $ingress = $config['result']['config']['ingress'] ?? [['service' => 'http_status:404']];
+
+        $ingress = array_values(array_filter($ingress, fn($r) => ($r['hostname'] ?? '') !== $hostname));
+        if (empty($ingress)) {
+            $ingress = [['service' => 'http_status:404']];
+        }
+
+        $result = $this->updateTunnelConfig($accountId, $tunnelId, $ingress);
+
+        // Remove CNAME DNS record if found
+        $this->deleteTunnelCname($hostname);
+
+        return $result;
+    }
+
+    /**
+     * Create or update a CNAME DNS record pointing to the tunnel.
+     * Looks up the CF zone by matching the hostname's root domain.
+     */
+    private function upsertTunnelCname(string $tunnelId, string $hostname): void
+    {
+        $cname = "{$tunnelId}.cfargotunnel.com";
+        $zoneId = $this->findZoneForHostname($hostname);
+        if (!$zoneId) return;
+
+        $records = $this->listDNSRecords($zoneId, ['type' => 'CNAME', 'name' => $hostname]);
+        $existing = $records['result'][0] ?? null;
+        $data = ['type' => 'CNAME', 'name' => $hostname, 'content' => $cname, 'ttl' => 1, 'proxied' => true];
+        if ($existing) {
+            $this->updateDNSRecord($zoneId, $existing['id'], $data);
+        } else {
+            $this->createDNSRecord($zoneId, $data);
+        }
+    }
+
+    /**
+     * Delete the CNAME DNS record for a hostname (if it points to cfargotunnel.com).
+     */
+    private function deleteTunnelCname(string $hostname): void
+    {
+        $zoneId = $this->findZoneForHostname($hostname);
+        if (!$zoneId) return;
+
+        $records = $this->listDNSRecords($zoneId, ['type' => 'CNAME', 'name' => $hostname]);
+        foreach ($records['result'] ?? [] as $record) {
+            if (str_contains($record['content'] ?? '', 'cfargotunnel.com')) {
+                $this->deleteDNSRecord($zoneId, $record['id']);
+            }
+        }
+    }
+
+    /**
+     * Find the CF zone ID that manages the given hostname.
+     * Matches by stripping subdomains until a zone is found.
+     */
+    private function findZoneForHostname(string $hostname): string|null
+    {
+        $parts = explode('.', $hostname);
+        while (count($parts) >= 2) {
+            $candidate = implode('.', $parts);
+            $zones = $this->request('GET', "/zones?name={$candidate}&per_page=1");
+            if (!empty($zones['result'][0]['id'])) {
+                return $zones['result'][0]['id'];
+            }
+            array_shift($parts);
+        }
+        return null;
+    }
+
+    // -------------------------------------------------------------------------
     // Account Validation
     // -------------------------------------------------------------------------
 
