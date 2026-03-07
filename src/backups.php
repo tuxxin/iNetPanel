@@ -103,7 +103,7 @@ function showAlert(msg, type = 'success') {
 }
 
 function loadBackups() {
-    fetch('/api/backups.php?action=list')
+    fetch('/api/backups?action=list')
         .then(r => r.json())
         .then(data => {
             const tbody = document.getElementById('backup-tbody');
@@ -132,7 +132,7 @@ document.getElementById('run-backup-btn').addEventListener('click', function () 
     this.disabled = true;
     const fd = new FormData();
     fd.append('action', 'run');
-    fetch('/api/backups.php', { method: 'POST', body: fd })
+    fetch('/api/backups', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             spinner.classList.add('d-none');
@@ -154,7 +154,7 @@ document.getElementById('backup-settings-form').addEventListener('submit', funct
     fd.append('backup_enabled',     document.getElementById('backup-enabled').checked ? '1' : '0');
     fd.append('backup_destination', document.getElementById('backup-dest').value.trim());
     fd.append('backup_retention',   document.getElementById('backup-retention').value);
-    fetch('/api/backups.php', { method: 'POST', body: fd })
+    fetch('/api/backups', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             if (data.success) showAlert('Settings saved.');

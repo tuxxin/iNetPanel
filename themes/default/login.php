@@ -68,7 +68,7 @@
 
         <?php
         // Show notice if install hasn't been completed
-        $lockFile = dirname(__DIR__, 3) . '/.installed';
+        $lockFile = dirname(__DIR__, 2) . '/db/.installed';
         if (!file_exists($lockFile)): ?>
         <div class="alert alert-warning py-2 px-3 mb-3 small">
             <i class="fas fa-tools me-1"></i>

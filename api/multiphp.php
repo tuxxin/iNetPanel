@@ -6,11 +6,11 @@
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
-$supportedVersions = ['5.6', '7.0', '7.1', '7.2', '7.3', '7.4', '8.0', '8.1', '8.2', '8.3', '8.4'];
+$supportedVersions = ['5.6', '7.0', '7.1', '7.2', '7.3', '7.4', '8.0', '8.1', '8.2', '8.3', '8.4', '8.5'];
 
 function phpIsInstalled(string $ver): bool
 {
-    return file_exists("/usr/sbin/php-fpm{$ver}") || is_dir("/etc/php/{$ver}");
+    return file_exists("/usr/sbin/php-fpm{$ver}") || file_exists("/usr/bin/php{$ver}");
 }
 
 switch ($action) {
@@ -39,14 +39,36 @@ switch ($action) {
         if (!in_array($ver, $supportedVersions)) {
             echo json_encode(['success' => false, 'error' => 'Invalid PHP version.']); break;
         }
-        $op  = $action === 'install' ? 'install' : 'remove';
-        $cmd = "sudo /usr/bin/apt-get {$op} -y -qq php{$ver}-fpm php{$ver}-cli php{$ver}-common php{$ver}-mysql php{$ver}-xml php{$ver}-mbstring php{$ver}-curl php{$ver}-zip 2>&1";
-        $out = shell_exec($cmd);
+        $panelDefault = DB::setting('php_default_version', '8.4');
+        if ($action === 'remove' && $ver === $panelDefault) {
+            echo json_encode(['success' => false, 'error' => "PHP {$ver} is the panel default and cannot be removed. Set a different default version first."]); break;
+        }
+        if ($action === 'remove') {
+            $cmd = "sudo /usr/bin/apt-get purge -y php{$ver}-fpm php{$ver}-cli php{$ver}-common php{$ver}-mysql php{$ver}-xml php{$ver}-mbstring php{$ver}-curl php{$ver}-zip 2>&1";
+        } else {
+            $cmd = "sudo /usr/bin/apt-get install -y php{$ver}-fpm php{$ver}-cli php{$ver}-common php{$ver}-mysql php{$ver}-xml php{$ver}-mbstring php{$ver}-curl php{$ver}-zip 2>&1";
+        }
+        exec($cmd, $outArr, $exitCode);
+        $out = implode("\n", $outArr);
         if ($action === 'install') {
             shell_exec("sudo /bin/systemctl enable php{$ver}-fpm 2>&1");
             shell_exec("sudo /bin/systemctl start  php{$ver}-fpm 2>&1");
         }
-        echo json_encode(['success' => true, 'output' => trim($out ?: '')]);
+        // After any purge, apt prerm hooks may disable modules for other PHP versions.
+        // Re-enable all FPM modules for the panel default and restart it.
+        if ($action === 'remove') {
+            shell_exec("sudo /usr/sbin/phpenmod -v {$panelDefault} -s fpm calendar ctype curl dom exif fileinfo ftp gd gettext gmp iconv intl mbstring mysqli pdo_mysql pdo_sqlite phar posix readline shmop simplexml sockets sqlite3 sysvmsg sysvsem sysvshm tokenizer xmlreader xmlwriter xsl zip 2>&1");
+        }
+        shell_exec("sudo /bin/systemctl restart php{$panelDefault}-fpm 2>&1");
+        // Verify the operation actually took effect
+        $nowInstalled = phpIsInstalled($ver);
+        $wantInstalled = ($action === 'install');
+        if ($nowInstalled !== $wantInstalled) {
+            $errMsg = trim($out) ?: "apt-get exited with code {$exitCode}.";
+            echo json_encode(['success' => false, 'error' => $errMsg]);
+            break;
+        }
+        echo json_encode(['success' => true, 'output' => trim($out)]);
         break;
 
     case 'set_default':
@@ -72,7 +94,8 @@ switch ($action) {
 
         if ($ver && $ver !== 'inherit') {
             // Rewrite the FPM pool config to point to the new version's socket
-            $poolConf = "/etc/php/8.4/fpm/pool.d/{$domain}.conf";
+            $currentDefault = DB::setting('php_default_version', '8.4');
+            $poolConf = "/etc/php/{$currentDefault}/fpm/pool.d/{$domain}.conf";
             $newSock  = "/run/php/php{$ver}-fpm-{$domain}.sock";
             // Move pool config to correct PHP version dir
             $newPool  = "/etc/php/{$ver}/fpm/pool.d/{$domain}.conf";

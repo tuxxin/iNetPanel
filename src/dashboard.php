@@ -5,7 +5,9 @@
 
 // ── System stats ─────────────────────────────────────────────────────────────
 $load     = sys_getloadavg();
-$cpuLoad  = round($load[0], 2);
+$cpuLoad  = round($load[0], 1);
+$load[1]  = round($load[1], 1);
+$load[2]  = round($load[2], 1);
 
 // Memory from /proc/meminfo
 $memTotal = $memFree = $memBuffers = $memCached = 0;
@@ -157,15 +159,15 @@ $cpuClass = $cpuLoad > 2 ? 'danger' : ($cpuLoad > 1 ? 'warning' : 'success');
 document.addEventListener('DOMContentLoaded', function () {
 
     // ── Service quick-list ───────────────────────────────────────────────
-    fetch('/api/services.php?action=list')
+    fetch('/api/services?action=list')
         .then(r => r.json())
         .then(data => {
             const ul = document.getElementById('dash-services');
             ul.innerHTML = '';
             if (!data.success) { ul.innerHTML = '<li class="list-group-item text-danger small ps-3">Failed to load</li>'; return; }
             data.data.slice(0, 6).forEach(s => {
-                const dot = s.active ? 'bg-success' : 'bg-secondary';
-                const txt = s.active ? 'Running'   : 'Stopped';
+                const dot = s.status === 'active' ? 'bg-success' : (s.status === 'missing' ? 'bg-danger' : 'bg-secondary');
+                const txt = s.status === 'active' ? 'Running' : (s.status === 'missing' ? 'Not installed' : 'Stopped');
                 ul.innerHTML += `<li class="list-group-item d-flex justify-content-between align-items-center py-2 ps-3">
                     <span class="small">${s.label}</span>
                     <span class="badge ${dot} rounded-pill">${txt}</span></li>`;
@@ -175,7 +177,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
     // ── Recent accounts ──────────────────────────────────────────────────
-    fetch('/api/accounts.php?action=list')
+    fetch('/api/accounts?action=list')
         .then(r => r.json())
         .then(data => {
             const ul = document.getElementById('dash-accounts');

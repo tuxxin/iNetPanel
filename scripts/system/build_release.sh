@@ -10,7 +10,7 @@
 #   bash /root/scripts/build_release.sh
 #
 # Install instructions (after uploading to server):
-#   curl -o latest https://inetpanel.tuxxin.com/data/latest && bash latest
+#   curl -o latest https://inetpanel.tuxxin.com/latest && bash latest
 # ==============================================================================
 
 BOLD='\033[1m'; GREEN='\033[1;32m'; RED='\033[1;31m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -79,8 +79,8 @@ ZIP_SIZE=$(du -sh    "$RELEASE_DIR/inetpanel-latest.zip" 2>/dev/null | cut -f1)
 echo -e "  ${BOLD}latest${NC}                  ${GREEN}$LATEST_SIZE${NC}  →  $RELEASE_DIR/latest"
 echo -e "  ${BOLD}inetpanel-latest.zip${NC}    ${GREEN}$ZIP_SIZE${NC}  →  $RELEASE_DIR/inetpanel-latest.zip"
 echo ""
-echo -e "  ${YELLOW}Upload both files to: https://inetpanel.tuxxin.com/data/${NC}"
+echo -e "  ${YELLOW}Upload both files to: https://inetpanel.tuxxin.com/${NC}"
 echo ""
 echo -e "  Install command:"
-echo -e "    ${GREEN}curl -o latest https://inetpanel.tuxxin.com/data/latest && bash latest${NC}"
+echo -e "    ${GREEN}curl -o latest https://inetpanel.tuxxin.com/latest && bash latest${NC}"
 echo -e "${BOLD}======================================================${NC}"

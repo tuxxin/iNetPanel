@@ -11,13 +11,20 @@ switch ($action) {
 
     case 'zones':
         $result = $cf->listZones();
-        echo json_encode($result);
+        echo json_encode([
+            'success' => $result['success'] ?? false,
+            'data'    => $result['result']  ?? [],
+        ]);
         break;
 
     case 'list':
         $zoneId = trim($_GET['zone_id'] ?? '');
         if (!$zoneId) { echo json_encode(['success' => false, 'error' => 'zone_id required.']); break; }
-        echo json_encode($cf->listDNSRecords($zoneId));
+        $result = $cf->listDNSRecords($zoneId);
+        echo json_encode([
+            'success' => $result['success'] ?? false,
+            'data'    => $result['result']  ?? [],
+        ]);
         break;
 
     case 'create':

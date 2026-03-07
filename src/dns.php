@@ -122,7 +122,7 @@ function showAlert(msg, type = 'success') {
 }
 
 // Load zones
-fetch('/api/dns.php?action=zones')
+fetch('/api/dns?action=zones')
     .then(r => r.json())
     .then(data => {
         const sel = document.getElementById('zone-sel');
@@ -145,7 +145,7 @@ document.getElementById('load-dns-btn').addEventListener('click', function () {
     document.getElementById('dns-table-card').classList.remove('d-none');
     document.getElementById('add-record-btn').disabled = false;
     document.getElementById('dns-tbody').innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Loading…</td></tr>';
-    fetch(`/api/dns.php?action=list&zone_id=${encodeURIComponent(zoneId)}`)
+    fetch(`/api/dns?action=list&zone_id=${encodeURIComponent(zoneId)}`)
         .then(r => r.json())
         .then(data => {
             const tbody = document.getElementById('dns-tbody');
@@ -211,7 +211,7 @@ document.getElementById('dns-save-btn').addEventListener('click', function () {
     fd.append('ttl',      document.getElementById('dns-ttl').value);
     fd.append('priority', document.getElementById('dns-priority').value);
     fd.append('proxied',  document.getElementById('dns-proxied').checked ? '1' : '0');
-    fetch('/api/dns.php', { method: 'POST', body: fd })
+    fetch('/api/dns', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             spinner.classList.add('d-none');
@@ -233,7 +233,7 @@ function deleteRecord(recordId) {
     fd.append('action', 'delete');
     fd.append('zone_id', currentZoneId);
     fd.append('record_id', recordId);
-    fetch('/api/dns.php', { method: 'POST', body: fd })
+    fetch('/api/dns', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             if (data.success) {

@@ -90,8 +90,9 @@ class Shell
         $allowedActions   = ['start', 'stop', 'restart', 'reload', 'is-active', 'status'];
         $allowedServices  = [
             'apache2', 'lighttpd', 'mariadb', 'mysql',
-            'php8.4-fpm', 'php8.3-fpm', 'php8.2-fpm', 'php8.1-fpm',
-            'php8.0-fpm', 'php7.4-fpm',
+            'php8.5-fpm', 'php8.4-fpm', 'php8.3-fpm', 'php8.2-fpm', 'php8.1-fpm',
+            'php8.0-fpm', 'php7.4-fpm', 'php7.3-fpm', 'php7.2-fpm', 'php7.1-fpm',
+            'php7.0-fpm', 'php5.6-fpm',
             'vsftpd', 'wg-quick@wg0', 'cron',
         ];
 
@@ -131,6 +132,22 @@ class Shell
     {
         $result = self::systemctl('is-active', $service);
         return trim($result['output']) === 'active';
+    }
+
+    /**
+     * Return 'active', 'inactive', or 'missing' for a service unit.
+     * Uses `systemctl status` which exits 4 when the unit does not exist.
+     */
+    public static function serviceStatus(string $service): string
+    {
+        // is-active is fast; use it first
+        $result = self::systemctl('is-active', $service);
+        if (trim($result['output']) === 'active') {
+            return 'active';
+        }
+        // Distinguish "stopped" from "unit not found" via status exit code
+        $status = self::systemctl('status', $service);
+        return ($status['code'] === 4) ? 'missing' : 'inactive';
     }
 
     /**

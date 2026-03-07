@@ -80,7 +80,7 @@ function showAlert(msg, type = 'success') {
 }
 
 // Load installed versions into selector
-fetch('/api/packages.php?action=installed_versions')
+fetch('/api/packages?action=installed_versions')
     .then(r => r.json())
     .then(data => {
         const sel = document.getElementById('pkg-version-sel');
@@ -102,7 +102,7 @@ function loadPackages(ver) {
     document.getElementById('pkg-version-label').textContent = `PHP ${ver} Extensions`;
     document.getElementById('pkg-tbody').innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">Loading…</td></tr>';
 
-    fetch(`/api/packages.php?action=list&version=${encodeURIComponent(ver)}`)
+    fetch(`/api/packages?action=list&version=${encodeURIComponent(ver)}`)
         .then(r => r.json())
         .then(data => {
             if (!data.success) {
@@ -116,15 +116,22 @@ function loadPackages(ver) {
         });
 }
 
+const PROTECTED_EXTS = ['fpm', 'cli', 'common', 'opcache', 'readline', 'sqlite3', 'mysql'];
+
 function renderPackages(packages, ver) {
     const tbody = document.getElementById('pkg-tbody');
     tbody.innerHTML = packages.map(p => {
         const badge = p.installed
             ? '<span class="badge bg-success">Installed</span>'
             : '<span class="badge bg-secondary">Not installed</span>';
-        const btn = p.installed
-            ? `<button class="btn btn-sm btn-outline-danger" onclick="togglePkg('${ver}','${p.extension}','remove')">Remove</button>`
-            : `<button class="btn btn-sm btn-outline-primary" onclick="togglePkg('${ver}','${p.extension}','install')">Install</button>`;
+        let btn;
+        if (p.installed && PROTECTED_EXTS.includes(p.extension)) {
+            btn = `<span class="text-muted small fst-italic">Required</span>`;
+        } else if (p.installed) {
+            btn = `<button class="btn btn-sm btn-outline-danger" onclick="togglePkg('${ver}','${p.extension}','remove')">Remove</button>`;
+        } else {
+            btn = `<button class="btn btn-sm btn-outline-primary" onclick="togglePkg('${ver}','${p.extension}','install')">Install</button>`;
+        }
         return `<tr data-pkg="${p.extension}">
             <td class="ps-4 fw-medium">${p.extension}</td>
             <td class="text-muted small">${p.package}</td>
@@ -143,7 +150,7 @@ function togglePkg(ver, ext, action) {
     fd.append('action', action);
     fd.append('version', ver);
     fd.append('extension', ext);
-    fetch('/api/packages.php', { method: 'POST', body: fd })
+    fetch('/api/packages', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             modal.hide();

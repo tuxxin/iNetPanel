@@ -16,7 +16,7 @@ $SYSTEM_LOGS = [
 
 function tailFile(string $path, int $lines = 300): string
 {
-    if (!file_exists($path)) return "(File not found: {$path})";
+    if (!file_exists($path)) return "(No log entries yet.)";
     $out = [];
     exec('tail -n ' . (int)$lines . ' ' . escapeshellarg($path) . ' 2>&1', $out);
     return implode("\n", $out) ?: '(Log is empty)';
@@ -41,7 +41,7 @@ switch ($action) {
         }
 
         // Sub-admin domain check
-        if (!\TiCore\Auth::isAdmin() && !\TiCore\Auth::canAccessDomain($domain)) {
+        if (!Auth::isAdmin() && !Auth::canAccessDomain($domain)) {
             echo json_encode(['success' => false, 'error' => 'Access denied.']); break;
         }
 

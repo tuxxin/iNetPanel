@@ -1,7 +1,11 @@
 <?php
+header('Cache-Control: no-store, no-cache, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+
 // --- LOCK FILE CHECK: redirect to login if already installed ---
 $projectRoot = dirname(__DIR__);
-$lockFile    = $projectRoot . '/.installed';
+$lockFile    = $projectRoot . '/db/.installed';
 if (file_exists($lockFile) && ($_SERVER['REQUEST_METHOD'] !== 'POST')) {
     header('Location: /login');
     exit;
@@ -14,46 +18,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     // PATH CONFIGURATION
     // dirname(__DIR__) = /var/www/inetpanel (Project Root)
     $projectRoot = dirname(__DIR__);
-    $lockFile    = $projectRoot . '/.installed';
+    $lockFile    = $projectRoot . '/db/.installed';
     $dbDir  = $projectRoot . '/db';
     $dbFile = $dbDir . '/inetpanel.db';
 
     // 1. VALIDATE CLOUDFLARE
     if ($_POST['action'] === 'validate_cf') {
-        $email = $_POST['email'] ?? '';
-        $apiKey = $_POST['api_key'] ?? '';
-        
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, "https://api.cloudflare.com/client/v4/user");
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); 
-        
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        $email     = $_POST['email']      ?? '';
+        $apiKey    = $_POST['api_key']    ?? '';
+        $accountId = trim($_POST['account_id'] ?? '');
+
+        $cfHeaders = [
             "X-Auth-Email: " . $email,
-            "X-Auth-Key: " . $apiKey,
-            "Content-Type: application/json"
-        ]);
-        
-        $result = curl_exec($ch);
-        $curlError = curl_error($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        
-        if ($curlError) {
-            echo json_encode(['success' => false, 'message' => 'Connection Error: ' . $curlError]);
+            "X-Auth-Key: "   . $apiKey,
+            "Content-Type: application/json",
+        ];
+
+        // Helper: make a CF API GET request
+        $cfGet = function(string $url) use ($cfHeaders): array {
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 15,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_SSL_VERIFYPEER => true,
+                CURLOPT_HTTPHEADER     => $cfHeaders,
+            ]);
+            $result    = curl_exec($ch);
+            $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
+            curl_close($ch);
+            return ['body' => $result, 'code' => $httpCode, 'error' => $curlError];
+        };
+
+        // Step 1: validate email + API key via /user
+        $r = $cfGet("https://api.cloudflare.com/client/v4/user");
+        if ($r['error']) {
+            echo json_encode(['success' => false, 'message' => 'Connection error: ' . $r['error']]);
+            exit;
+        }
+        $data = json_decode($r['body'], true);
+        if ($r['code'] !== 200 || !($data['success'] ?? false)) {
+            $msg = $data['errors'][0]['message'] ?? 'Invalid Email or Global API Key.';
+            echo json_encode(['success' => false, 'message' => $msg]);
             exit;
         }
 
-        $data = json_decode($result, true);
-
-        if ($httpCode === 200 && isset($data['success']) && $data['success']) {
-            echo json_encode(['success' => true]);
-        } else {
-            $msg = $data['errors'][0]['message'] ?? 'Invalid Email or Global API Key.';
-            echo json_encode(['success' => false, 'message' => $msg]);
+        // Step 2: validate account ID if provided
+        if ($accountId) {
+            $r2   = $cfGet("https://api.cloudflare.com/client/v4/accounts/{$accountId}");
+            $data2 = json_decode($r2['body'], true);
+            if ($r2['code'] !== 200 || !($data2['success'] ?? false)) {
+                $msg = $data2['errors'][0]['message'] ?? 'Account ID not found or not accessible.';
+                echo json_encode(['success' => false, 'message' => 'Account ID invalid: ' . $msg]);
+                exit;
+            }
         }
+
+        echo json_encode(['success' => true]);
         exit;
     }
 
@@ -194,6 +216,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $wgSubnet     = trim($_POST['wg_subnet']   ?? '10.10.0.0/24');
             $wgEndpoint   = trim($_POST['wg_endpoint'] ?? '');
 
+            // Auto-detect installed PHP version (newest first)
+            $detectedPhpVer = '8.4';
+            foreach (array_reverse(['5.6','7.0','7.1','7.2','7.3','7.4','8.0','8.1','8.2','8.3','8.4','8.5']) as $_v) {
+                if (file_exists("/usr/sbin/php-fpm{$_v}") || file_exists("/usr/bin/php{$_v}")) {
+                    $detectedPhpVer = $_v;
+                    break;
+                }
+            }
+
             $settings = [
                 'server_hostname'   => $_POST['hostname'],
                 'timezone'          => $_POST['timezone'],
@@ -228,6 +259,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 'backup_cron_time'    => '03:00',
                 'auto_update_enabled' => '0',
                 'auto_update_time'    => '02:00',
+                // PHP
+                'php_default_version' => $detectedPhpVer,
             ];
 
             $stmt = $db->prepare("INSERT OR REPLACE INTO settings (key, value, category) VALUES (:k, :v, 'general')");
@@ -238,9 +271,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             // Write lock file — prevents install.php from being accessed again
             file_put_contents($lockFile, date('Y-m-d H:i:s'));
 
+            // Apply timezone to PHP runtime and OS
+            $tz = $_POST['timezone'] ?? 'UTC';
+            if (!in_array($tz, DateTimeZone::listIdentifiers())) { $tz = 'UTC'; }
+            date_default_timezone_set($tz);
+            exec('sudo /usr/bin/timedatectl set-timezone ' . escapeshellarg($tz) . ' 2>&1');
+
             // Create Cloudflare Zero Trust Tunnel if CF is enabled + account ID provided
             if ($cfEnabled && $cfAccountId) {
-                $tunnelName = 'inetpanel-' . preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['hostname'] ?? 'panel');
+                $tunnelName = 'iNetPanel_' . (preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['hostname'] ?? '') ?: 'panel');
                 $cfEmail  = $_POST['cf_email'] ?? '';
                 $cfApiKey = $_POST['cf_key']   ?? '';
 
@@ -294,9 +333,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             // Set up DDNS cron if enabled
             if ($ddnsEnabled === '1' && $ddnsInterval > 0) {
-                $cronLine = "*/{$ddnsInterval} * * * * www-data php /var/www/inetpanel/scripts/ddns_update.php >> /var/log/inetpanel_ddns.log 2>&1\n";
-                file_put_contents('/etc/cron.d/inetpanel_ddns', $cronLine);
-                @chmod('/etc/cron.d/inetpanel_ddns', 0644);
+                $phpBin   = 'php' . DB::setting('php_default_version', '8.4');
+                $cronLine = "*/{$ddnsInterval} * * * * www-data {$phpBin} /var/www/inetpanel/scripts/ddns_update.php >> /var/log/inetpanel_ddns.log 2>&1\n";
+                $proc = popen('sudo /root/scripts/manage_cron.sh write inetpanel_ddns', 'w');
+                fwrite($proc, $cronLine); pclose($proc);
             }
 
             echo json_encode(['success' => true]);
@@ -541,12 +581,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             <div id="manualContent" style="display: none;">
                 <div class="alert alert-warning border-0 shadow-sm">
-                    <h6 class="alert-heading fw-bold"><i class="fas fa-exclamation-triangle me-2"></i> Limited Mode</h6>
+                    <h6 class="alert-heading fw-bold"><i class="fas fa-exclamation-triangle me-2"></i> Limited Mode <span class="fw-normal">(Not Recommended)</span></h6>
                     <p class="small mb-0">System will operate in <strong>Port-Based Mode</strong>. Email and DNS automation will be disabled.</p>
                 </div>
             </div>
 
             <!-- CF DDNS -->
+            <div id="cfDdnsSection">
             <hr class="my-3">
             <div class="mb-3">
                 <div class="d-flex align-items-center justify-content-between">
@@ -575,6 +616,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </div>
                 <input type="text" class="form-control form-control-sm mb-2" id="ddnsZoneId" placeholder="Cloudflare Zone ID (optional — auto-detected if blank)">
             </div>
+            </div><!-- /cfDdnsSection -->
 
             <!-- WireGuard VPN -->
             <hr class="my-3">
@@ -726,6 +768,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         document.getElementById('optManual').classList.toggle('selected', option !== 'cloudflare');
         document.getElementById('cloudflareContent').style.display = option === 'cloudflare' ? 'block' : 'none';
         document.getElementById('manualContent').style.display = option !== 'cloudflare' ? 'block' : 'none';
+        document.getElementById('cfDdnsSection').style.display = option === 'cloudflare' ? 'block' : 'none';
     }
 
     function checkStrength(p) {
@@ -739,13 +782,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     function getCfFormData() {
         const e = document.getElementById('cfEmail').value;
         const k = document.getElementById('cfApiKey').value;
-        if(!e || !k) { 
+        const a = document.getElementById('cfAccountId').value;
+        if(!e || !k) {
             document.getElementById('cfErrorMsg').textContent = "Email & Key required.";
             document.getElementById('cfErrorMsg').classList.remove('d-none');
-            return null; 
+            return null;
         }
         const fd = new FormData();
-        fd.append('action', 'validate_cf'); fd.append('email', e); fd.append('api_key', k);
+        fd.append('action', 'validate_cf'); fd.append('email', e); fd.append('api_key', k); fd.append('account_id', a);
         return fd;
     }
 

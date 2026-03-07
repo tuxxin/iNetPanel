@@ -7,29 +7,25 @@
 define('ROOT_PATH',   dirname(__DIR__));
 define('TICORE_PATH', ROOT_PATH . '/TiCore');
 
-// Bootstrap TiCore (DB + CloudflareAPI)
-spl_autoload_register(function (string $class): void {
-    if (str_starts_with($class, 'TiCore\\')) {
-        $file = TICORE_PATH . '/' . str_replace('TiCore\\', '', $class) . '.php';
-        if (file_exists($file)) {
-            require_once $file;
-        }
-    }
-});
+require_once TICORE_PATH . '/Config.php';
+require_once TICORE_PATH . '/Router.php';
+require_once TICORE_PATH . '/App.php';
+require_once TICORE_PATH . '/DB.php';
+require_once TICORE_PATH . '/CloudflareAPI.php';
 
-$app = \TiCore\App::getInstance();
+$app = App::getInstance();
 
 $lastIpFile = ROOT_PATH . '/db/last_ip.txt';
 $logPrefix  = '[' . date('Y-m-d H:i:s') . '] DDNS: ';
 
 // Check if DDNS is enabled
-$enabled = \TiCore\DB::setting('cf_ddns_enabled', '0');
+$enabled = DB::setting('cf_ddns_enabled', '0');
 if ($enabled !== '1') {
     exit(0);
 }
 
-$hostname = \TiCore\DB::setting('cf_ddns_hostname', '');
-$zoneId   = \TiCore\DB::setting('cf_ddns_zone_id',  '');
+$hostname = DB::setting('cf_ddns_hostname', '');
+$zoneId   = DB::setting('cf_ddns_zone_id',  '');
 
 if (empty($hostname)) {
     echo $logPrefix . "No DDNS hostname configured.\n";
@@ -55,17 +51,17 @@ if ($currentIp === $lastIp) {
     exit(0);
 }
 
-echo $logPrefix . "IP changed: {$lastIp} → {$currentIp}\n";
+echo $logPrefix . "IP changed: {$lastIp} -> {$currentIp}\n";
 
 // If zone ID not stored, try to find it by matching hostname
-$cf = new \TiCore\CloudflareAPI();
+$cf = new CloudflareAPI();
 
 if (empty($zoneId)) {
     $zones = $cf->listZones();
     foreach ($zones['result'] ?? [] as $zone) {
         if (str_ends_with($hostname, $zone['name'])) {
             $zoneId = $zone['id'];
-            \TiCore\DB::saveSetting('cf_ddns_zone_id', $zoneId);
+            DB::saveSetting('cf_ddns_zone_id', $zoneId);
             break;
         }
     }
@@ -81,9 +77,9 @@ $result = $cf->upsertARecord($zoneId, $hostname, $currentIp);
 
 if ($result['success'] ?? false) {
     file_put_contents($lastIpFile, $currentIp);
-    \TiCore\DB::saveSetting('cf_ddns_last_ip', $currentIp);
-    \TiCore\DB::saveSetting('cf_ddns_last_updated', date('Y-m-d H:i:s'));
-    echo $logPrefix . "Updated '{$hostname}' → {$currentIp}\n";
+    DB::saveSetting('cf_ddns_last_ip', $currentIp);
+    DB::saveSetting('cf_ddns_last_updated', date('Y-m-d H:i:s'));
+    echo $logPrefix . "Updated '{$hostname}' -> {$currentIp}\n";
 } else {
     $err = $result['errors'][0]['message'] ?? 'Unknown error';
     echo $logPrefix . "CF API error: {$err}\n";

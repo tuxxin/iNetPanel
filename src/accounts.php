@@ -198,7 +198,7 @@ function showToast(msg, type = 'success') {
 }
 
 function loadAccounts() {
-    fetch('/api/accounts.php?action=list')
+    fetch('/api/accounts?action=list')
         .then(r => r.json())
         .then(data => {
             const tbody = document.getElementById('accounts-tbody');
@@ -253,7 +253,7 @@ document.getElementById('confirm-delete-btn').addEventListener('click', function
     fd.append('action', 'delete');
     fd.append('domain', pendingDeleteDomain);
     if (noBackup) fd.append('no_backup', '1');
-    fetch('/api/accounts.php', { method: 'POST', body: fd })
+    fetch('/api/accounts', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
@@ -272,7 +272,7 @@ function suspendAccount(domain, action) {
     const fd = new FormData();
     fd.append('action', action);
     fd.append('domain', domain);
-    fetch('/api/accounts.php', { method: 'POST', body: fd })
+    fetch('/api/accounts', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             if (data.success) {

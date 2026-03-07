@@ -131,7 +131,7 @@ document.getElementById('refresh-log-btn').addEventListener('click', function ()
         document.getElementById('load-domain-log-btn').click();
     } else {
         const key = active.dataset.logkey;
-        fetch(`/api/logs.php?action=tail&key=${encodeURIComponent(key)}`)
+        fetch(`/api/logs?action=tail&key=${encodeURIComponent(key)}`)
             .then(r => r.json())
             .then(data => {
                 const pre = document.getElementById(`pre-${key}`);
@@ -147,7 +147,7 @@ document.getElementById('load-domain-log-btn').addEventListener('click', functio
     const pre = document.getElementById('pre-domain');
     if (!domain) { pre.textContent = 'Please select a domain.'; return; }
     pre.textContent = 'Loading…';
-    fetch(`/api/logs.php?action=domain&domain=${encodeURIComponent(domain)}&logtype=${encodeURIComponent(logtype)}`)
+    fetch(`/api/logs?action=domain&domain=${encodeURIComponent(domain)}&logtype=${encodeURIComponent(logtype)}`)
         .then(r => r.json())
         .then(data => {
             pre.textContent = data.content || '(empty)';

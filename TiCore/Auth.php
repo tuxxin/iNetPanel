@@ -33,7 +33,7 @@ class Auth
         self::startSession();
 
         // Redirect to install if panel hasn't been set up yet
-        $lockFile = defined('ROOT_PATH') ? ROOT_PATH . '/.installed' : '/var/www/inetpanel/.installed';
+        $lockFile = defined('ROOT_PATH') ? ROOT_PATH . '/db/.installed' : '/var/www/inetpanel/db/.installed';
         if (!file_exists($lockFile)) {
             header('Location: /install.php');
             exit;

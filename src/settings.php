@@ -259,10 +259,31 @@ function s(string $key, string $default = ''): string {
                             </div>
                         </div>
                     </div>
-                    <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-primary">Save & Validate</button>
-                        <span id="cf-validate-result" class="align-self-center small"></span>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Account ID</label>
+                            <input type="text" class="form-control" name="cf_account_id" value="<?= htmlspecialchars(s('cf_account_id')) ?>" placeholder="Your CF Account ID">
+                            <div class="form-text">Required for Zero Trust Tunnel management.</div>
+                        </div>
                     </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="submit" class="btn btn-primary">Save & Validate</button>
+                        <button type="button" class="btn btn-outline-secondary" id="setup-tunnel-btn">
+                            <span class="spinner-border spinner-border-sm d-none me-1" id="tunnel-spinner"></span>
+                            <i class="fas fa-network-wired me-1"></i>Setup Zero Trust Tunnel
+                        </button>
+                        <span id="cf-validate-result" class="align-self-center small"></span>
+                        <span id="tunnel-result" class="align-self-center small"></span>
+                    </div>
+                    <?php if (s('cf_tunnel_id')): ?>
+                    <div class="alert alert-success py-2 px-3 mt-3 small">
+                        <i class="fas fa-check-circle me-1"></i>Tunnel active: <code><?= htmlspecialchars(s('cf_tunnel_id')) ?></code>
+                    </div>
+                    <?php else: ?>
+                    <div class="alert alert-warning py-2 px-3 mt-3 small">
+                        <i class="fas fa-exclamation-triangle me-1"></i>No Zero Trust Tunnel configured. Click <strong>Setup Zero Trust Tunnel</strong> to create one.
+                    </div>
+                    <?php endif; ?>
                 </form>
             </div>
 
@@ -320,6 +341,21 @@ function s(string $key, string $default = ''): string {
             <!-- ═══ WIREGUARD ═════════════════════════════════════════ -->
             <div class="tab-pane fade" id="tab-wireguard">
                 <h6 class="text-muted text-uppercase small fw-bold mb-3">WireGuard VPN</h6>
+
+                <?php $wgInstalled = file_exists('/usr/bin/wg') || file_exists('/usr/sbin/wg'); ?>
+                <?php if (!$wgInstalled): ?>
+
+                <div class="alert alert-warning d-flex align-items-start gap-3">
+                    <i class="fas fa-exclamation-triangle mt-1"></i>
+                    <div>
+                        <div class="fw-semibold">WireGuard is not installed</div>
+                        <div class="small mt-1">WireGuard was not selected during installation. To install it, run the following command on your server:</div>
+                        <code class="d-block mt-2 p-2 bg-white rounded border small">sudo apt-get install -y wireguard wireguard-tools</code>
+                        <div class="small text-muted mt-2">After installation, reload this page to manage WireGuard from the panel.</div>
+                    </div>
+                </div>
+
+                <?php else: ?>
 
                 <!-- Status row -->
                 <div class="d-flex align-items-center gap-3 mb-4 p-3 bg-light rounded border" id="wg-status-row">
@@ -381,6 +417,8 @@ function s(string $key, string $default = ''): string {
                         </tbody>
                     </table>
                 </div>
+
+                <?php endif; ?>
             </div>
 
         </div>
@@ -437,7 +475,7 @@ document.querySelectorAll('.settings-form').forEach(form => {
             if (!cb.checked) fd.set(cb.name, '0');
             else fd.set(cb.name, '1');
         });
-        fetch('/api/settings.php', { method: 'POST', body: fd })
+        fetch('/api/settings', { method: 'POST', body: fd })
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
@@ -451,8 +489,32 @@ document.querySelectorAll('.settings-form').forEach(form => {
                 } else {
                     showAlert(data.error || 'Save failed.', 'danger');
                 }
-            });
+            })
+            .catch(() => showAlert('Request failed. Check your connection.', 'danger'));
     });
+});
+
+// ── Setup Zero Trust Tunnel button ───────────────────────────────────────────
+document.getElementById('setup-tunnel-btn').addEventListener('click', function () {
+    const spinner = document.getElementById('tunnel-spinner');
+    const result  = document.getElementById('tunnel-result');
+    spinner.classList.remove('d-none');
+    this.disabled = true;
+    result.textContent = '';
+    const fd = new FormData(); fd.append('action', 'setup_tunnel');
+    fetch('/api/settings', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            spinner.classList.add('d-none');
+            this.disabled = false;
+            if (data.success) {
+                result.innerHTML = '<span class="text-success"><i class="fas fa-check me-1"></i>Tunnel created. Reloading…</span>';
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                result.innerHTML = '<span class="text-danger"><i class="fas fa-times me-1"></i>' + (data.error || 'Failed') + '</span>';
+            }
+        })
+        .catch(() => { spinner.classList.add('d-none'); this.disabled = false; result.innerHTML = '<span class="text-danger">Request failed.</span>'; });
 });
 
 // ── DDNS test button ─────────────────────────────────────────────────────────
@@ -463,7 +525,7 @@ document.getElementById('ddns-test-btn').addEventListener('click', function () {
     this.disabled = true;
     result.textContent = '';
     const fd = new FormData(); fd.append('action', 'ddns_test');
-    fetch('/api/settings.php', { method: 'POST', body: fd })
+    fetch('/api/settings', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             spinner.classList.add('d-none');
@@ -471,12 +533,13 @@ document.getElementById('ddns-test-btn').addEventListener('click', function () {
             result.innerHTML = data.success
                 ? `<span class="text-success"><i class="fas fa-check me-1"></i>${data.output || 'Updated'}</span>`
                 : `<span class="text-danger"><i class="fas fa-times me-1"></i>${data.error || 'Failed'}</span>`;
-        });
+        })
+        .catch(() => { spinner.classList.add('d-none'); this.disabled = false; result.innerHTML = '<span class="text-danger">Request failed.</span>'; });
 });
 
 // ── WireGuard tab ─────────────────────────────────────────────────────────────
 function loadWgStatus() {
-    fetch('/api/wireguard.php?action=status')
+    fetch('/api/wireguard?action=status')
         .then(r => r.json())
         .then(data => {
             if (!data.success) return;
@@ -506,7 +569,7 @@ function loadWgStatus() {
 }
 
 function loadWgPeers() {
-    fetch('/api/wireguard.php?action=list_peers')
+    fetch('/api/wireguard?action=list_peers')
         .then(r => r.json())
         .then(data => {
             const tbody = document.getElementById('wg-peers-tbody');
@@ -526,18 +589,20 @@ function loadWgPeers() {
         });
 }
 
+if (document.getElementById('wg-toggle-btn')) {
 document.getElementById('wg-toggle-btn').addEventListener('click', function () {
     const spinner = document.getElementById('wg-toggle-spinner');
     spinner.classList.remove('d-none');
     this.disabled = true;
     const fd = new FormData(); fd.append('action', 'toggle');
-    fetch('/api/wireguard.php', { method: 'POST', body: fd })
+    fetch('/api/wireguard', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             spinner.classList.add('d-none');
             if (data.success) loadWgStatus();
             else showAlert(data.error || 'Toggle failed.', 'danger');
-        });
+        })
+        .catch(() => { spinner.classList.add('d-none'); this.disabled = false; showAlert('Request failed.', 'danger'); });
 });
 
 document.getElementById('wg-auto-peer').addEventListener('change', function () {
@@ -546,13 +611,13 @@ document.getElementById('wg-auto-peer').addEventListener('change', function () {
     const fd = new FormData();
     fd.append('action', 'set_auto_peer');
     fd.append('enabled', this.checked ? '1' : '0');
-    fetch('/api/wireguard.php', { method: 'POST', body: fd });
+    fetch('/api/wireguard', { method: 'POST', body: fd });
 });
 
 document.getElementById('wg-auto-configure-btn').addEventListener('click', function () {
     this.disabled = true;
     const fd = new FormData(); fd.append('action', 'auto_configure_all');
-    fetch('/api/wireguard.php', { method: 'POST', body: fd })
+    fetch('/api/wireguard', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             this.disabled = false;
@@ -562,7 +627,8 @@ document.getElementById('wg-auto-configure-btn').addEventListener('click', funct
             } else {
                 showAlert(data.error || 'Failed.', 'danger');
             }
-        });
+        })
+        .catch(() => { this.disabled = false; showAlert('Request failed.', 'danger'); });
 });
 
 document.getElementById('add-peer-btn').addEventListener('click', function () {
@@ -580,7 +646,7 @@ document.getElementById('add-peer-confirm-btn').addEventListener('click', functi
     const fd = new FormData();
     fd.append('action', 'add_peer');
     fd.append('name', name);
-    fetch('/api/wireguard.php', { method: 'POST', body: fd })
+    fetch('/api/wireguard', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             spinner.classList.add('d-none');
@@ -594,7 +660,8 @@ document.getElementById('add-peer-confirm-btn').addEventListener('click', functi
                 al.className = 'alert alert-danger mt-2 small py-2';
                 al.textContent = data.error || 'Failed.';
             }
-        });
+        })
+        .catch(() => { spinner.classList.add('d-none'); this.disabled = false; showAlert('Request failed.', 'danger'); });
 });
 
 function removePeer(name) {
@@ -602,19 +669,20 @@ function removePeer(name) {
     const fd = new FormData();
     fd.append('action', 'remove_peer');
     fd.append('name', name);
-    fetch('/api/wireguard.php', { method: 'POST', body: fd })
+    fetch('/api/wireguard', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             if (data.success) { showAlert(`Peer '${name}' removed.`); loadWgPeers(); }
             else showAlert(data.error || 'Remove failed.', 'danger');
-        });
+        })
+        .catch(() => showAlert('Request failed.', 'danger'));
 }
 
 // Load WG data when that tab is first shown
 document.querySelector('[data-bs-target="#tab-wireguard"]').addEventListener('shown.bs.tab', function () {
-    loadWgStatus();
-    loadWgPeers();
+    if (typeof loadWgStatus === 'function') { loadWgStatus(); loadWgPeers(); }
 });
+} // end if wg-toggle-btn exists
 
 // ── Updates tab ───────────────────────────────────────────────────────────────
 const checkNowBtn  = document.getElementById('check-now-btn');
@@ -624,7 +692,7 @@ if (checkNowBtn) {
     checkNowBtn.addEventListener('click', function () {
         this.textContent = 'Checking…';
         this.disabled = true;
-        fetch('/api/update_check.php?action=check')
+        fetch('/api/update_check?action=check')
             .then(r => r.json())
             .then(data => {
                 this.disabled = false;
@@ -636,7 +704,8 @@ if (checkNowBtn) {
                 } else {
                     showAlert(data.error || 'Check failed.', 'danger');
                 }
-            });
+            })
+            .catch(() => { this.disabled = false; this.textContent = 'Check now'; showAlert('Request failed.', 'danger'); });
     });
 }
 
@@ -646,14 +715,15 @@ if (updateNowBtn) {
         spinner.classList.remove('d-none');
         this.disabled = true;
         const fd = new FormData(); fd.append('action', 'update_now');
-        fetch('/api/settings.php', { method: 'POST', body: fd })
+        fetch('/api/settings', { method: 'POST', body: fd })
             .then(r => r.json())
             .then(data => {
                 spinner.classList.add('d-none');
                 this.disabled = false;
                 document.getElementById('update-output').textContent = data.output || '(no output)';
                 new bootstrap.Modal(document.getElementById('updateOutputModal')).show();
-            });
+            })
+            .catch(() => { spinner.classList.add('d-none'); this.disabled = false; showAlert('Request failed.', 'danger'); });
     });
 }
 

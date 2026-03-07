@@ -145,7 +145,7 @@ function showAlert(msg, type = 'success') {
 }
 
 // Load zones
-fetch('/api/dns.php?action=zones')
+fetch('/api/dns?action=zones')
     .then(r => r.json())
     .then(data => {
         const sel = document.getElementById('zone-sel');
@@ -231,7 +231,7 @@ document.getElementById('save-rule-btn').addEventListener('click', function () {
     fd.append('zone_id', currentZoneId);
     fd.append('from', from);
     fd.append('to', to);
-    fetch('/api/email.php', { method: 'POST', body: fd })
+    fetch('/api/email', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             spinner.classList.add('d-none');
@@ -253,7 +253,7 @@ function deleteRule(ruleId) {
     fd.append('action', 'delete_rule');
     fd.append('zone_id', currentZoneId);
     fd.append('rule_id', ruleId);
-    fetch('/api/email.php', { method: 'POST', body: fd })
+    fetch('/api/email', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             if (data.success) { showAlert('Rule deleted.'); loadRules(); }
@@ -279,7 +279,7 @@ document.getElementById('save-address-btn').addEventListener('click', function (
     fd.append('action', 'create_address');
     fd.append('zone_id', currentZoneId);
     fd.append('email', email);
-    fetch('/api/email.php', { method: 'POST', body: fd })
+    fetch('/api/email', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             spinner.classList.add('d-none');

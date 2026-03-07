@@ -24,7 +24,7 @@ switch ($action) {
     case 'save':
         Auth::requireAdmin();
         $allowed = [
-            'server_hostname', 'timezone', 'admin_email', 'default_theme',
+            'panel_name', 'server_hostname', 'timezone', 'admin_email', 'default_theme', 'cf_account_id',
             'backup_enabled', 'backup_destination', 'backup_retention',
             'cf_enabled', 'cf_email', 'cf_api_key',
             'cf_ddns_enabled', 'cf_ddns_hostname', 'cf_ddns_zone_id', 'cf_ddns_interval',
@@ -37,8 +37,20 @@ switch ($action) {
         $saved = [];
         foreach ($allowed as $key) {
             if (isset($_POST[$key])) {
+                // Don't overwrite CF API key with the masked placeholder value
+                if ($key === 'cf_api_key' && preg_match('/^\*+$/', trim($_POST[$key]))) {
+                    continue;
+                }
                 DB::saveSetting($key, $_POST[$key]);
                 $saved[] = $key;
+            }
+        }
+        // Apply timezone to PHP runtime and OS if changed
+        if (in_array('timezone', $saved)) {
+            $tz = DB::setting('timezone', 'UTC');
+            if (in_array($tz, DateTimeZone::listIdentifiers())) {
+                date_default_timezone_set($tz);
+                shell_exec('sudo /usr/bin/timedatectl set-timezone ' . escapeshellarg($tz) . ' 2>&1');
             }
         }
         // If CF credentials were saved, validate them
@@ -54,10 +66,12 @@ switch ($action) {
             $enabled  = DB::setting('cf_ddns_enabled', '0');
             $interval = (int)DB::setting('cf_ddns_interval', '5');
             if ($enabled === '1' && $interval > 0) {
-                $cron = "*/{$interval} * * * * www-data php /var/www/inetpanel/scripts/ddns_update.php >> /var/log/inetpanel_ddns.log 2>&1\n";
-                @file_put_contents('/etc/cron.d/inetpanel_ddns', $cron);
+                $phpBin = 'php' . DB::setting('php_default_version', '8.4');
+                $cron = "*/{$interval} * * * * www-data {$phpBin} /var/www/inetpanel/scripts/ddns_update.php >> /var/log/inetpanel_ddns.log 2>&1\n";
+                $proc = popen('sudo /root/scripts/manage_cron.sh write inetpanel_ddns', 'w');
+                fwrite($proc, $cron); pclose($proc);
             } else {
-                @unlink('/etc/cron.d/inetpanel_ddns');
+                shell_exec('sudo /root/scripts/manage_cron.sh remove inetpanel_ddns 2>&1');
             }
         }
         // Rebuild system update cron (/etc/cron.d/lamp_update) if schedule changed
@@ -73,25 +87,29 @@ switch ($action) {
             } else {
                 $cronContent = "# iNetPanel managed — system package updates (disabled)\n";
             }
-            @file_put_contents('/etc/cron.d/lamp_update', $cronContent);
+            $proc = popen('sudo /root/scripts/manage_cron.sh write lamp_update', 'w');
+            fwrite($proc, $cronContent); pclose($proc);
 
             // Backup cron
             $backupTime = DB::setting('backup_cron_time', '03:00');
             [$bHour, $bMin] = array_pad(explode(':', $backupTime), 2, '00');
             $backupCron = "# iNetPanel managed — account backups\n"
                 . "{$bMin} {$bHour} * * * root /root/scripts/backup_accounts.sh >> /var/log/lamp_backup.log 2>&1\n";
-            @file_put_contents('/etc/cron.d/lamp_backup', $backupCron);
+            $proc = popen('sudo /root/scripts/manage_cron.sh write lamp_backup', 'w');
+            fwrite($proc, $backupCron); pclose($proc);
 
             // Panel auto-update cron
             $autoEnabled = DB::setting('auto_update_enabled', '0');
             $autoTime    = DB::setting('auto_update_time', '02:00');
             [$aHour, $aMin] = array_pad(explode(':', $autoTime), 2, '00');
             if ($autoEnabled === '1') {
+                $phpBin2  = 'php' . DB::setting('php_default_version', '8.4');
                 $autoCron = "# iNetPanel managed — panel auto-update\n"
-                    . "{$aMin} {$aHour} * * * www-data php /var/www/inetpanel/scripts/panel_update.php >> /var/log/inetpanel_update.log 2>&1\n";
-                @file_put_contents('/etc/cron.d/inetpanel_autoupdate', $autoCron);
+                    . "{$aMin} {$aHour} * * * www-data {$phpBin2} /var/www/inetpanel/scripts/panel_update.php >> /var/log/inetpanel_update.log 2>&1\n";
+                $proc = popen('sudo /root/scripts/manage_cron.sh write inetpanel_autoupdate', 'w');
+                fwrite($proc, $autoCron); pclose($proc);
             } else {
-                @unlink('/etc/cron.d/inetpanel_autoupdate');
+                shell_exec('sudo /root/scripts/manage_cron.sh remove inetpanel_autoupdate 2>&1');
             }
         }
         echo json_encode(['success' => true, 'saved' => $saved]);
@@ -137,10 +155,41 @@ switch ($action) {
         ]);
         break;
 
+    case 'setup_tunnel':
+        Auth::requireAdmin();
+        $accountId = DB::setting('cf_account_id', '');
+        if (!$accountId) {
+            echo json_encode(['success' => false, 'error' => 'CF Account ID not configured.']);
+            break;
+        }
+        $cf = new CloudflareAPI();
+        try {
+            $hostname   = DB::setting('server_hostname', gethostname());
+            $tunnelName = 'iNetPanel_' . (preg_replace('/[^a-zA-Z0-9_-]/', '', $hostname) ?: 'panel');
+            $tunnel     = $cf->createTunnel($accountId, $tunnelName);
+            $tunnelId   = $tunnel['result']['id'] ?? '';
+            if (!$tunnelId) {
+                $msg = $tunnel['errors'][0]['message'] ?? 'Tunnel creation failed.';
+                echo json_encode(['success' => false, 'error' => $msg]);
+                break;
+            }
+            $tunnelToken = $cf->getTunnelToken($accountId, $tunnelId) ?: '';
+            DB::saveSetting('cf_tunnel_id',    $tunnelId);
+            DB::saveSetting('cf_tunnel_token', $tunnelToken);
+            if ($tunnelToken) {
+                shell_exec('sudo /root/scripts/cloudflared_setup.sh --action install --token ' . escapeshellarg($tunnelToken) . ' 2>&1');
+            }
+            echo json_encode(['success' => true, 'tunnel_id' => $tunnelId]);
+        } catch (Throwable $e) {
+            echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+        }
+        break;
+
     case 'ddns_test':
         Auth::requireAdmin();
         // Force an immediate DDNS update attempt
-        $output = shell_exec('php /var/www/inetpanel/scripts/ddns_update.php 2>&1');
+        $phpBin = 'php' . DB::setting('php_default_version', '8.4');
+        $output = shell_exec("{$phpBin} /var/www/inetpanel/scripts/ddns_update.php 2>&1");
         echo json_encode(['success' => true, 'output' => trim($output ?: 'No output')]);
         break;
 

@@ -140,7 +140,7 @@ function selectAllDomains(state) {
 }
 
 function loadUsers() {
-    fetch('/api/panel_users.php?action=list')
+    fetch('/api/panel-users?action=list')
         .then(r => r.json())
         .then(data => {
             const tbody = document.getElementById('users-tbody');
@@ -238,7 +238,7 @@ document.getElementById('save-user-btn').addEventListener('click', function () {
     if (password) fd.append('password', password);
     fd.append('domains', JSON.stringify(domains));
 
-    fetch('/api/panel_users.php', { method: 'POST', body: fd })
+    fetch('/api/panel-users', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             spinner.classList.add('d-none');
@@ -265,7 +265,7 @@ document.getElementById('confirm-delete-user-btn').addEventListener('click', fun
     const fd = new FormData();
     fd.append('action', 'delete');
     fd.append('id', pendingDeleteUserId);
-    fetch('/api/panel_users.php', { method: 'POST', body: fd })
+    fetch('/api/panel-users', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             bootstrap.Modal.getInstance(document.getElementById('deleteUserModal')).hide();

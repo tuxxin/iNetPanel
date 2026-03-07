@@ -1,6 +1,8 @@
 # iNetPanel
 
-A self-hosted web hosting control panel for Debian 12. Manage Apache virtual hosts, PHP versions, MariaDB databases, FTP accounts, SSH keys, DNS records, email forwarding, backups, and WireGuard VPN — all from a single admin interface.
+A self-hosted web hosting control panel built for home servers. iNetPanel uses **Cloudflare Zero Trust Tunnels** to expose multiple domains from a single machine — no open ports, no exposed IP address, no port forwarding. Each hosting account you create automatically gets a published application routed through the tunnel, making your domains publicly accessible while keeping your home network completely private.
+
+Manage Apache virtual hosts, PHP versions, MariaDB databases, FTP accounts, SSH keys, DNS records, email forwarding, backups, and WireGuard VPN — all from a single admin interface.
 
 ---
 
@@ -63,13 +65,13 @@ iNetPanel is the result: a capable, modern hosting panel built for people who wa
 ### Step 1 — Run the server installer
 
 ```bash
-bash <(curl -s https://inetpanel.tuxxin.com/data/latest)
+bash <(curl -s https://inetpanel.tuxxin.com/latest)
 ```
 
 Or download and run manually:
 
 ```bash
-curl -O https://inetpanel.tuxxin.com/data/latest
+curl -O https://inetpanel.tuxxin.com/latest
 bash latest
 ```
 

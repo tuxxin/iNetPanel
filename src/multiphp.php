@@ -5,12 +5,12 @@
 
 Auth::requireAdmin();
 
-$allVersions = ['5.6','7.0','7.1','7.2','7.3','7.4','8.0','8.1','8.2','8.3','8.4'];
+$allVersions = ['5.6','7.0','7.1','7.2','7.3','7.4','8.0','8.1','8.2','8.3','8.4','8.5'];
 
 // Detect installed versions
 $installed = [];
 foreach ($allVersions as $v) {
-    if (is_dir("/etc/php/{$v}") || file_exists("/usr/sbin/php-fpm{$v}")) {
+    if (file_exists("/usr/sbin/php-fpm{$v}") || file_exists("/usr/bin/php{$v}")) {
         $installed[] = $v;
     }
 }
@@ -49,7 +49,8 @@ try {
                 <h6 class="text-muted text-uppercase small fw-bold mb-3">Available PHP Versions</h6>
                 <div class="row g-3" id="versions-grid">
                     <?php foreach ($allVersions as $v):
-                        $isInstalled = in_array($v, $installed);
+                        $isInstalled  = in_array($v, $installed);
+                        $isProtected  = ($v === $systemDefault);
                     ?>
                     <div class="col-md-3 col-6">
                         <div class="p-3 border rounded d-flex justify-content-between align-items-center <?= $isInstalled ? 'bg-success-subtle border-success-subtle' : 'bg-light' ?> h-100" id="php-card-<?= str_replace('.', '', $v) ?>">
@@ -57,9 +58,13 @@ try {
                             <?php if ($isInstalled): ?>
                                 <div class="d-flex gap-1 align-items-center">
                                     <span class="badge bg-success"><i class="fas fa-check"></i> Installed</span>
-                                    <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="toggleVersion('<?= $v ?>', 'remove')" title="Remove">
-                                        <i class="fas fa-times"></i>
-                                    </button>
+                                    <?php if ($isProtected): ?>
+                                        <span class="badge bg-primary ms-1" title="This is the panel default — change the default before removing">Required</span>
+                                    <?php else: ?>
+                                        <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="toggleVersion('<?= $v ?>', 'remove')" title="Remove">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    <?php endif; ?>
                                 </div>
                             <?php else: ?>
                                 <button class="btn btn-sm btn-outline-primary py-0 px-2" onclick="toggleVersion('<?= $v ?>', 'install')">
@@ -174,7 +179,7 @@ function toggleVersion(ver, action) {
     const fd = new FormData();
     fd.append('action', action);
     fd.append('version', ver);
-    fetch('/api/multiphp.php', { method: 'POST', body: fd })
+    fetch('/api/multiphp', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             modal.hide();
@@ -193,7 +198,7 @@ function saveSystemDefault() {
     const fd = new FormData();
     fd.append('action', 'set_default');
     fd.append('version', ver);
-    fetch('/api/multiphp.php', { method: 'POST', body: fd })
+    fetch('/api/multiphp', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             if (data.success) showAlert(`System default set to PHP ${ver}.`);
@@ -209,7 +214,7 @@ function setDomainPhp(domain, btn) {
     fd.append('action', 'set_domain');
     fd.append('domain', domain);
     fd.append('version', ver);
-    fetch('/api/multiphp.php', { method: 'POST', body: fd })
+    fetch('/api/multiphp', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             btn.disabled = false;

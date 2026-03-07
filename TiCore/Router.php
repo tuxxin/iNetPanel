@@ -14,6 +14,9 @@ class Router
 
     public function dispatch(string $request): void
     {
+        // Strip .php extension so /api/settings.php matches route /api/settings
+        $request = preg_replace('/\.php$/', '', $request);
+
         if (isset($this->routes[$request])) {
             ($this->routes[$request])();
             return;

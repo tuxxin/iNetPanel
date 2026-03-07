@@ -20,7 +20,7 @@ const PHP_EXTENSIONS = [
 
 function phpIsInstalled(string $ver): bool
 {
-    return is_dir("/etc/php/{$ver}") || file_exists("/usr/sbin/php-fpm{$ver}");
+    return file_exists("/usr/sbin/php-fpm{$ver}") || file_exists("/usr/bin/php{$ver}");
 }
 
 function getInstalledExtensions(string $ver): array
@@ -73,22 +73,31 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'Unknown extension.']); break;
         }
 
+        // Protect core packages whose removal would break PHP-FPM or the panel
+        $protected = ['fpm', 'cli', 'common', 'opcache', 'readline', 'sqlite3', 'mysql'];
+        if ($action === 'remove' && in_array($ext, $protected, true)) {
+            echo json_encode(['success' => false, 'error' => "Extension '{$ext}' is required by the panel and cannot be removed."]); break;
+        }
+
         $pkg  = "php{$ver}-{$ext}";
         $flag = ($action === 'install') ? 'install' : 'remove';
         $cmd  = "DEBIAN_FRONTEND=noninteractive sudo /usr/bin/apt-get {$flag} -y " . escapeshellarg($pkg) . " 2>&1";
         exec($cmd, $lines, $rc);
         $output = implode("\n", $lines);
 
-        if ($rc === 0) {
-            echo json_encode(['success' => true, 'output' => $output]);
-        } else {
-            echo json_encode(['success' => false, 'error' => "apt-get failed (exit {$rc})", 'output' => $output]);
+        if ($rc !== 0) {
+            echo json_encode(['success' => false, 'error' => "apt-get failed (exit {$rc})", 'output' => $output]); break;
         }
+
+        // Restart FPM after package change so extensions are loaded/unloaded
+        Shell::systemctl('restart', "php{$ver}-fpm");
+
+        echo json_encode(['success' => true, 'output' => $output]);
         break;
 
     case 'installed_versions':
         // Returns list of installed PHP versions so frontend can populate the dropdown
-        $versions = ['5.6','7.0','7.1','7.2','7.3','7.4','8.0','8.1','8.2','8.3','8.4'];
+        $versions = ['5.6','7.0','7.1','7.2','7.3','7.4','8.0','8.1','8.2','8.3','8.4','8.5'];
         $result = [];
         foreach ($versions as $v) {
             if (phpIsInstalled($v)) {

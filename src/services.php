@@ -65,7 +65,7 @@ function showToast(msg, type = 'success') {
 }
 
 function loadServices() {
-    fetch('/api/services.php?action=list')
+    fetch('/api/services?action=list')
         .then(r => r.json())
         .then(data => {
             const tbody = document.getElementById('services-tbody');
@@ -73,24 +73,29 @@ function loadServices() {
                 tbody.innerHTML = '<tr><td colspan="3" class="text-center text-danger py-3">Failed to load services.</td></tr>'; return;
             }
             tbody.innerHTML = data.data.map(s => {
-                const badgeClass = s.active ? 'bg-success' : 'bg-secondary';
-                const statusText = s.active ? 'Running'   : 'Stopped';
-                const iconClass  = s.active ? 'fa-circle text-success' : 'fa-circle text-secondary';
+                const badgeClass = s.status === 'active' ? 'bg-success' : (s.status === 'missing' ? 'bg-danger' : 'bg-secondary');
+                const statusText = s.status === 'active' ? 'Running' : (s.status === 'missing' ? 'Not installed' : 'Stopped');
+                const dotClass   = s.status === 'active' ? 'text-success' : (s.status === 'missing' ? 'text-danger' : 'text-secondary');
 
                 let actions = `<span class="text-muted fst-italic small">System Core</span>`;
+                if (s.status === 'missing') {
+                    actions = s.name === 'wg-quick@wg0'
+                        ? `<a href="/admin/settings" class="btn btn-sm btn-outline-primary"><i class="fas fa-wrench me-1"></i>Install</a>`
+                        : `<span class="text-muted fst-italic small">Not available</span>`;
+                }
                 <?php if ($isAdmin): ?>
-                if (!s.locked) {
-                    const toggleBtn = s.active
-                        ? `<button class="btn btn-sm btn-outline-warning me-1" onclick="svcAction('${s.service}','stop')" title="Stop"><i class="fas fa-stop"></i></button>`
-                        : `<button class="btn btn-sm btn-outline-success me-1" onclick="svcAction('${s.service}','start')" title="Start"><i class="fas fa-play"></i></button>`;
-                    const restartBtn = `<button class="btn btn-sm btn-outline-secondary" onclick="svcAction('${s.service}','restart')" title="Restart"><i class="fas fa-redo"></i></button>`;
+                else if (!s.locked) {
+                    const toggleBtn = s.status === 'active'
+                        ? `<button class="btn btn-sm btn-outline-warning me-1" onclick="svcAction('${s.name}','stop')" title="Stop"><i class="fas fa-stop"></i></button>`
+                        : `<button class="btn btn-sm btn-outline-success me-1" onclick="svcAction('${s.name}','start')" title="Start"><i class="fas fa-play"></i></button>`;
+                    const restartBtn = `<button class="btn btn-sm btn-outline-secondary" onclick="svcAction('${s.name}','restart')" title="Restart"><i class="fas fa-redo"></i></button>`;
                     actions = toggleBtn + restartBtn;
                 }
                 <?php endif; ?>
 
                 return `<tr>
                     <td class="ps-4 fw-medium">
-                        <i class="fas fa-circle me-2 ${s.active ? 'text-success' : 'text-secondary'}" style="font-size:.6rem;vertical-align:middle"></i>
+                        <i class="fas fa-circle me-2 ${dotClass}" style="font-size:.6rem;vertical-align:middle"></i>
                         <i class="${s.icon} text-muted me-2"></i>${s.label}
                     </td>
                     <td><span class="badge ${badgeClass}">${statusText}</span></td>
@@ -124,7 +129,7 @@ document.getElementById('svc-confirm-btn').addEventListener('click', function ()
     const fd = new FormData();
     fd.append('action', pendingAction);
     fd.append('service', pendingSvc);
-    fetch('/api/services.php', { method: 'POST', body: fd })
+    fetch('/api/services', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             bootstrap.Modal.getInstance(document.getElementById('svcModal')).hide();

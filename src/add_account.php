@@ -4,14 +4,15 @@
 
 // Fetch installed PHP versions for the dropdown
 $phpVersions = [];
-$allVersions = ['5.6','7.0','7.1','7.2','7.3','7.4','8.0','8.1','8.2','8.3','8.4'];
+$allVersions = ['5.6','7.0','7.1','7.2','7.3','7.4','8.0','8.1','8.2','8.3','8.4','8.5'];
 foreach ($allVersions as $v) {
-    if (is_dir("/etc/php/{$v}") || file_exists("/usr/sbin/php-fpm{$v}")) {
+    if (file_exists("/usr/sbin/php-fpm{$v}") || file_exists("/usr/bin/php{$v}")) {
         $phpVersions[] = $v;
     }
 }
+$phpDefault = DB::setting('php_default_version', '8.4');
 if (empty($phpVersions)) {
-    $phpVersions = ['8.4']; // fallback
+    $phpVersions = [$phpDefault];
 }
 ?>
 
@@ -37,7 +38,7 @@ if (empty($phpVersions)) {
                     <label class="form-label fw-semibold">PHP Version</label>
                     <select class="form-select" id="php_version" name="php_version">
                         <?php foreach (array_reverse($phpVersions) as $v): ?>
-                        <option value="<?= htmlspecialchars($v) ?>" <?= $v === '8.4' ? 'selected' : '' ?>><?= htmlspecialchars($v) ?></option>
+                        <option value="<?= htmlspecialchars($v) ?>" <?= $v === $phpDefault ? 'selected' : '' ?>><?= htmlspecialchars($v) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
@@ -125,7 +126,7 @@ document.getElementById('create-form').addEventListener('submit', function (e) {
     fd.append('password', pass);
     fd.append('php_version', document.getElementById('php_version').value);
 
-    fetch('/api/accounts.php', { method: 'POST', body: fd })
+    fetch('/api/accounts', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             spinner.classList.add('d-none');
