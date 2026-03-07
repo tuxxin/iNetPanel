@@ -20,7 +20,7 @@ const PHP_EXTENSIONS = [
 
 function phpIsInstalled(string $ver): bool
 {
-    return file_exists("/usr/sbin/php-fpm{$ver}") || file_exists("/usr/bin/php{$ver}");
+    return file_exists("/usr/sbin/php-fpm{$ver}");
 }
 
 function getInstalledExtensions(string $ver): array

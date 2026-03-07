@@ -10,7 +10,7 @@ $supportedVersions = ['5.6', '7.0', '7.1', '7.2', '7.3', '7.4', '8.0', '8.1', '8
 
 function phpIsInstalled(string $ver): bool
 {
-    return file_exists("/usr/sbin/php-fpm{$ver}") || file_exists("/usr/bin/php{$ver}");
+    return file_exists("/usr/sbin/php-fpm{$ver}");
 }
 
 switch ($action) {
@@ -35,6 +35,7 @@ switch ($action) {
     case 'install':
     case 'remove':
         Auth::requireAdmin();
+        set_time_limit(0);
         $ver = trim($_POST['version'] ?? '');
         if (!in_array($ver, $supportedVersions)) {
             echo json_encode(['success' => false, 'error' => 'Invalid PHP version.']); break;
@@ -48,19 +49,16 @@ switch ($action) {
         } else {
             $cmd = "sudo /usr/bin/apt-get install -y php{$ver}-fpm php{$ver}-cli php{$ver}-common php{$ver}-mysql php{$ver}-xml php{$ver}-mbstring php{$ver}-curl php{$ver}-zip 2>&1";
         }
+        // Ensure dpkg is in a clean state before running apt (a previous interrupted
+        // operation would cause apt to fail immediately with a dpkg error otherwise).
+        shell_exec("sudo /usr/bin/dpkg --configure -a 2>&1");
         exec($cmd, $outArr, $exitCode);
         $out = implode("\n", $outArr);
         if ($action === 'install') {
             shell_exec("sudo /bin/systemctl enable php{$ver}-fpm 2>&1");
             shell_exec("sudo /bin/systemctl start  php{$ver}-fpm 2>&1");
         }
-        // After any purge, apt prerm hooks may disable modules for other PHP versions.
-        // Re-enable all FPM modules for the panel default and restart it.
-        if ($action === 'remove') {
-            shell_exec("sudo /usr/sbin/phpenmod -v {$panelDefault} -s fpm calendar ctype curl dom exif fileinfo ftp gd gettext gmp iconv intl mbstring mysqli pdo_mysql pdo_sqlite phar posix readline shmop simplexml sockets sqlite3 sysvmsg sysvsem sysvshm tokenizer xmlreader xmlwriter xsl zip 2>&1");
-        }
-        shell_exec("sudo /bin/systemctl restart php{$panelDefault}-fpm 2>&1");
-        // Verify the operation actually took effect
+        // Verify the operation actually took effect before doing anything disruptive
         $nowInstalled = phpIsInstalled($ver);
         $wantInstalled = ($action === 'install');
         if ($nowInstalled !== $wantInstalled) {
@@ -68,7 +66,23 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => $errMsg]);
             break;
         }
+
+        // Send the success response to the browser NOW, before restarting FPM.
+        // fastcgi_finish_request() flushes and closes the HTTP response while
+        // PHP continues executing — prevents the FPM restart from killing the reply.
         echo json_encode(['success' => true, 'output' => trim($out)]);
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        }
+
+        // After any purge, apt prerm hooks may disable modules for other PHP versions
+        // and can corrupt shared library symbols. Reinstall core packages and
+        // re-enable all FPM modules for the panel default to restore a clean state.
+        if ($action === 'remove') {
+            shell_exec("sudo /usr/bin/apt-get install --reinstall -y php{$panelDefault}-mysql php{$panelDefault}-sqlite3 php{$panelDefault}-common 2>&1");
+            shell_exec("sudo /usr/sbin/phpenmod -v {$panelDefault} -s fpm calendar ctype curl dom exif fileinfo ftp gd gettext gmp iconv intl mbstring mysqli pdo_mysql pdo_sqlite phar posix readline shmop simplexml sockets sqlite3 sysvmsg sysvsem sysvshm tokenizer xmlreader xmlwriter xsl zip 2>&1");
+        }
+        shell_exec("sudo /bin/systemctl restart php{$panelDefault}-fpm 2>&1");
         break;
 
     case 'set_default':

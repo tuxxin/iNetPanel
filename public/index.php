@@ -58,7 +58,7 @@ try {
 // Auto-detect php_default_version if unset or the stored version is no longer installed
 try {
     $__phpVer = DB::setting('php_default_version', '');
-    if (!$__phpVer || (!file_exists("/usr/sbin/php-fpm{$__phpVer}") && !file_exists("/usr/bin/php{$__phpVer}"))) {
+    if (!$__phpVer || !file_exists("/usr/sbin/php-fpm{$__phpVer}")) {
         foreach (array_reverse(['5.6','7.0','7.1','7.2','7.3','7.4','8.0','8.1','8.2','8.3','8.4','8.5']) as $__v) {
             if (file_exists("/usr/sbin/php-fpm{$__v}") || file_exists("/usr/bin/php{$__v}")) {
                 DB::saveSetting('php_default_version', $__v);
