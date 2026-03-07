@@ -17,7 +17,7 @@ iNetPanel is the result: a capable, modern hosting panel built for people who wa
 ## Features
 
 - **Account Management** — Create and delete hosting accounts (Apache vhost + PHP-FPM pool + Linux user + FTP) from the panel
-- **Multi-PHP** — Install and switch between multiple PHP versions (5.6–8.4) per domain using sury.org packages
+- **Multi-PHP** — Install and switch between multiple PHP versions (5.6–8.5) per domain using sury.org packages
 - **SSH Key Manager** — Import, generate, and delete SSH keys for any hosting account or the root user without touching the command line
 - **Cloudflare Zero Trust Tunnel** — Automatic tunnel created at install; each new hosting account gets a published public hostname routed through the tunnel (no open ports required)
 - **Cloudflare DNS** — Full DNS record management via Cloudflare API (A, CNAME, MX, TXT, etc.)
