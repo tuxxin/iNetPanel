@@ -164,6 +164,17 @@ try {
 </div>
 
 <script>
+const PANEL_DEFAULT_PHP = '<?= htmlspecialchars($systemDefault) ?>';
+
+function phpVerGt(a, b) {
+    const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+        if (d !== 0) return d > 0;
+    }
+    return false;
+}
+
 function showAlert(msg, type = 'success') {
     const el = document.getElementById('multiphp-alert');
     el.className = `alert alert-${type}`;
@@ -172,6 +183,12 @@ function showAlert(msg, type = 'success') {
 }
 
 function toggleVersion(ver, action) {
+    if (phpVerGt(ver, PANEL_DEFAULT_PHP)) {
+        const msg = `⚠️ PHP ${ver} is newer than the panel default (PHP ${PANEL_DEFAULT_PHP}).\n\n` +
+            `${action === 'install' ? 'Installing' : 'Removing'} a version newer than the system default ` +
+            `may cause instability or break the system entirely.\n\nProceed with caution — continue?`;
+        if (!confirm(msg)) return;
+    }
     const modal = new bootstrap.Modal(document.getElementById('phpModal'));
     document.getElementById('php-modal-title').textContent = action === 'install' ? `Installing PHP ${ver}…` : `Removing PHP ${ver}…`;
     document.getElementById('php-modal-msg').textContent = 'This may take a minute. Please wait.';

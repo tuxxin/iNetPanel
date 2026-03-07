@@ -79,7 +79,7 @@ switch ($action) {
         // and can corrupt shared library symbols. Reinstall core packages and
         // re-enable all FPM modules for the panel default to restore a clean state.
         if ($action === 'remove') {
-            shell_exec("sudo /usr/bin/apt-get install --reinstall -y php{$panelDefault}-mysql php{$panelDefault}-sqlite3 php{$panelDefault}-common 2>&1");
+            shell_exec("sudo /usr/bin/apt-get install --reinstall -y php{$panelDefault}-mysql php{$panelDefault}-sqlite3 php{$panelDefault}-common phpmyadmin 2>&1");
             shell_exec("sudo /usr/sbin/phpenmod -v {$panelDefault} -s fpm calendar ctype curl dom exif fileinfo ftp gd gettext gmp iconv intl mbstring mysqli pdo_mysql pdo_sqlite phar posix readline shmop simplexml sockets sqlite3 sysvmsg sysvsem sysvshm tokenizer xmlreader xmlwriter xsl zip 2>&1");
         }
         shell_exec("sudo /bin/systemctl restart php{$panelDefault}-fpm 2>&1");

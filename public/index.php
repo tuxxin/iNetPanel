@@ -205,6 +205,7 @@ foreach ([
     '/api/logs'           => 'logs.php',
     '/api/update_check'   => 'update_check.php',
     '/api/ssh-keys'       => 'ssh_keys.php',
+    '/api/stats'          => 'stats.php',
 ] as $route => $file) {
     $router->add($route, function () use ($file) {
         Auth::check();

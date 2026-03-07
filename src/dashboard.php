@@ -218,13 +218,17 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     function pollStats() {
-        // Re-use the numbers already rendered server-side for first point
-        const now = new Date().toLocaleTimeString();
-        labels.push(now);
-        cpuData.push(<?= $cpuLoad ?>);
-        memData.push(<?= $memPct ?>);
-        if (labels.length > 60) { labels.shift(); cpuData.shift(); memData.shift(); }
-        chart.update('none');
+        fetch('/api/stats')
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) return;
+                labels.push(new Date().toLocaleTimeString());
+                cpuData.push(data.cpu);
+                memData.push(data.mem);
+                if (labels.length > 60) { labels.shift(); cpuData.shift(); memData.shift(); }
+                chart.update('none');
+            })
+            .catch(() => {});
     }
     pollStats();
     setInterval(pollStats, 5000);

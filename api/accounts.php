@@ -51,7 +51,7 @@ switch ($action) {
             break;
         }
 
-        $result = Shell::run('create_account', ['--domain' => $domain, '--password' => $password]);
+        $result = Shell::run('create_account', ['--domain' => $domain, '--password' => $password, '--php-version' => $phpVer]);
 
         if ($result['success']) {
             // Detect assigned port
@@ -85,7 +85,15 @@ switch ($action) {
             }
         }
 
+        // Flush response to browser before reloading PHP-FPM (which would otherwise
+        // kill this worker mid-request since create_account.sh triggers a pool reload).
         echo json_encode($result);
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        }
+        if ($result['success']) {
+            shell_exec("sudo /bin/systemctl reload php{$phpVer}-fpm 2>&1");
+        }
         break;
 
     // -------------------------------------------------------------------------

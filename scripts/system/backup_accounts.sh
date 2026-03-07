@@ -1,0 +1,93 @@
+#!/bin/bash
+# ==============================================================================
+# backup_accounts.sh — Backs up all hosted accounts (files + MariaDB exports)
+#   - /backup/<domain>_YYYY-MM-DD.tgz per account
+#   - Exports all MariaDB databases matching the account prefix
+#   - Retention policy: removes backups older than RETENTION_DAYS (default: 3)
+#   - --single <domain> mode: backs up one account (used by delete_account.sh)
+# Usage: inetp backup_accounts
+#        backup_accounts.sh --single <domain>
+# ==============================================================================
+BACKUP_DIR="/backup"
+RETENTION_DAYS=3        # Change to adjust how many days of backups to keep
+DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
+DATE=$(date +%Y-%m-%d)
+
+BOLD='\033[1m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; RED='\033[1;31m'; NC='\033[0m'
+
+SINGLE_MODE=0
+SINGLE_ACCOUNT=""
+if [ "$1" = "--single" ] && [ -n "$2" ]; then
+    SINGLE_MODE=1
+    SINGLE_ACCOUNT="$2"
+fi
+
+mkdir -p "$BACKUP_DIR"
+
+backup_account() {
+    local DOMAIN="$1"
+    local BACKUP_FILE="${BACKUP_DIR}/${DOMAIN}_${DATE}.tgz"
+    local TMP_SQL
+    TMP_SQL=$(mktemp -d)
+
+    echo -e "  ${YELLOW}Backing up:${NC} $DOMAIN"
+
+    # Export all MariaDB databases matching this account's name prefix
+    local DB_PREFIX
+    DB_PREFIX=$(echo "$DOMAIN" | tr '.-' '_')
+    local DBS
+    DBS=$(mysql -u root -p"$DB_ROOT_PASS" -N \
+        -e "SHOW DATABASES LIKE '${DB_PREFIX}%'" 2>/dev/null)
+    for DB in $DBS; do
+        mysqldump -u root -p"$DB_ROOT_PASS" --single-transaction "$DB" \
+            > "${TMP_SQL}/${DB}.sql" 2>/dev/null
+        echo -e "    Exported DB: $DB"
+    done
+
+    # Archive: home directory + SQL dumps in a single tgz
+    tar -czf "$BACKUP_FILE" \
+        -C / "home/$DOMAIN" \
+        -C "$TMP_SQL" . \
+        2>/dev/null
+
+    rm -rf "$TMP_SQL"
+    SIZE=$(du -sh "$BACKUP_FILE" 2>/dev/null | cut -f1)
+    echo -e "    ${GREEN}Saved: $BACKUP_FILE ($SIZE)${NC}"
+}
+
+if [ "$SINGLE_MODE" -eq 1 ]; then
+    [ -d "/home/$SINGLE_ACCOUNT" ] \
+        || { echo -e "${RED}Account not found: $SINGLE_ACCOUNT${NC}"; exit 1; }
+    backup_account "$SINGLE_ACCOUNT"
+else
+    echo -e "${BOLD}--- Account Backup ---${NC}"
+    echo -e "  Date: $DATE  |  Retention: ${RETENTION_DAYS} days  |  Destination: $BACKUP_DIR"
+    echo ""
+
+    COUNT=0
+    for user_home in /home/*/; do
+        DOMAIN=$(basename "$user_home")
+        # Only back up accounts that have an Apache vhost (skips system users)
+        if [ -f "/etc/apache2/sites-available/${DOMAIN}.conf" ]; then
+            backup_account "$DOMAIN"
+            COUNT=$((COUNT + 1))
+        fi
+    done
+
+    echo ""
+    echo -e "  Accounts backed up: ${GREEN}$COUNT${NC}"
+
+    # Retention policy (not applied in --single mode)
+    echo ""
+    echo -e "${YELLOW}Applying ${RETENTION_DAYS}-day retention policy...${NC}"
+    REMOVED=0
+    while IFS= read -r -d '' old; do
+        rm -f "$old"
+        echo -e "  Removed: $(basename "$old")"
+        REMOVED=$((REMOVED + 1))
+    done < <(find "$BACKUP_DIR" -name "*.tgz" -mtime +"$RETENTION_DAYS" -print0)
+    echo -e "  Removed $REMOVED old backup(s)."
+fi
+
+echo ""
+echo -e "${GREEN}Backup complete.${NC}"
