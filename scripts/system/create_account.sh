@@ -114,9 +114,12 @@ php_value[session.save_path]    = ${TMP_DIR}
 php_admin_value[open_basedir]   = /home/${DOMAIN}/:/tmp/
 POOL
 
-# PHP-FPM reload is deferred — the caller (panel API) sends the HTTP response
-# first via fastcgi_finish_request(), then reloads FPM so the new pool's socket
-# is created without killing the in-flight API request.
+# Non-interactive callers (panel API) reload FPM themselves after sending the HTTP
+# response via fastcgi_finish_request(), to avoid killing the in-flight request.
+# Interactive CLI use must reload here so the new pool socket is created immediately.
+if [ "$NON_INTERACTIVE" -eq 0 ]; then
+    systemctl reload "php${PHP_VER}-fpm"
+fi
 
 # ----------------------------------------------------------------
 # Apache VHost
