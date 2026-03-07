@@ -23,7 +23,7 @@ iNetPanel is the result: a capable, modern hosting panel built for people who wa
 - **Cloudflare DNS** — Full DNS record management via Cloudflare API (A, CNAME, MX, TXT, etc.)
 - **Email Forwarding** — Manage Cloudflare Email Routing rules per domain
 - **Cloudflare DDNS** — Automatically update a DNS A record when your server's IP changes
-- **WireGuard VPN** — Optional VPN with auto-provisioned peer configs per hosting account; locks SSH/FTP to VPN-only when enabled
+- **WireGuard VPN** — Optional VPN with auto-provisioned peer configs per hosting account; locks SSH/FTP to VPN-only when enabled (requires router port-forwarding)
 - **Account Suspension** — Suspend/resume accounts (blocks HTTP, FTP, SSH, and WireGuard peer simultaneously)
 - **Backups** — Per-account and full backups to `/backup/` with configurable retention
 - **Service Manager** — Start, stop, and restart system services (Apache, PHP-FPM, MariaDB, vsftpd, WireGuard) from the panel
