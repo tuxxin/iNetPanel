@@ -188,9 +188,10 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             data.data.slice(0, 6).forEach(a => {
                 const badge = a.status === 'active' ? 'bg-success' : 'bg-warning text-dark';
+                const phpPill = a.php_version ? `<span class="badge bg-secondary-subtle text-secondary rounded-pill me-1">PHP ${a.php_version}</span>` : '';
                 ul.innerHTML += `<li class="list-group-item d-flex justify-content-between align-items-center py-2 ps-3">
                     <span class="small fw-semibold">${a.domain_name}</span>
-                    <span class="badge ${badge} rounded-pill">${a.status}</span></li>`;
+                    <span class="d-flex align-items-center gap-1">${phpPill}<span class="badge ${badge} rounded-pill">${a.status}</span></span></li>`;
             });
         }).catch(() => {
             document.getElementById('dash-accounts').innerHTML = '<li class="list-group-item text-muted small ps-3">Account data unavailable</li>';

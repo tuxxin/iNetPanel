@@ -94,6 +94,13 @@ switch ($action) {
             }
         }
 
+        $diff = $checkTs ? time() - $checkTs : null;
+        if (!$diff)              $checkedAgo = 'never';
+        elseif ($diff < 60)     $checkedAgo = 'just now';
+        elseif ($diff < 3600)   $checkedAgo = round($diff / 60) . ' min ago';
+        elseif ($diff < 86400)  $checkedAgo = round($diff / 3600) . ' hr ago';
+        else                    $checkedAgo = round($diff / 86400) . ' days ago';
+
         echo json_encode([
             'success'          => true,
             'current'          => $current,
@@ -101,6 +108,7 @@ switch ($action) {
             'update_available' => $latestVer && version_compare($latestVer, $current, '>'),
             'download_url'     => $downloadUrl,
             'cached'           => (time() - $checkTs < CACHE_TTL),
+            'checked_ago'      => $checkedAgo,
         ]);
         break;
 }

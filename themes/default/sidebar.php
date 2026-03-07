@@ -93,22 +93,25 @@
     <div class="sidebar-footer">
         <?php
         $panel_version = class_exists('Version') ? Version::display() : 'v0.107';
+        $updateInfo = class_exists('Version') ? Version::checkUpdate() : ['available' => false, 'latest' => ''];
         ?>
-        <div class="sidebar-version-block mb-2">
+        <?php if ($updateInfo['available']): ?>
+        <a href="/admin/settings"
+           class="d-flex align-items-center gap-1 mb-2 text-decoration-none"
+           style="font-size:0.68rem; color:#dc3545;" title="v<?= htmlspecialchars($updateInfo['latest']) ?> available">
+            <i class="fas fa-circle-arrow-up" style="font-size:0.75rem;"></i>
+            Update available — v<?= htmlspecialchars($updateInfo['latest']) ?>
+        </a>
+        <?php endif; ?>
+        <div class="sidebar-version-block">
             <div class="d-flex align-items-center gap-2">
                 <span class="version-label">iNetPanel</span>
-                <span class="version-badge"><?php echo htmlspecialchars($panel_version); ?></span>
+                <a href="https://github.com/tuxxin/iNetPanel" class="version-badge text-decoration-none d-flex align-items-center gap-1" target="_blank" title="GitHub">
+                    <i class="fab fa-github" style="font-size:0.7rem;"></i><?php echo htmlspecialchars($panel_version); ?>
+                </a>
             </div>
             <div class="version-sub text-muted" style="font-size: 0.68rem; margin-top: 2px;">
-                Powered by <span class="ticore-tag">TiCore</span>
-            </div>
-        </div>
-        <div class="d-flex justify-content-between align-items-center">
-            <span class="text-muted" style="font-size: 0.72rem;">&#169; 2025 iNetPanel</span>
-            <div class="d-flex align-items-center gap-2">
-                <a href="https://github.com/tuxxin/iNetPanel" class="footer-icon" target="_blank" title="GitHub">
-                    <i class="fab fa-github"></i>
-                </a>
+                Powered by <a href="https://tuxxin.com" target="_blank" class="ticore-tag text-decoration-none">Tuxxin.com</a>
             </div>
         </div>
     </div>

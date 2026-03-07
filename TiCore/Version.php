@@ -27,6 +27,46 @@ class Version
     }
 
     /**
+     * Check if a newer version is available.
+     * Fetches the latest release tag from GitHub releases.
+     * Returns ['available' => bool, 'latest' => string].
+     * Results are cached in a transient file for 6 hours to avoid hammering GitHub.
+     */
+    public static function checkUpdate(): array
+    {
+        $cache = sys_get_temp_dir() . '/inetp_update_check.json';
+        if (file_exists($cache) && (time() - filemtime($cache)) < 21600) {
+            $data = json_decode(file_get_contents($cache), true);
+            if (is_array($data)) return $data;
+        }
+
+        $ctx = stream_context_create(['http' => [
+            'timeout'       => 4,
+            'user_agent'    => 'iNetPanel/' . self::APP_VERSION,
+            'ignore_errors' => true,
+        ]]);
+
+        $body = @file_get_contents(
+            'https://api.github.com/repos/tuxxin/iNetPanel/releases/latest',
+            false, $ctx
+        );
+
+        if (!$body) {
+            return ['available' => false, 'latest' => self::APP_VERSION];
+        }
+
+        $json   = json_decode($body, true);
+        $latest = ltrim($json['tag_name'] ?? '', 'v');
+        $result = [
+            'available' => version_compare($latest, self::APP_VERSION, '>'),
+            'latest'    => $latest ?: self::APP_VERSION,
+        ];
+
+        file_put_contents($cache, json_encode($result));
+        return $result;
+    }
+
+    /**
      * Increment version by 0.001 and rewrite the constant in this file.
      * Called by the version bump script on each release commit.
      */

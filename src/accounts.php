@@ -212,8 +212,8 @@ function loadAccounts() {
                 const badge     = suspended
                     ? '<span class="badge bg-warning text-dark">Suspended</span>'
                     : '<span class="badge bg-success">Active</span>';
-                const wgBadge = a.wg_peer_ip
-                    ? `<span class="badge bg-primary-subtle text-primary" style="cursor:pointer" onclick="showWgConfig('${a.domain_name}')" title="${a.wg_peer_ip}"><i class="fas fa-shield-alt"></i></span>`
+                const wgBadge = a.wg_ip
+                    ? `<span class="badge bg-primary-subtle text-primary" style="cursor:pointer" onclick="showWgConfig('${a.domain_name}')" title="${a.wg_ip}"><i class="fas fa-shield-alt"></i></span>`
                     : '<span class="text-muted">—</span>';
                 const suspendBtn = suspended
                     ? `<button class="btn btn-sm btn-outline-success me-1" onclick="suspendAccount('${a.domain_name}','resume')" title="Reactivate"><i class="fas fa-play"></i></button>`
@@ -223,7 +223,7 @@ function loadAccounts() {
                 return `<tr class="${rowClass}">
                     <td class="ps-4 fw-semibold">${a.domain_name}</td>
                     <td>${a.port ?? '—'}</td>
-                    <td>${a.disk_usage ?? '—'}</td>
+                    <td>${a.disk ?? '—'}</td>
                     <td>${a.php_version ?? '8.4'}</td>
                     <td>${badge}</td>
                     <td>${wgBadge}</td>

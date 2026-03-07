@@ -67,7 +67,7 @@ function s(string $key, string $default = ''): string {
                                     <span class="badge bg-warning text-dark ms-2 fs-6">Update Available</span>
                                 <?php endif; ?>
                             </div>
-                            <div class="text-muted small mt-1">Checked: <?= htmlspecialchars($checkedAgo) ?>
+                            <div class="text-muted small mt-1">Checked: <span id="update-checked-ago"><?= htmlspecialchars($checkedAgo) ?></span>
                                 <button class="btn btn-link btn-sm p-0 ms-1" id="check-now-btn">Check now</button>
                             </div>
                         </div>
@@ -685,6 +685,21 @@ document.querySelector('[data-bs-target="#tab-wireguard"]').addEventListener('sh
 } // end if wg-toggle-btn exists
 
 // ── Updates tab ───────────────────────────────────────────────────────────────
+function refreshUpdateStatus() {
+    fetch('/api/update_check?action=status')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success || !data.latest) return;
+            const disp = document.getElementById('latest-ver-display');
+            if (disp) disp.innerHTML = 'v' + data.latest + (data.update_available ? ' <span class="badge bg-warning text-dark ms-2">Update Available</span>' : '');
+            const checkedEl = document.getElementById('update-checked-ago');
+            if (checkedEl && data.checked_ago) checkedEl.textContent = data.checked_ago;
+        })
+        .catch(() => {});
+}
+// Auto-load on page ready
+document.addEventListener('DOMContentLoaded', refreshUpdateStatus);
+
 const checkNowBtn  = document.getElementById('check-now-btn');
 const updateNowBtn = document.getElementById('update-now-btn');
 
@@ -700,6 +715,8 @@ if (checkNowBtn) {
                 if (data.success) {
                     const disp = document.getElementById('latest-ver-display');
                     if (disp) disp.innerHTML = 'v' + data.latest + (data.update_available ? ' <span class="badge bg-warning text-dark ms-2">Update Available</span>' : '');
+                    const checkedEl = document.getElementById('update-checked-ago');
+                    if (checkedEl) checkedEl.textContent = 'just now';
                     showAlert(data.update_available ? `Update available: v${data.latest}` : 'Already up to date.', data.update_available ? 'warning' : 'success');
                 } else {
                     showAlert(data.error || 'Check failed.', 'danger');
