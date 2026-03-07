@@ -75,6 +75,14 @@ switch ($action) {
             fastcgi_finish_request();
         }
 
+        // Configure upload limits for the newly installed PHP version
+        if ($action === 'install') {
+            $ini = "/etc/php/{$ver}/fpm/php.ini";
+            shell_exec("sudo /bin/sed -i 's/^upload_max_filesize[[:space:]]*=.*/upload_max_filesize = 100M/' " . escapeshellarg($ini) . " 2>&1");
+            shell_exec("sudo /bin/sed -i 's/^post_max_size[[:space:]]*=.*/post_max_size = 100M/' "             . escapeshellarg($ini) . " 2>&1");
+            shell_exec("sudo /bin/systemctl reload php{$ver}-fpm 2>&1");
+        }
+
         // After any purge, apt prerm hooks may disable modules for other PHP versions
         // and can corrupt shared library symbols. Reinstall core packages and
         // re-enable all FPM modules for the panel default to restore a clean state.

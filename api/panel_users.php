@@ -20,20 +20,28 @@ switch ($action) {
     case 'create':
         $username = trim($_POST['username'] ?? '');
         $password = $_POST['password'] ?? '';
+        $role     = $_POST['role'] ?? 'subadmin';
         $domains  = json_decode($_POST['domains'] ?? '[]', true) ?: [];
 
+        if (!in_array($role, ['fulladmin', 'subadmin'], true)) {
+            echo json_encode(['success' => false, 'error' => 'Invalid role.']); break;
+        }
         if (!$username || !$password) {
             echo json_encode(['success' => false, 'error' => 'Username and password required.']); break;
         }
         if (strlen($password) < 8) {
             echo json_encode(['success' => false, 'error' => 'Password must be at least 8 characters.']); break;
         }
+        // Full admins have access to all domains
+        if ($role === 'fulladmin') {
+            $domains = [];
+        }
         $hash = password_hash($password, PASSWORD_DEFAULT);
         try {
             $id = DB::insert('panel_users', [
                 'username'         => $username,
                 'password_hash'    => $hash,
-                'role'             => 'subadmin',
+                'role'             => $role,
                 'assigned_domains' => json_encode($domains),
             ]);
             echo json_encode(['success' => true, 'id' => $id]);
@@ -44,8 +52,22 @@ switch ($action) {
 
     case 'update':
         $id      = (int)($_POST['id'] ?? 0);
+        $role    = $_POST['role'] ?? null;
         $domains = json_decode($_POST['domains'] ?? '[]', true) ?: [];
-        $updates = ['assigned_domains' => json_encode($domains)];
+        $updates = [];
+
+        if ($role !== null) {
+            if (!in_array($role, ['fulladmin', 'subadmin'], true)) {
+                echo json_encode(['success' => false, 'error' => 'Invalid role.']); break;
+            }
+            $updates['role'] = $role;
+            // Full admins don't need domain restrictions
+            if ($role === 'fulladmin') {
+                $domains = [];
+            }
+        }
+        $updates['assigned_domains'] = json_encode($domains);
+
         if (!empty($_POST['password'])) {
             if (strlen($_POST['password']) < 8) {
                 echo json_encode(['success' => false, 'error' => 'Password must be at least 8 characters.']); break;

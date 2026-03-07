@@ -107,11 +107,13 @@ pm.start_servers     = 2
 pm.min_spare_servers = 1
 pm.max_spare_servers = 3
 
-php_admin_value[error_log]      = ${LOG_DIR}/php_error.log
-php_admin_flag[log_errors]      = on
-php_admin_value[upload_tmp_dir] = ${TMP_DIR}
-php_value[session.save_path]    = ${TMP_DIR}
-php_admin_value[open_basedir]   = /home/${DOMAIN}/:/tmp/
+php_admin_value[error_log]           = ${LOG_DIR}/php_error.log
+php_admin_flag[log_errors]           = on
+php_admin_value[upload_tmp_dir]      = ${TMP_DIR}
+php_value[session.save_path]         = ${TMP_DIR}
+php_admin_value[open_basedir]        = /home/${DOMAIN}/:/tmp/
+php_admin_value[upload_max_filesize] = 100M
+php_admin_value[post_max_size]       = 100M
 POOL
 
 # Non-interactive callers (panel API) reload FPM themselves after sending the HTTP
@@ -140,6 +142,7 @@ cat << VHOST > "$VHOST_CONF"
         Options Indexes FollowSymLinks
         AllowOverride All
         Require all granted
+        LimitRequestBody 104857600
     </Directory>
 
     ErrorLog  ${LOG_DIR}/apache_error.log

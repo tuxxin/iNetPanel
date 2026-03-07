@@ -31,6 +31,8 @@ try {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="/assets/css/style.css" rel="stylesheet">
+    <!-- Apply saved theme before first paint to avoid flash -->
+    <script>(function(){var t=localStorage.getItem('inetp_theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');})()</script>
 </head>
 <body>
 
@@ -48,17 +50,22 @@ try {
     </a>
     <?php endif; ?>
 
+    <?php
+    $_headerUser    = class_exists('Auth') ? Auth::user() : null;
+    $_headerName    = htmlspecialchars($_headerUser['username'] ?? 'User');
+    $_headerInitial = strtoupper(substr($_headerUser['username'] ?? 'U', 0, 1));
+    ?>
     <div class="dropdown">
         <a href="#" class="user-dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-            <div class="bg-primary rounded-circle d-flex justify-content-center align-items-center me-2" 
-                 style="width:32px; height:32px; background: var(--active-gradient) !important;">
-                 A
+            <div class="rounded-circle d-flex justify-content-center align-items-center me-2 fw-bold"
+                 style="width:32px; height:32px; background: var(--active-gradient); font-size:0.9rem; color:#fff;">
+                <?= $_headerInitial ?>
             </div>
-            <span class="me-1">Admin</span>
+            <span class="me-1"><?= $_headerName ?></span>
             <i class="fas fa-chevron-down small" style="font-size: 0.7rem;"></i>
         </a>
         <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2">
-            <li><a class="dropdown-item" href="#"><i class="fas fa-user-circle me-2 text-muted"></i> Profile</a></li>
+            <li><a class="dropdown-item" href="/admin/profile"><i class="fas fa-user-circle me-2 text-muted"></i> Profile</a></li>
             <li><a class="dropdown-item" href="/admin/settings"><i class="fas fa-cogs me-2 text-muted"></i> Settings</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item text-danger" href="/logout"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>

@@ -37,11 +37,14 @@ require_once TICORE_PATH . '/Config.php';
 require_once TICORE_PATH . '/Router.php';
 require_once TICORE_PATH . '/DB.php';
 require_once TICORE_PATH . '/Auth.php';
+require_once TICORE_PATH . '/AccountAuth.php';
 require_once TICORE_PATH . '/Shell.php';
 require_once TICORE_PATH . '/View.php';
 require_once TICORE_PATH . '/CloudflareAPI.php';
 require_once TICORE_PATH . '/Version.php';
 require_once TICORE_PATH . '/App.php';
+
+define('ACCOUNT_THEME_PATH', ROOT_PATH . '/themes/account');
 
 // -------------------------------------------------------------------
 // 4. BOOTSTRAP APPLICATION
@@ -188,6 +191,52 @@ $router->add('/admin/panel-users', function () use ($view) {
     $view->renderAdmin('Panel Users', SRC_PATH . '/panel_users.php');
 });
 
+// Profile (all authenticated users)
+$router->add('/admin/profile', function () use ($view) {
+    Auth::check();
+    $view->renderAdmin('My Profile', SRC_PATH . '/profile.php');
+});
+
+// -------------------------------------------------------------------
+// ACCOUNT PORTAL — hosting account holders log in with FTP credentials
+// -------------------------------------------------------------------
+$router->add('/user/login', function () {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $username = trim($_POST['username'] ?? '');
+        $password = $_POST['password'] ?? '';
+        if ($username && $password && AccountAuth::login($username, $password)) {
+            header('Location: /user/dashboard');
+            exit;
+        }
+        $error = 'Invalid credentials. Use your FTP/SSH username and password.';
+    } else {
+        $error = '';
+    }
+    require ACCOUNT_THEME_PATH . '/login.php';
+    exit;
+});
+
+$router->add('/user/dashboard', function () {
+    AccountAuth::check();
+    $GLOBALS['_page_title'] = 'My Account';
+    require ACCOUNT_THEME_PATH . '/header.php';
+    require SRC_PATH . '/account/portal.php';
+    require ACCOUNT_THEME_PATH . '/footer.php';
+    exit;
+});
+
+$router->add('/user/logout', function () {
+    AccountAuth::logout();
+});
+
+// Account Portal API (scoped to the logged-in domain, no admin session required)
+$router->add('/api/account', function () {
+    AccountAuth::check();
+    header('Content-Type: application/json');
+    require API_PATH . '/account.php';
+    exit;
+});
+
 // -------------------------------------------------------------------
 // API ROUTES — session-protected JSON endpoints
 // -------------------------------------------------------------------
@@ -206,6 +255,7 @@ foreach ([
     '/api/update_check'   => 'update_check.php',
     '/api/ssh-keys'       => 'ssh_keys.php',
     '/api/stats'          => 'stats.php',
+    '/api/profile'        => 'profile.php',
 ] as $route => $file) {
     $router->add($route, function () use ($file) {
         Auth::check();

@@ -19,7 +19,10 @@
             $wgEnabled = DB::setting('wg_enabled', '0') === '1';
         }
     } catch (\Throwable) {}
-    $isAdmin = class_exists('Auth') && Auth::isAdmin();
+    $isSuperAdmin  = class_exists('Auth') && Auth::isAdmin();        // real admin only
+    $hasFullAccess = class_exists('Auth') && Auth::hasFullAccess();  // admin + fulladmin
+    $isSubAdmin    = !$hasFullAccess;                                 // subadmin or unauthenticated
+    $isAdmin       = $isSuperAdmin; // kept for legacy references below
     ?>
 
     <div class="sidebar-menu">
@@ -70,7 +73,7 @@
             <i class="fas fa-file-lines"></i> <span>Logs</span>
         </a>
 
-        <?php if ($isAdmin): ?>
+        <?php if ($isSuperAdmin): ?>
         <div class="text-uppercase small text-muted fw-bold px-3 mb-2 mt-4" style="font-size: 0.75rem; letter-spacing: 1px;">Admin</div>
         <a href="/admin/panel-users" class="<?= sidebarActive('panel-users') ?>">
             <i class="fas fa-user-shield"></i> <span>Panel Users</span>

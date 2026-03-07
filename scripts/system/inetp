@@ -16,7 +16,9 @@ case "$COMMAND" in
     backup_accounts)  bash "$SCRIPTS_DIR/backup_accounts.sh"  "$@" ;;
     update)           bash "$SCRIPTS_DIR/inetp-update.sh"     "$@" ;;
     wireguard_setup)  bash "$SCRIPTS_DIR/wireguard_setup.sh"  "$@" ;;
-    wg_peer)          bash "$SCRIPTS_DIR/wg_peer.sh"          "$@" ;;
+    wg_peer)           bash "$SCRIPTS_DIR/wg_peer.sh"           "$@" ;;
+    get_account_hash)  bash "$SCRIPTS_DIR/get_account_hash.sh"  "$@" ;;
+    verify_account)    python3 "$SCRIPTS_DIR/verify_account_credentials.py" "$@" ;;
     list)
         echo -e "${BOLD}Active Accounts:${NC}"
         FOUND=0

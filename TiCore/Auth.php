@@ -121,6 +121,18 @@ class Auth
     }
 
     /**
+     * Returns true for the real admin OR a full-admin panel user.
+     * Use for most access checks. isAdmin() / requireAdmin() remain exclusive
+     * to the superadmin (e.g. Panel Users management).
+     */
+    public static function hasFullAccess(): bool
+    {
+        self::startSession();
+        $role = $_SESSION['role'] ?? '';
+        return $role === 'admin' || $role === 'fulladmin';
+    }
+
+    /**
      * Returns true if the current user may access the given domain.
      * Admins can access everything; sub-admins only see assigned domains.
      */

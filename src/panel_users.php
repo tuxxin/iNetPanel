@@ -14,7 +14,7 @@ try {
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h4 class="mb-0"><i class="fas fa-user-shield me-2"></i>Panel Users</h4>
     <button class="btn btn-primary btn-sm" id="add-user-btn">
-        <i class="fas fa-plus me-1"></i>Add Sub-Admin
+        <i class="fas fa-plus me-1"></i>Add User
     </button>
 </div>
 
@@ -54,7 +54,7 @@ try {
                 <div class="row g-3">
                     <div class="col-md-6" id="username-wrap">
                         <label class="form-label fw-semibold">Username <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="user-username" placeholder="subadmin" autocomplete="off">
+                        <input type="text" class="form-control" id="user-username" placeholder="username" autocomplete="off">
                         <div class="form-text">Lowercase letters, numbers, hyphens only.</div>
                     </div>
                     <div class="col-md-6">
@@ -66,8 +66,27 @@ try {
                         </div>
                     </div>
                     <div class="col-12">
+                        <label class="form-label fw-semibold">Role <span class="text-danger">*</span></label>
+                        <div class="d-flex gap-3 mt-1">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="user-role" id="role-fulladmin" value="fulladmin">
+                                <label class="form-check-label" for="role-fulladmin">
+                                    <span class="fw-semibold">Full Admin</span>
+                                    <div class="form-text mt-0">Full control over the panel. Cannot manage other panel users.</div>
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="user-role" id="role-subadmin" value="subadmin" checked>
+                                <label class="form-check-label" for="role-subadmin">
+                                    <span class="fw-semibold">Sub-user</span>
+                                    <div class="form-text mt-0">Restricted to assigned domains. Sees only Dashboard, Accounts, DNS, and Email.</div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12" id="domain-section">
                         <label class="form-label fw-semibold">Assigned Domains</label>
-                        <div class="form-text mb-2">Select which hosting accounts this sub-admin can manage. Leave empty to grant access to none.</div>
+                        <div class="form-text mb-2">Select which hosting accounts this sub-user can manage. Leave empty to grant access to none.</div>
                         <?php if (empty($domains)): ?>
                         <p class="text-muted small">No hosting accounts exist yet.</p>
                         <?php else: ?>
@@ -139,23 +158,39 @@ function selectAllDomains(state) {
     document.querySelectorAll('.domain-checkbox').forEach(cb => cb.checked = state);
 }
 
+function roleLabel(role) {
+    return role === 'fulladmin' ? '<span class="badge bg-primary">Full Admin</span>'
+                                : '<span class="badge bg-secondary">Sub-user</span>';
+}
+
+function updateDomainSection() {
+    const role = document.querySelector('input[name="user-role"]:checked')?.value;
+    document.getElementById('domain-section').style.display = (role === 'subadmin') ? '' : 'none';
+}
+
+document.querySelectorAll('input[name="user-role"]').forEach(r =>
+    r.addEventListener('change', updateDomainSection)
+);
+
 function loadUsers() {
     fetch('/api/panel-users?action=list')
         .then(r => r.json())
         .then(data => {
             const tbody = document.getElementById('users-tbody');
             if (!data.success || !data.data.length) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No sub-admins yet.</td></tr>'; return;
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No panel users yet.</td></tr>'; return;
             }
             tbody.innerHTML = data.data.map(u => {
                 const domains = Array.isArray(u.assigned_domains) ? u.assigned_domains : [];
-                const domainBadges = domains.length
-                    ? domains.map(d => `<span class="badge bg-primary-subtle text-primary me-1">${d}</span>`).join('')
-                    : '<span class="text-muted small">None</span>';
+                const domainBadges = u.role === 'fulladmin'
+                    ? '<span class="text-muted small">All domains</span>'
+                    : (domains.length
+                        ? domains.map(d => `<span class="badge bg-primary-subtle text-primary me-1">${d}</span>`).join('')
+                        : '<span class="text-muted small">None</span>');
                 const created = u.created_at ? u.created_at.substring(0, 10) : '—';
                 return `<tr>
                     <td class="ps-4 fw-semibold"><i class="fas fa-user me-2 text-muted"></i>${u.username}</td>
-                    <td><span class="badge bg-secondary">${u.role}</span></td>
+                    <td>${roleLabel(u.role)}</td>
                     <td>${domainBadges}</td>
                     <td class="text-muted small">${created}</td>
                     <td class="text-end pe-4">
@@ -168,24 +203,31 @@ function loadUsers() {
 }
 
 function openAddModal() {
-    document.getElementById('user-modal-title').innerHTML = '<i class="fas fa-user-plus me-2"></i>Add Sub-Admin';
+    document.getElementById('user-modal-title').innerHTML = '<i class="fas fa-user-plus me-2"></i>Add Panel User';
     document.getElementById('user-id').value         = '';
     document.getElementById('user-username').value   = '';
     document.getElementById('user-password').value   = '';
     document.getElementById('pass-optional').textContent = '(required)';
     document.getElementById('username-wrap').style.display = '';
+    document.getElementById('role-subadmin').checked = true;
     document.querySelectorAll('.domain-checkbox').forEach(cb => cb.checked = false);
     document.getElementById('user-modal-error').className = 'd-none';
+    updateDomainSection();
     new bootstrap.Modal(document.getElementById('userModal')).show();
 }
 
 function editUser(u) {
-    document.getElementById('user-modal-title').innerHTML = '<i class="fas fa-user-edit me-2"></i>Edit Sub-Admin';
+    document.getElementById('user-modal-title').innerHTML = '<i class="fas fa-user-edit me-2"></i>Edit Panel User';
     document.getElementById('user-id').value       = u.id;
     document.getElementById('user-username').value = u.username;
     document.getElementById('user-password').value = '';
     document.getElementById('pass-optional').textContent = '(leave blank to keep current)';
     document.getElementById('username-wrap').style.display = 'none';
+    // Set role radio
+    const roleVal = u.role || 'subadmin';
+    const roleRadio = document.querySelector(`input[name="user-role"][value="${roleVal}"]`);
+    if (roleRadio) roleRadio.checked = true;
+    updateDomainSection();
     const assigned = Array.isArray(u.assigned_domains) ? u.assigned_domains : [];
     document.querySelectorAll('.domain-checkbox').forEach(cb => {
         cb.checked = assigned.includes(cb.value);
@@ -231,11 +273,14 @@ document.getElementById('save-user-btn').addEventListener('click', function () {
     this.disabled = true;
     errEl.className = 'd-none';
 
+    const role = document.querySelector('input[name="user-role"]:checked')?.value || 'subadmin';
+
     const fd = new FormData();
     fd.append('action',  id ? 'update' : 'create');
     if (id) fd.append('id', id);
     if (!id) fd.append('username', username);
     if (password) fd.append('password', password);
+    fd.append('role', role);
     fd.append('domains', JSON.stringify(domains));
 
     fetch('/api/panel-users', { method: 'POST', body: fd })
@@ -245,7 +290,7 @@ document.getElementById('save-user-btn').addEventListener('click', function () {
             this.disabled = false;
             if (data.success) {
                 bootstrap.Modal.getInstance(document.getElementById('userModal')).hide();
-                showAlert(id ? 'User updated.' : 'Sub-admin created.');
+                showAlert(id ? 'User updated.' : 'User created.');
                 loadUsers();
             } else {
                 errEl.className = 'alert alert-danger mt-3 small py-2';

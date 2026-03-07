@@ -60,7 +60,7 @@ class Shell
         $exitCode  = 0;
         exec($cmd, $output, $exitCode);
 
-        $outputStr = implode("\n", $output);
+        $outputStr = preg_replace('/\x1B\[[0-9;]*[mGKHF]/', '', implode("\n", $output));
         $success   = ($exitCode === 0);
 
         self::log(

@@ -171,7 +171,7 @@ document.getElementById('load-rules-btn').addEventListener('click', function () 
 
 function loadRules() {
     document.getElementById('rules-tbody').innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">Loading…</td></tr>';
-    fetch(`/api/email.php?action=list_rules&zone_id=${encodeURIComponent(currentZoneId)}`)
+    fetch(`/api/email?action=list_rules&zone_id=${encodeURIComponent(currentZoneId)}`)
         .then(r => r.json())
         .then(data => {
             const tbody = document.getElementById('rules-tbody');
@@ -196,7 +196,7 @@ function loadRules() {
 }
 
 function loadAddresses() {
-    fetch(`/api/email.php?action=list_addresses&zone_id=${encodeURIComponent(currentZoneId)}`)
+    fetch(`/api/email?action=list_addresses&zone_id=${encodeURIComponent(currentZoneId)}`)
         .then(r => r.json())
         .then(data => {
             const tbody = document.getElementById('addresses-tbody');
