@@ -68,6 +68,7 @@ switch ($action) {
             if ($port) {
                 DB::query('INSERT OR REPLACE INTO account_ports (domain_name, port) VALUES (?, ?)', [$domain, $port]);
             }
+            $result['port'] = $port;
             // Auto-generate WG peer if enabled
             if (DB::setting('wg_auto_peer', '0') === '1') {
                 Shell::run('wg_peer', ['--add', '--name' => $domain]);
