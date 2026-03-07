@@ -1,0 +1,51 @@
+#!/bin/bash
+# ==============================================================================
+# inetp — Server Account Manager
+# Usage: inetp <command>
+# ==============================================================================
+SCRIPTS_DIR="/root/scripts"
+BOLD='\033[1m'; GREEN='\033[1;32m'; NC='\033[0m'
+
+COMMAND="$1"; shift
+
+case "$COMMAND" in
+    create_account)   bash "$SCRIPTS_DIR/create_account.sh"   "$@" ;;
+    delete_account)   bash "$SCRIPTS_DIR/delete_account.sh"   "$@" ;;
+    suspend_account)  bash "$SCRIPTS_DIR/suspend_account.sh"  "$@" ;;
+    optimize_images)  bash "$SCRIPTS_DIR/optimize_images.sh"  "$@" ;;
+    backup_accounts)  bash "$SCRIPTS_DIR/backup_accounts.sh"  "$@" ;;
+    update)           bash "$SCRIPTS_DIR/inetp-update.sh"     "$@" ;;
+    wireguard_setup)  bash "$SCRIPTS_DIR/wireguard_setup.sh"  "$@" ;;
+    wg_peer)          bash "$SCRIPTS_DIR/wg_peer.sh"          "$@" ;;
+    list)
+        echo -e "${BOLD}Active Accounts:${NC}"
+        FOUND=0
+        for conf in /etc/apache2/sites-available/*.conf; do
+            NAME=$(basename "$conf" .conf)
+            [[ "$NAME" == "000-default" || "$NAME" == "phpmyadmin" ]] && continue
+            PORT=$(grep '<VirtualHost' "$conf" | grep -oP '(?<=:)\d+')
+            STATUS="active"
+            [ -L "/etc/apache2/sites-enabled/${NAME}.conf" ] || STATUS="suspended"
+            echo -e "  ${GREEN}${NAME}${NC}  →  port ${PORT}  [${STATUS}]"
+            FOUND=$((FOUND + 1))
+        done
+        [ "$FOUND" -eq 0 ] && echo "  No accounts found."
+        ;;
+    *)
+        echo -e "${BOLD}inetp — Server Account Manager${NC}"
+        echo ""
+        echo "  Usage: inetp <command>"
+        echo ""
+        echo "  Commands:"
+        echo -e "    ${GREEN}create_account${NC}    Create a new hosting account"
+        echo -e "    ${GREEN}delete_account${NC}    Delete an account and all its data"
+        echo -e "    ${GREEN}suspend_account${NC}   Suspend or resume an account"
+        echo -e "    ${GREEN}optimize_images${NC}   Optimize images in a target directory"
+        echo -e "    ${GREEN}backup_accounts${NC}   Backup all accounts to /backup"
+        echo -e "    ${GREEN}update${NC}            Run system package update"
+        echo -e "    ${GREEN}wireguard_setup${NC}   Set up WireGuard VPN server"
+        echo -e "    ${GREEN}wg_peer${NC}           Manage WireGuard peers"
+        echo -e "    ${GREEN}list${NC}              List all active accounts and ports"
+        echo ""
+        ;;
+esac
