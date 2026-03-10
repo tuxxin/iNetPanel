@@ -382,6 +382,11 @@ switch ($action) {
         }
 
         echo json_encode(shellResult($result));
+        // Flush response to client, then reload FPM to activate the new pool socket.
+        // Must happen AFTER response is sent — reloading FPM recycles the panel worker too.
+        if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+        $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
+        exec("sudo systemctl reload " . escapeshellarg($fpmService) . " 2>/dev/null");
         break;
 
     case 'add_domain':
@@ -470,6 +475,10 @@ switch ($action) {
         }
 
         echo json_encode(shellResult($result));
+        // Flush response to client, then reload FPM to activate the new pool socket.
+        if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+        $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
+        exec("sudo systemctl reload " . escapeshellarg($fpmService) . " 2>/dev/null");
         break;
 
     case 'delete':
