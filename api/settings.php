@@ -208,7 +208,14 @@ switch ($action) {
             }
         }
         DB::saveSetting('server_hostname', $hostname);
-        echo json_encode(['success' => true]);
+
+        // Auto-issue SSL for panel services (LE first, self-signed fallback)
+        $sslIssued = false;
+        if (strpos($hostname, '.') !== false) {
+            $result = Shell::run('panel_ssl', [$hostname]);
+            $sslIssued = $result['success'];
+        }
+        echo json_encode(['success' => true, 'ssl_issued' => $sslIssued]);
         break;
 
     case 'reboot':

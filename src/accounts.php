@@ -42,7 +42,7 @@ $isAdmin = Auth::hasFullAccess();
     </div>
 </div>
 
-<!-- Delete Modal -->
+<!-- Delete Confirmation Modal -->
 <div class="modal fade" id="deleteModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -61,10 +61,26 @@ $isAdmin = Auth::hasFullAccess();
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-danger" id="confirm-delete-btn">
-                    <span class="spinner-border spinner-border-sm d-none me-1" id="delete-spinner"></span>
-                    Delete
-                </button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-btn">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Progress Modal -->
+<div class="modal fade" id="deleteProgressModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-body p-4 text-center">
+                <div id="delete-progress-icon">
+                    <div class="spinner-border text-danger mb-3"></div>
+                </div>
+                <h6 class="mb-2">Deleting Domain</h6>
+                <p class="small text-muted mb-3" id="delete-progress-stage">Preparing...</p>
+                <div class="progress" style="height:6px">
+                    <div class="progress-bar bg-danger progress-bar-striped progress-bar-animated" id="delete-progress-bar" style="width:5%"></div>
+                </div>
+                <div class="small text-muted mt-2" id="delete-progress-pct">5%</div>
             </div>
         </div>
     </div>
@@ -222,6 +238,8 @@ function loadAccounts() {
                     : `<button class="btn btn-sm btn-outline-warning me-1" onclick="suspendAccount('${a.domain_name}','suspend')" title="Suspend"><i class="fas fa-pause"></i></button>`;
                 const deleteBtn  = `<button class="btn btn-sm btn-outline-danger" onclick="confirmDelete('${a.domain_name}')" title="Delete"><i class="fas fa-trash"></i></button>`;
                 const sshKeysBtn = `<button class="btn btn-sm btn-outline-secondary me-1" onclick="openSshKeys('${username}')" title="SSH Keys"><i class="fas fa-key"></i></button>`;
+                const addDomainBtn = `<a class="btn btn-sm btn-outline-primary me-1" href="/admin/add-domain?user=${encodeURIComponent(username)}" title="Add domain to ${username}"><i class="fas fa-plus-circle"></i></a>`;
+                const loginAsBtn = `<button class="btn btn-sm btn-outline-info me-1" onclick="loginAsUser('${username}')" title="Login as ${username}"><i class="fas fa-sign-in-alt"></i></button>`;
                 return `<tr class="${rowClass}">
                     <td class="ps-4"><span class="badge bg-light text-dark border">${username}</span></td>
                     <td class="fw-semibold"><a href="https://${a.domain_name}" target="_blank" class="text-decoration-none">${a.domain_name} <i class="fas fa-external-link-alt ms-1" style="font-size:.7em;opacity:.5"></i></a></td>
@@ -230,7 +248,7 @@ function loadAccounts() {
                     <td>${a.php_version ?? '8.4'}</td>
                     <td>${badge}</td>
                     <td>${wgBadge}</td>
-                    <td class="text-end pe-4">${sshKeysBtn}${suspendBtn}${deleteBtn}</td>
+                    <td class="text-end pe-4">${loginAsBtn}${addDomainBtn}${sshKeysBtn}${suspendBtn}${deleteBtn}</td>
                 </tr>`;
             }).join('');
         })
@@ -246,29 +264,83 @@ function confirmDelete(domain) {
     new bootstrap.Modal(document.getElementById('deleteModal')).show();
 }
 
+let deleteProgressModal = null;
+function getDeleteProgressModal() {
+    if (!deleteProgressModal) deleteProgressModal = new bootstrap.Modal(document.getElementById('deleteProgressModal'));
+    return deleteProgressModal;
+}
+
+function setDeleteProgress(pct, stage) {
+    document.getElementById('delete-progress-bar').style.width = pct + '%';
+    document.getElementById('delete-progress-pct').textContent = pct + '%';
+    if (stage) document.getElementById('delete-progress-stage').textContent = stage;
+}
+
 document.getElementById('confirm-delete-btn').addEventListener('click', function () {
     if (!pendingDeleteDomain) return;
-    const spinner = document.getElementById('delete-spinner');
-    spinner.classList.remove('d-none');
-    this.disabled = true;
     const noBackup = !document.getElementById('delete-backup').checked;
-    const fd = new FormData();
-    fd.append('action', 'delete');
-    fd.append('domain', pendingDeleteDomain);
-    if (noBackup) fd.append('no_backup', '1');
-    fetch('/api/accounts', { method: 'POST', body: fd })
-        .then(r => r.json())
-        .then(data => {
-            bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
-            spinner.classList.add('d-none');
-            this.disabled = false;
-            if (data.success) {
-                showToast(`Account '${pendingDeleteDomain}' deleted.`);
-                loadAccounts();
-            } else {
-                showToast(data.error || 'Delete failed.', 'danger');
-            }
-        });
+
+    // Close confirmation modal, show progress modal
+    bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
+    setTimeout(() => {
+        setDeleteProgress(5, 'Preparing...');
+        document.getElementById('delete-progress-icon').innerHTML = '<div class="spinner-border text-danger mb-3"></div>';
+        getDeleteProgressModal().show();
+
+        // Animate progress stages
+        const stages = noBackup ? [
+            { pct: 15,  text: 'Disabling Apache vhost...',     delay: 500 },
+            { pct: 35,  text: 'Removing PHP-FPM pool...',      delay: 2000 },
+            { pct: 55,  text: 'Revoking SSL certificate...',   delay: 4000 },
+            { pct: 70,  text: 'Dropping database...',          delay: 7000 },
+            { pct: 85,  text: 'Cleaning up files...',          delay: 9000 },
+            { pct: 92,  text: 'Removing Cloudflare routes...', delay: 11000 },
+        ] : [
+            { pct: 10,  text: 'Creating backup...',            delay: 500 },
+            { pct: 25,  text: 'Disabling Apache vhost...',     delay: 5000 },
+            { pct: 40,  text: 'Removing PHP-FPM pool...',      delay: 8000 },
+            { pct: 55,  text: 'Revoking SSL certificate...',   delay: 10000 },
+            { pct: 70,  text: 'Dropping database...',          delay: 15000 },
+            { pct: 85,  text: 'Cleaning up files...',          delay: 18000 },
+            { pct: 92,  text: 'Removing Cloudflare routes...', delay: 20000 },
+        ];
+        const timers = stages.map(s => setTimeout(() => setDeleteProgress(s.pct, s.text), s.delay));
+
+        const fd = new FormData();
+        fd.append('action', 'delete');
+        fd.append('domain', pendingDeleteDomain);
+        if (noBackup) fd.append('no_backup', '1');
+        fetch('/api/accounts', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(data => {
+                timers.forEach(clearTimeout);
+                if (data.success) {
+                    setDeleteProgress(100, 'Done!');
+                    document.getElementById('delete-progress-icon').innerHTML =
+                        '<i class="fas fa-check-circle text-success mb-3" style="font-size:2.5rem"></i>';
+                    setTimeout(() => {
+                        getDeleteProgressModal().hide();
+                        showToast(`Account '${pendingDeleteDomain}' deleted.`);
+                        loadAccounts();
+                    }, 1200);
+                } else {
+                    setDeleteProgress(0, data.error || 'Delete failed.');
+                    document.getElementById('delete-progress-icon').innerHTML =
+                        '<i class="fas fa-times-circle text-danger mb-3" style="font-size:2.5rem"></i>';
+                    setTimeout(() => {
+                        getDeleteProgressModal().hide();
+                        showToast(data.error || 'Delete failed.', 'danger');
+                    }, 2500);
+                }
+            })
+            .catch(() => {
+                timers.forEach(clearTimeout);
+                setDeleteProgress(0, 'Connection error.');
+                document.getElementById('delete-progress-icon').innerHTML =
+                    '<i class="fas fa-times-circle text-danger mb-3" style="font-size:2.5rem"></i>';
+                setTimeout(() => getDeleteProgressModal().hide(), 2500);
+            });
+    }, 300);
 });
 
 function suspendAccount(domain, action) {
@@ -317,6 +389,19 @@ document.getElementById('wg-download-btn').addEventListener('click', function ()
     a.download = wgConfigName + '.conf';
     a.click();
 });
+
+function loginAsUser(username) {
+    fetch(`/api/accounts?action=auto_login_token&username=${encodeURIComponent(username)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.token) {
+                window.open(`/user/auto-login?token=${encodeURIComponent(data.token)}`, '_blank');
+            } else {
+                showToast(data.error || 'Failed to generate login token.', 'danger');
+            }
+        })
+        .catch(() => showToast('Failed to generate login token.', 'danger'));
+}
 
 document.addEventListener('DOMContentLoaded', function () {
     loadAccounts();

@@ -116,7 +116,8 @@ php_admin_value[upload_max_filesize] = 100M
 php_admin_value[post_max_size]       = 100M
 POOL
 
-systemctl reload "php${PHP_VER}-fpm" 2>/dev/null
+# FPM reload is handled by the calling PHP code after all API calls complete
+# (shell script no longer reloads FPM to avoid killing the PHP worker mid-request)
 
 # ----------------------------------------------------------------
 # SSL Certificate
@@ -143,6 +144,9 @@ cat << VHOST > "$VHOST_CONF"
     SSLEngine on
     SSLCertificateFile    ${SSL_CERT}
     SSLCertificateKeyFile ${SSL_KEY}
+
+    # Redirect plain HTTP requests to HTTPS (when someone hits the port without TLS)
+    ErrorDocument 400 "<!DOCTYPE html><html><head><script>location.replace(location.href.replace('http:','https:'))</script></head><body>Redirecting to HTTPS...</body></html>"
 
     <FilesMatch "\.php\$">
         SetHandler "proxy:unix:${FPM_SOCK}|fcgi://localhost"

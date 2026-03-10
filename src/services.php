@@ -6,12 +6,29 @@ $isAdmin = Auth::hasFullAccess();
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h4 class="mb-0"><i class="fas fa-server me-2"></i>Services</h4>
-    <button class="btn btn-outline-secondary btn-sm" id="refresh-btn">
-        <i class="fas fa-sync-alt me-1"></i>Refresh
-    </button>
+    <div>
+        <button class="btn btn-outline-secondary btn-sm" id="refresh-btn">
+            <i class="fas fa-sync-alt me-1"></i>Refresh
+        </button>
+    </div>
 </div>
 
 <div id="services-alert" class="d-none mb-3"></div>
+
+<!-- Service Monitor Card -->
+<?php if ($isAdmin): ?>
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body d-flex justify-content-between align-items-center">
+        <div>
+            <h6 class="mb-1 fw-bold"><i class="fas fa-heartbeat me-2 text-danger"></i>Service Monitor</h6>
+            <div class="text-muted small">Automatically restarts stopped services every 2 minutes. Events are logged to Admin Logs.</div>
+        </div>
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="monitor-toggle" style="width:3em;height:1.5em;cursor:pointer">
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <div class="card border-0 shadow-sm">
     <div class="table-responsive">
@@ -71,6 +88,11 @@ function loadServices() {
             const tbody = document.getElementById('services-tbody');
             if (!data.success) {
                 tbody.innerHTML = '<tr><td colspan="3" class="text-center text-danger py-3">Failed to load services.</td></tr>'; return;
+            }
+            // Update monitor toggle state
+            const monToggle = document.getElementById('monitor-toggle');
+            if (monToggle && data.monitorEnabled !== undefined) {
+                monToggle.checked = data.monitorEnabled;
             }
             tbody.innerHTML = data.data.map(s => {
                 const badgeClass = s.status === 'active' ? 'bg-success' : (s.status === 'missing' ? 'bg-danger' : 'bg-secondary');
@@ -145,6 +167,31 @@ document.getElementById('svc-confirm-btn').addEventListener('click', function ()
 });
 
 document.getElementById('refresh-btn').addEventListener('click', loadServices);
+
+// Monitor toggle
+const monitorToggle = document.getElementById('monitor-toggle');
+if (monitorToggle) {
+    monitorToggle.addEventListener('change', function() {
+        const enabled = this.checked ? '1' : '0';
+        const fd = new FormData();
+        fd.append('action', 'toggle_monitor');
+        fd.append('enabled', enabled);
+        fetch('/api/services', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('Service Monitor ' + (data.monitorEnabled ? 'enabled' : 'disabled') + '.');
+                } else {
+                    showToast(data.error || 'Failed to toggle monitor.', 'danger');
+                    monitorToggle.checked = !monitorToggle.checked;
+                }
+            })
+            .catch(() => {
+                showToast('Request failed.', 'danger');
+                monitorToggle.checked = !monitorToggle.checked;
+            });
+    });
+}
 
 document.addEventListener('DOMContentLoaded', function () {
     loadServices();

@@ -33,7 +33,8 @@ switch ($action) {
                 'locked' => !empty($svc['locked']),
             ];
         }
-        echo json_encode(['success' => true, 'data' => $data]);
+        $monitorEnabled = DB::setting('service_monitor', '1') === '1';
+        echo json_encode(['success' => true, 'data' => $data, 'monitorEnabled' => $monitorEnabled]);
         break;
 
     case 'restart':
@@ -48,6 +49,23 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => "Service '{$service}' is managed by iNetPanel and cannot be controlled here."]); break;
         }
         $result = Shell::systemctl($action, $service);
+        echo json_encode($result);
+        break;
+
+    case 'toggle_monitor':
+        Auth::requireAdmin();
+        $enabled = ($_POST['enabled'] ?? '') === '1';
+        DB::saveSetting('service_monitor', $enabled ? '1' : '0');
+
+        // Enable/disable the cron job via the bash script (runs as root via inetp)
+        Shell::run('service_monitor', [$enabled ? 'enable' : 'disable']);
+
+        echo json_encode(['success' => true, 'monitorEnabled' => $enabled]);
+        break;
+
+    case 'run_monitor':
+        Auth::requireAdmin();
+        $result = Shell::run('service_monitor', ['run']);
         echo json_encode($result);
         break;
 

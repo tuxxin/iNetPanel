@@ -24,6 +24,8 @@ class Shell
         'wg_peer',
         'manage_ssh_keys',
         'ssl_manage',
+        'panel_ssl',
+        'service_monitor',
         'list',
     ];
 

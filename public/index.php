@@ -141,6 +141,10 @@ $router->add('/admin/add-account', function () use ($view) {
     Auth::check();
     $view->renderAdmin('Add Account', SRC_PATH . '/add_account.php');
 });
+$router->add('/admin/add-domain', function () use ($view) {
+    Auth::check();
+    $view->renderAdmin('Add Domain', SRC_PATH . '/add_domain.php');
+});
 $router->add('/admin/accounts', function () use ($view) {
     Auth::check();
     $view->renderAdmin('List Accounts', SRC_PATH . '/accounts.php');
@@ -246,6 +250,16 @@ $router->add('/user/dashboard', function () {
     require SRC_PATH . '/account/portal.php';
     require ACCOUNT_THEME_PATH . '/footer.php';
     exit;
+});
+
+$router->add('/user/auto-login', function () {
+    $token = trim($_GET['token'] ?? '');
+    AccountAuth::autoLogin($token);
+});
+
+$router->add('/user/phpmyadmin', function () {
+    AccountAuth::check();
+    AccountAuth::phpMyAdminSignOn();
 });
 
 $router->add('/user/logout', function () {

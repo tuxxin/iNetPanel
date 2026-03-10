@@ -381,13 +381,103 @@ switch ($action) {
             if ($warnings) $result['warnings'] = $warnings;
         }
 
+        // Reload FPM after all work is done (deferred so the response gets sent first)
+        $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
+        shell_exec("(sleep 2 && systemctl reload " . escapeshellarg($fpmService) . ") > /dev/null 2>&1 &");
+
         echo json_encode(shellResult($result));
-        if (function_exists('fastcgi_finish_request')) {
-            fastcgi_finish_request();
+        break;
+
+    case 'add_domain':
+        Auth::requireAdmin();
+        $domain   = trim($_POST['domain']   ?? '');
+        $username = trim($_POST['username'] ?? '');
+        $phpVer   = trim($_POST['php_version'] ?? '8.4');
+
+        if (!$domain || !$username) {
+            echo json_encode(['success' => false, 'error' => 'Domain and username are required.']);
+            break;
         }
+
+        if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9\-\.]{1,61}[a-zA-Z0-9]$/', $domain)) {
+            echo json_encode(['success' => false, 'error' => 'Invalid domain name.']);
+            break;
+        }
+
+        // Verify user exists
+        $existingUser = DB::fetchOne('SELECT id FROM hosting_users WHERE username = ?', [$username]);
+        if (!$existingUser) {
+            echo json_encode(['success' => false, 'error' => "Hosting user '{$username}' not found."]);
+            break;
+        }
+
+        $skipCf   = ($_POST['skip_cf'] ?? '0') === '1';
+        $cfActive = DB::setting('cf_enabled', '0') === '1' && !$skipCf;
+
+        // Pre-flight: check if domain is already routed via CF tunnel
+        if ($cfActive) {
+            $tunnelId  = DB::setting('cf_tunnel_id',  '');
+            $accountId = DB::setting('cf_account_id', '');
+            if ($tunnelId && $accountId) {
+                try {
+                    $cf = new CloudflareAPI();
+                    $routed = $cf->getRoutedHostnames($accountId, $tunnelId);
+                    if (isset($routed[$domain])) {
+                        echo json_encode(['success' => false, 'error' => "Domain '{$domain}' is already routed on this Cloudflare tunnel."]);
+                        break;
+                    }
+                } catch (Throwable) {}
+            }
+        }
+
+        // Add domain to existing user
+        $addArgs = ['--username' => $username, '--domain' => $domain, '--php-version' => $phpVer];
+        if (!$cfActive) $addArgs[] = '--no-cf';
+        $result = Shell::run('add_domain', $addArgs);
+
         if ($result['success']) {
-            shell_exec("sudo /bin/systemctl reload php{$phpVer}-fpm 2>&1");
+            $port = null;
+            if (preg_match('/port[:\s]+(\d+)/i', $result['output'], $m)) {
+                $port = (int)$m[1];
+            }
+            $docRoot = "/home/{$username}/{$domain}/www";
+            DB::query(
+                'INSERT OR IGNORE INTO domains (hosting_user_id, domain_name, document_root, php_version, port, status, created_at)
+                 VALUES (?, ?, ?, ?, ?, \'active\', datetime(\'now\'))',
+                [$existingUser['id'], $domain, $docRoot, $phpVer, $port]
+            );
+            if ($port) {
+                DB::query('INSERT OR REPLACE INTO account_ports (domain_name, port) VALUES (?, ?)', [$domain, $port]);
+            }
+            $result['port'] = $port;
+
+            $warnings = [];
+            if ($port && $cfActive) {
+                $tunnelId  = DB::setting('cf_tunnel_id',  '');
+                $accountId = DB::setting('cf_account_id', '');
+                if ($tunnelId && $accountId) {
+                    try {
+                        if (!isset($cf)) $cf = new CloudflareAPI();
+                        $cfResult = $cf->addTunnelHostname($accountId, $tunnelId, $domain, "https://localhost:{$port}");
+                        if (!empty($cfResult['dns_skipped'])) {
+                            $warnings[] = "Domain added to tunnel but DNS CNAME was not created — the zone for '{$domain}' is not in your Cloudflare account.";
+                        }
+                    } catch (Throwable $e) {
+                        $warnings[] = "Cloudflare tunnel setup failed: " . $e->getMessage();
+                    }
+                }
+            } elseif ($port && !$cfActive) {
+                shell_exec("sudo /usr/bin/firewall-cmd --permanent --add-port={$port}/tcp 2>&1");
+                shell_exec("sudo /usr/bin/firewall-cmd --reload 2>&1");
+            }
+            if ($warnings) $result['warnings'] = $warnings;
         }
+
+        // Reload FPM after all work is done
+        $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
+        shell_exec("(sleep 2 && systemctl reload " . escapeshellarg($fpmService) . ") > /dev/null 2>&1 &");
+
+        echo json_encode(shellResult($result));
         break;
 
     case 'delete':
@@ -566,8 +656,8 @@ switch ($action) {
         $force     = ($_GET['force'] ?? '0') === '1';
         $cacheTs   = (int)DB::setting('cf_domain_cache_ts', '0');
 
-        // Return cached data if fresh (5 min) and not forced
-        if (!$force && $cacheTs && (time() - $cacheTs < 300)) {
+        // Return cached data if fresh (30 min) and not forced
+        if (!$force && $cacheTs && (time() - $cacheTs < 1800)) {
             $cached = DB::setting('cf_domain_cache_json', '');
             if ($cached) {
                 echo $cached;
@@ -575,50 +665,61 @@ switch ($action) {
             }
         }
 
-        $cf = new CloudflareAPI();
+        try {
+            $cf = new CloudflareAPI();
 
-        // Get zones
-        $zonesRaw = $cf->listZones();
-        $zones = [];
-        foreach ($zonesRaw['result'] ?? [] as $z) {
-            $zones[] = ['id' => $z['id'], 'name' => $z['name'], 'status' => $z['status'] ?? 'unknown'];
-        }
+            // Get zones
+            $zonesRaw = $cf->listZones();
+            $zones = [];
+            foreach ($zonesRaw['result'] ?? [] as $z) {
+                $zones[] = ['id' => $z['id'], 'name' => $z['name'], 'status' => $z['status'] ?? 'unknown'];
+            }
 
-        // Get routed hostnames from our tunnel
-        $routedHostnames = [];
-        if ($tunnelId && $accountId) {
-            $routedHostnames = $cf->getRoutedHostnames($accountId, $tunnelId);
-        }
+            // Get routed hostnames from our tunnel
+            $routedHostnames = [];
+            if ($tunnelId && $accountId) {
+                $routedHostnames = $cf->getRoutedHostnames($accountId, $tunnelId);
+            }
 
-        // Check CNAME targets per zone for external tunnel conflicts
-        foreach ($zones as &$z) {
-            $cnames = $cf->getZoneCnameTargets($z['id']);
-            $z['routed']   = isset($routedHostnames[$z['name']]);
-            $z['available'] = !$z['routed'];
-            // Check if root domain has a CNAME to another tunnel
-            if (isset($cnames[$z['name']]) && str_contains($cnames[$z['name']], 'cfargotunnel.com')
-                && !str_contains($cnames[$z['name']], $tunnelId)) {
-                $z['cname_conflict'] = true;
-                $z['available'] = false;
-            } else {
+            // Mark routed zones (CNAME conflict check is done on-demand per zone)
+            foreach ($zones as &$z) {
+                $z['routed']         = isset($routedHostnames[$z['name']]);
+                $z['available']      = !$z['routed'];
                 $z['cname_conflict'] = false;
             }
-            $z['cnames'] = $cnames;
+            unset($z);
+
+            $response = json_encode([
+                'success'           => true,
+                'cf_enabled'        => true,
+                'tunnel_id'         => $tunnelId,
+                'zones'             => $zones,
+                'routed_hostnames'  => array_keys($routedHostnames),
+            ]);
+
+            DB::saveSetting('cf_domain_cache_json', $response);
+            DB::saveSetting('cf_domain_cache_ts', (string)time());
+
+            echo $response;
+        } catch (Throwable $e) {
+            echo json_encode(['success' => false, 'error' => 'Cloudflare API error: ' . $e->getMessage()]);
         }
-        unset($z);
+        break;
 
-        $response = json_encode([
-            'success'           => true,
-            'cf_enabled'        => true,
-            'tunnel_id'         => $tunnelId,
-            'zones'             => $zones,
-            'routed_hostnames'  => array_keys($routedHostnames),
-        ]);
-
-        DB::saveSetting('cf_domain_cache_json', $response);
-        DB::saveSetting('cf_domain_cache_ts', (string)time());
-
-        echo $response;
+    case 'auto_login_token':
+        Auth::requireAdmin();
+        $username = trim($_GET['username'] ?? '');
+        if (!$username) {
+            echo json_encode(['success' => false, 'error' => 'Username required.']);
+            break;
+        }
+        $user = DB::fetchOne('SELECT id FROM hosting_users WHERE username = ?', [$username]);
+        if (!$user) {
+            echo json_encode(['success' => false, 'error' => 'Hosting user not found.']);
+            break;
+        }
+        $token = AccountAuth::createAutoLoginToken($username);
+        echo json_encode(['success' => true, 'token' => $token]);
         break;
 
     case 'check_domain':
@@ -626,6 +727,14 @@ switch ($action) {
         $domain = trim($_GET['domain'] ?? '');
         if (!$domain) {
             echo json_encode(['success' => false, 'error' => 'Domain required.']);
+            break;
+        }
+
+        // Check if already hosted on this server
+        $existing = DB::fetchOne('SELECT id FROM domains WHERE domain_name = ?', [$domain]);
+        $vhostExists = file_exists("/etc/apache2/sites-available/{$domain}.conf");
+        if ($existing || $vhostExists) {
+            echo json_encode(['success' => true, 'available' => false, 'reason' => 'Domain already exists on this server.', 'cf_managed' => false]);
             break;
         }
 
@@ -669,6 +778,7 @@ switch ($action) {
 
         echo json_encode(['success' => true, 'available' => true, 'cf_managed' => true]);
         break;
+
 
     // =========================================================================
     default:

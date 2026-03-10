@@ -112,6 +112,9 @@ case "$COMMAND" in
     wg_peer)             bash "$SCRIPTS_DIR/wg_peer.sh"             "$@" ;;
     firewall)          bash "$SCRIPTS_DIR/firewall_manage.sh"   "$@" ;;
     ssl_manage)        bash "$SCRIPTS_DIR/ssl_manage.sh"       "$@" ;;
+    fix_permissions)   bash "$SCRIPTS_DIR/fix_permissions.sh"   "$@" ;;
+    panel_ssl)         bash "$SCRIPTS_DIR/panel_ssl.sh"         "$@" ;;
+    service_monitor)   bash "$SCRIPTS_DIR/service_monitor.sh"   "$@" ;;
     get_account_hash)  bash "$SCRIPTS_DIR/get_account_hash.sh"  "$@" ;;
     verify_account)    python3 "$SCRIPTS_DIR/verify_account_credentials.py" "$@" ;;
     list)
@@ -165,6 +168,7 @@ case "$COMMAND" in
         echo -e "    ${GREEN}wireguard_uninstall${NC} Remove WireGuard and restore public access"
         echo -e "    ${GREEN}wg_peer${NC}           Manage WireGuard peers"
         echo -e "    ${GREEN}firewall${NC}          Firewall management (status, flush, ban, unban)"
+        echo -e "    ${GREEN}fix_permissions${NC}   Reset file/directory permissions for a user"
         echo -e "    ${GREEN}ssl_manage${NC}        SSL certificate management (issue, revoke, renew, status)"
         echo -e "    ${GREEN}list${NC}              List all active accounts and ports"
         echo -e "    ${GREEN}-v${NC}                Show version and system info"

@@ -39,7 +39,7 @@ echo -e "${BOLD}--- Removing Domain: ${DOMAIN} from ${USERNAME} ---${NC}"
 # ----------------------------------------------------------------
 if [ "$NO_BACKUP" -eq 0 ] && [ -d "/home/$USERNAME/$DOMAIN" ]; then
     echo -e "${YELLOW}Backing up domain files...${NC}"
-    bash "$SCRIPTS_DIR/backup_accounts.sh" --single "$USERNAME" 2>/dev/null
+    timeout 120 bash "$SCRIPTS_DIR/backup_accounts.sh" --single "$USERNAME" 2>/dev/null || echo -e "${YELLOW}Backup timed out or failed, continuing with deletion.${NC}"
 fi
 
 # ----------------------------------------------------------------
@@ -64,7 +64,7 @@ for PHP_VER in 8.5 8.4 8.3 8.2 8.1 8.0 7.4 7.3 7.2 7.1 7.0 5.6; do
     POOL_CONF="/etc/php/${PHP_VER}/fpm/pool.d/${POOL_NAME}.conf"
     if [ -f "$POOL_CONF" ]; then
         rm -f "$POOL_CONF"
-        systemctl reload "php${PHP_VER}-fpm" 2>/dev/null
+        (sleep 2 && systemctl reload "php${PHP_VER}-fpm") > /dev/null 2>&1 &
         break
     fi
 done
@@ -73,7 +73,7 @@ for PHP_VER in 8.5 8.4 8.3 8.2 8.1 8.0 7.4 7.3 7.2 7.1 7.0 5.6; do
     POOL_CONF="/etc/php/${PHP_VER}/fpm/pool.d/${DOMAIN}.conf"
     if [ -f "$POOL_CONF" ]; then
         rm -f "$POOL_CONF"
-        systemctl reload "php${PHP_VER}-fpm" 2>/dev/null
+        (sleep 2 && systemctl reload "php${PHP_VER}-fpm") > /dev/null 2>&1 &
         break
     fi
 done
@@ -81,7 +81,7 @@ done
 # ----------------------------------------------------------------
 # SSL Certificate
 # ----------------------------------------------------------------
-bash "$SCRIPTS_DIR/ssl_manage.sh" revoke "$DOMAIN" 2>/dev/null
+timeout 60 bash "$SCRIPTS_DIR/ssl_manage.sh" revoke "$DOMAIN" 2>/dev/null || echo -e "${YELLOW}SSL revoke timed out, continuing.${NC}"
 
 # ----------------------------------------------------------------
 # MariaDB — drop domain database (keep the user for other domains)

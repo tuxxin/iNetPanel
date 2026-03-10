@@ -34,11 +34,20 @@
         <a href="/admin/add-account" class="<?= sidebarActive('add-account') ?>">
             <i class="fas fa-globe"></i> <span>Add Account</span>
         </a>
-        <a href="/admin/accounts" class="<?= sidebarActive('accounts') && !sidebarActive('add-account') ? 'active' : '' ?>">
+        <a href="/admin/add-domain" class="<?= sidebarActive('add-domain') ?>">
+            <i class="fas fa-plus-circle"></i> <span>Add Domain</span>
+        </a>
+        <a href="/admin/accounts" class="<?= sidebarActive('accounts') && !sidebarActive('add-account') && !sidebarActive('add-domain') ? 'active' : '' ?>">
             <i class="fas fa-users"></i> <span>List Accounts</span>
         </a>
 
-        <a href="http://<?= htmlspecialchars($_SERVER['SERVER_NAME']) ?>:8888" target="_blank">
+        <?php
+        $pmaHostname = DB::setting('server_hostname', '');
+        $pmaCertFile = $pmaHostname ? "/etc/letsencrypt/live/{$pmaHostname}/fullchain.pem" : '';
+        $pmaHasSSL = $pmaCertFile && (file_exists($pmaCertFile) || glob("/etc/letsencrypt/live/{$pmaHostname}-*/fullchain.pem"));
+        $pmaUrl = $pmaHasSSL ? "https://{$pmaHostname}:8443" : "http://" . htmlspecialchars($_SERVER['SERVER_NAME']) . ":8888";
+        ?>
+        <a href="<?= $pmaUrl ?>" target="_blank">
             <i class="fas fa-database"></i> <span>phpMyAdmin</span>
         </a>
 

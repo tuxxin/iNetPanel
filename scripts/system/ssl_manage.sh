@@ -102,6 +102,8 @@ case "$COMMAND" in
             2>&1
 
         if [ $? -eq 0 ] && [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
+            # Ensure www-data can read cert files (for SSL status page)
+            chmod 755 /etc/letsencrypt/archive /etc/letsencrypt/live 2>/dev/null
             echo -e "${GREEN}SSL certificate issued successfully for ${DOMAIN}.${NC}"
         else
             echo -e "${RED}Let's Encrypt certificate issuance failed. Generating self-signed fallback.${NC}"
@@ -117,9 +119,9 @@ case "$COMMAND" in
             # Check if it's a real LE cert or self-signed
             ISSUER=$(openssl x509 -issuer -noout -in "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" 2>/dev/null)
             if echo "$ISSUER" | grep -qi "Let's Encrypt"; then
-                certbot revoke --cert-name "$DOMAIN" --non-interactive 2>/dev/null
+                timeout 30 certbot revoke --cert-name "$DOMAIN" --non-interactive 2>/dev/null
             fi
-            certbot delete --cert-name "$DOMAIN" --non-interactive 2>/dev/null
+            timeout 15 certbot delete --cert-name "$DOMAIN" --non-interactive 2>/dev/null
             # Clean up self-signed fallback dirs that certbot doesn't know about
             rm -rf "/etc/letsencrypt/live/${DOMAIN}" 2>/dev/null
             rm -rf "/etc/letsencrypt/archive/${DOMAIN}" 2>/dev/null

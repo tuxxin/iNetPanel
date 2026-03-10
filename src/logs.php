@@ -1,32 +1,32 @@
 <?php
 // FILE: src/logs.php
-// iNetPanel — System Logs (real files)
+// iNetPanel — System Logs (all loaded via AJAX for proper sudo support)
 
 
-// Available log files
+// Available log files (keys must match api/logs.php $SYSTEM_LOGS)
 $systemLogs = [
-    'update'     => ['label' => 'System Updates',   'file' => '/var/log/lamp_update.log'],
-    'backup'     => ['label' => 'Backup Jobs',      'file' => '/var/log/lamp_backup.log'],
-    'lighttpd'   => ['label' => 'lighttpd Error',   'file' => '/var/log/lighttpd/error.log'],
-    'ssl'        => ['label' => 'SSL / Certbot',    'file' => '/var/log/letsencrypt/letsencrypt.log'],
-    'ssl_renew'  => ['label' => 'SSL Renewal',      'file' => '/var/log/certbot_renew.log'],
-    'auth'       => ['label' => 'Auth / SSH',       'file' => '/var/log/auth.log'],
-    'fail2ban'   => ['label' => 'Fail2Ban',         'file' => '/var/log/fail2ban.log'],
-    'panel_logs' => ['label' => 'Panel Logs',        'source' => 'db'],
+    'update'     => ['label' => 'System Updates'],
+    'backup'     => ['label' => 'Backup Jobs'],
+    'lighttpd'   => ['label' => 'lighttpd Error'],
+    'ssl'        => ['label' => 'SSL / Certbot'],
+    'ssl_renew'  => ['label' => 'SSL Renewal'],
+    'auth'       => ['label' => 'Auth / SSH'],
+    'fail2ban'   => ['label' => 'Fail2Ban'],
+    'panel_logs' => ['label' => 'Panel Logs', 'source' => 'db'],
 ];
 
-// Domain log selector
+// Domain log selector — DB first, fallback to Apache vhosts
 $domains = [];
 try {
     $domains = DB::fetchAll('SELECT domain_name FROM domains ORDER BY domain_name');
 } catch (\Throwable $e) {}
-
-function readLogTail(string $file, int $lines = 300): string
-{
-    if (!file_exists($file)) return "(Log file not found: {$file})";
-    $out = [];
-    exec("tail -n {$lines} " . escapeshellarg($file) . " 2>&1", $out);
-    return implode("\n", $out) ?: '(Log is empty)';
+if (empty($domains)) {
+    foreach (glob('/etc/apache2/sites-available/*.conf') as $conf) {
+        $name = basename($conf, '.conf');
+        if (in_array($name, ['000-default', 'default-ssl', 'phpmyadmin'])) continue;
+        $domains[] = ['domain_name' => $name];
+    }
+    sort($domains);
 }
 ?>
 
@@ -67,14 +67,10 @@ function readLogTail(string $file, int $lines = 300): string
     <div class="card-body p-0">
         <div class="tab-content">
 
-            <!-- System log tabs -->
+            <!-- System log tabs — all loaded via AJAX -->
             <?php $first = true; foreach ($systemLogs as $key => $info): ?>
             <div class="tab-pane fade <?= $first ? 'show active' : '' ?>" id="log-<?= $key ?>">
-                <?php if (isset($info['source']) && $info['source'] === 'db'): ?>
                 <pre id="pre-<?= $key ?>" class="m-0 p-3 bg-dark text-light rounded-bottom" style="height:500px;overflow-y:auto;font-size:.82rem;white-space:pre-wrap;word-break:break-all">(Loading...)</pre>
-                <?php else: ?>
-                <pre id="pre-<?= $key ?>" class="m-0 p-3 bg-dark text-light rounded-bottom" style="height:500px;overflow-y:auto;font-size:.82rem;white-space:pre-wrap;word-break:break-all"><?= htmlspecialchars(readLogTail($info['file'])) ?></pre>
-                <?php endif; ?>
             </div>
             <?php $first = false; endforeach; ?>
 
@@ -115,29 +111,51 @@ function scrollToBottom(preId) {
     if (el) el.scrollTop = el.scrollHeight;
 }
 
-// Load DB-sourced logs and scroll all panes to bottom on load
+// Load a system log tab via API (uses sudo for restricted logs)
+function loadSystemLog(key) {
+    const pre = document.getElementById(`pre-${key}`);
+    if (!pre) return;
+    pre.textContent = 'Loading…';
+    fetch(`/api/logs?action=tail&key=${encodeURIComponent(key)}`)
+        .then(r => r.json())
+        .then(data => {
+            pre.textContent = data.content || '(empty)';
+            pre.scrollTop = pre.scrollHeight;
+        })
+        .catch(() => { pre.textContent = '(Failed to load)'; });
+}
+
+// Load DB-sourced panel logs
 function loadPanelLogs() {
+    const pre = document.getElementById('pre-panel_logs');
+    if (!pre) return;
+    pre.textContent = 'Loading…';
     fetch('/api/logs?action=panel')
         .then(r => r.json())
         .then(data => {
-            const pre = document.getElementById('pre-panel_logs');
-            if (pre) { pre.textContent = data.content || '(No activity logged yet.)'; pre.scrollTop = pre.scrollHeight; }
+            pre.textContent = data.content || '(No activity logged yet.)';
+            pre.scrollTop = pre.scrollHeight;
         })
-        .catch(() => {
-            const pre = document.getElementById('pre-panel_logs');
-            if (pre) pre.textContent = '(Failed to load panel logs)';
-        });
+        .catch(() => { pre.textContent = '(Failed to load panel logs)'; });
 }
 
 document.addEventListener('DOMContentLoaded', function () {
-    loadPanelLogs();
-    <?php foreach (array_keys($systemLogs) as $key): ?>
-    scrollToBottom('pre-<?= $key ?>');
-    <?php endforeach; ?>
+    // Load the first (active) system log tab
+    const activeBtn = document.querySelector('#log-tabs .nav-link.active');
+    if (activeBtn) {
+        const key = activeBtn.dataset.logkey;
+        if (key === 'panel_logs') loadPanelLogs();
+        else if (key) loadSystemLog(key);
+    }
 
-    // Scroll to bottom when tab shown
+    // Load other tabs on switch (lazy)
     document.querySelectorAll('[data-bs-toggle="tab"]').forEach(btn => {
         btn.addEventListener('shown.bs.tab', function () {
+            const key = this.dataset.logkey;
+            if (!key) return; // domain tab
+            if (key === 'panel_logs') loadPanelLogs();
+            else loadSystemLog(key);
+
             const pane = document.querySelector(this.dataset.bsTarget);
             const pre  = pane?.querySelector('pre');
             if (pre) pre.scrollTop = pre.scrollHeight;
@@ -154,16 +172,8 @@ document.getElementById('refresh-log-btn').addEventListener('click', function ()
         document.getElementById('load-domain-log-btn').click();
     } else {
         const key = active.dataset.logkey;
-        if (key === 'panel_logs') {
-            loadPanelLogs();
-        } else {
-            fetch(`/api/logs?action=tail&key=${encodeURIComponent(key)}`)
-                .then(r => r.json())
-                .then(data => {
-                    const pre = document.getElementById(`pre-${key}`);
-                    if (pre) { pre.textContent = data.content || '(empty)'; pre.scrollTop = pre.scrollHeight; }
-                });
-        }
+        if (key === 'panel_logs') loadPanelLogs();
+        else loadSystemLog(key);
     }
 });
 

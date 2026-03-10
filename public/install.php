@@ -353,6 +353,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 }
             }
 
+            // Set up panel auto-update cron (daily at 2am by default)
+            {
+                $phpVerRow2 = $db->query("SELECT value FROM settings WHERE key = 'php_default_version'")->fetch(PDO::FETCH_ASSOC);
+                $phpBin2 = 'php' . ($phpVerRow2['value'] ?? '8.4');
+                $autoUpdateCron = "# iNetPanel managed — panel auto-update\n"
+                    . "00 02 * * * root {$phpBin2} /var/www/inetpanel/scripts/panel_update.php >> /var/log/inetpanel_update.log 2>&1\n";
+                $proc = popen('sudo /root/scripts/manage_cron.sh write inetpanel_autoupdate', 'w');
+                fwrite($proc, $autoUpdateCron); pclose($proc);
+            }
+
             // Set up DDNS cron if enabled
             if ($ddnsEnabled === '1' && $ddnsInterval > 0) {
                 $phpVerStmt = $db->prepare("SELECT value FROM settings WHERE key = 'php_default_version'");
@@ -364,7 +374,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 fwrite($proc, $cronLine); pclose($proc);
             }
 
-            echo json_encode(['success' => true]);
+            // Issue SSL for panel services (LE first, self-signed fallback)
+            $sslHostname = ($ddnsHostname !== '') ? $ddnsHostname : ($_POST['hostname'] ?? '');
+            if ($sslHostname && strpos($sslHostname, '.') !== false) {
+                exec('sudo /usr/local/bin/inetp panel_ssl ' . escapeshellarg($sslHostname) . ' 2>&1', $sslOut, $sslExit);
+            }
+
+            $redirectUrl = ($sslHostname && strpos($sslHostname, '.') !== false)
+                ? "https://{$sslHostname}/login"
+                : '/login';
+            echo json_encode(['success' => true, 'redirectUrl' => $redirectUrl]);
 
         } catch (Exception $e) {
             echo json_encode(['success' => false, 'message' => $e->getMessage()]);
@@ -905,7 +924,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             if(res.success) {
                 document.getElementById('installStatusText').textContent = "Complete! Redirecting to login...";
-                setTimeout(() => window.location.href = '/login', 1500);
+                setTimeout(() => window.location.href = res.redirectUrl || '/login', 1500);
             } else {
                 document.getElementById('installSpinner').classList.add('d-none');
                 document.getElementById('installError').classList.remove('d-none');

@@ -20,7 +20,7 @@ $SYSTEM_LOGS = [
 ];
 
 // Logs that require sudo to read (root-owned, not readable by www-data)
-$RESTRICTED_LOGS = ['auth', 'fail2ban'];
+$RESTRICTED_LOGS = ['auth', 'fail2ban', 'ssl', 'ssl_renew'];
 
 function tailFile(string $path, int $lines = 300, bool $useSudo = false): string
 {
@@ -40,6 +40,17 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'Unknown log.']); break;
         }
         $useSudo = in_array($key, $RESTRICTED_LOGS);
+
+        // Debian 12+ (journald, no rsyslog): auth.log doesn't exist
+        if ($key === 'auth' && !file_exists($SYSTEM_LOGS[$key])) {
+            $cmd = 'sudo journalctl -u ssh -n 300 --no-pager 2>&1';
+            $out = [];
+            exec($cmd, $out);
+            $content = implode("\n", $out) ?: '(No SSH auth logs available)';
+            echo json_encode(['success' => true, 'content' => $content]);
+            break;
+        }
+
         echo json_encode(['success' => true, 'content' => tailFile($SYSTEM_LOGS[$key], 300, $useSudo)]);
         break;
 
@@ -81,13 +92,25 @@ switch ($action) {
             [$domain]
         );
         $username = $domainRow['username'] ?? null;
+
+        // Fallback: parse username from Apache vhost DocumentRoot
+        if (!$username) {
+            $vhostConf = "/etc/apache2/sites-available/{$domain}.conf";
+            if (file_exists($vhostConf)) {
+                $content = file_get_contents($vhostConf);
+                if (preg_match('#DocumentRoot\s+/home/([^/]+)/([^/]+)/www#', $content, $m)) {
+                    $username = $m[1];
+                }
+            }
+        }
+
         $logBase = ($username && is_dir("/home/{$username}/{$domain}/logs"))
             ? "/home/{$username}/{$domain}/logs"
             : "/home/{$domain}/logs";
 
         $logFiles = [
-            'apache_error'  => "{$logBase}/error.log",
-            'apache_access' => "{$logBase}/access.log",
+            'apache_error'  => "{$logBase}/apache_error.log",
+            'apache_access' => "{$logBase}/apache_access.log",
             'php_error'     => "{$logBase}/php_error.log",
         ];
 

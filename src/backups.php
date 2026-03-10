@@ -146,6 +146,12 @@ document.getElementById('run-backup-btn').addEventListener('click', function () 
             } else {
                 showAlert(data.error || 'Backup failed.', 'danger');
             }
+        })
+        .catch(err => {
+            spinner.classList.add('d-none');
+            icon.classList.remove('d-none');
+            this.disabled = false;
+            showAlert('Request failed: ' + err.message, 'danger');
         });
 });
 

@@ -2,6 +2,13 @@
 // FILE: src/firewall.php
 // iNetPanel — Firewall Management (firewalld + fail2ban)
 $isAdmin = Auth::hasFullAccess();
+
+// Detect user's real IP (works behind Cloudflare tunnel)
+$clientIp = $_SERVER['HTTP_CF_CONNECTING_IP']
+    ?? $_SERVER['HTTP_X_FORWARDED_FOR']
+    ?? $_SERVER['REMOTE_ADDR']
+    ?? '';
+if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -161,6 +168,9 @@ $isAdmin = Auth::hasFullAccess();
                         <button class="btn btn-sm btn-danger" onclick="f2bBan()"><i class="fas fa-ban me-1"></i>Ban</button>
                     </div>
                 </div>
+                <?php if ($clientIp): ?>
+                <p class="text-muted small mt-2 mb-0"><i class="fas fa-info-circle me-1"></i>Your IP: <code><?= htmlspecialchars($clientIp) ?></code></p>
+                <?php endif; ?>
                 <?php endif; ?>
             </div>
         </div>
@@ -187,6 +197,9 @@ $isAdmin = Auth::hasFullAccess();
                         <button class="btn btn-sm btn-success" onclick="wlAdd()"><i class="fas fa-plus me-1"></i>Add</button>
                     </div>
                 </div>
+                <?php if ($clientIp): ?>
+                <p class="text-muted small mt-2 mb-0"><i class="fas fa-info-circle me-1"></i>Your IP: <code><?= htmlspecialchars($clientIp) ?></code></p>
+                <?php endif; ?>
                 <?php endif; ?>
             </div>
         </div>
@@ -211,10 +224,16 @@ function loadFirewallStatus() {
     fetch('/api/firewall?action=status')
         .then(r => r.json())
         .then(data => {
-            if (!data.success) return;
+            if (!data.success) {
+                showFwToast(data.error || 'Failed to load firewall status', 'danger');
+                return;
+            }
             fwData = data.data;
             renderFirewalld(fwData);
             renderFail2Ban(fwData);
+        })
+        .catch(err => {
+            showFwToast('Failed to connect: ' + err.message, 'danger');
         });
     loadWhitelist();
     loadF2bSettings();

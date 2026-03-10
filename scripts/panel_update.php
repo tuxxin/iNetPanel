@@ -234,9 +234,25 @@ if (file_exists($sudoersFile)) {
     $needLine = 'www-data ALL=(root) NOPASSWD: /usr/bin/php* /var/www/inetpanel/scripts/panel_update.php *';
     if (strpos($sudoers, 'panel_update.php') === false) {
         file_put_contents($sudoersFile, $sudoers . "\n" . $needLine . "\n");
-        chmod($sudoersFile, 0440);
+        $sudoers = file_get_contents($sudoersFile);
         log_msg('Added panel_update.php sudo rule.');
     }
+
+    // Ensure journalctl rule exists (needed for auth logs on Debian 12+ without rsyslog)
+    if (strpos($sudoers, 'journalctl') === false) {
+        file_put_contents($sudoersFile, $sudoers . "\nwww-data ALL=(root) NOPASSWD: /usr/bin/journalctl\n");
+        $sudoers = file_get_contents($sudoersFile);
+        log_msg('Added journalctl sudo rule.');
+    }
+
+    // Ensure fix_permissions.sh rule exists
+    if (strpos($sudoers, 'fix_permissions.sh') === false) {
+        file_put_contents($sudoersFile, $sudoers . "\nwww-data ALL=(root) NOPASSWD: /root/scripts/fix_permissions.sh\n");
+        $sudoers = file_get_contents($sudoersFile);
+        log_msg('Added fix_permissions.sh sudo rule.');
+    }
+
+    chmod($sudoersFile, 0440);
 }
 
 // Update SQLite record

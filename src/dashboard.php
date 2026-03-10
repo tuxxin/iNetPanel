@@ -192,7 +192,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 const badge = a.status === 'active' ? 'bg-success' : 'bg-warning text-dark';
                 const phpPill = a.php_version ? `<span class="badge bg-secondary-subtle text-secondary rounded-pill me-1">PHP ${a.php_version}</span>` : '';
                 ul.innerHTML += `<li class="list-group-item d-flex justify-content-between align-items-center py-2 ps-3">
-                    <a href="http://${a.domain_name}" target="_blank" class="small fw-semibold text-decoration-none">${a.domain_name} <i class="fas fa-external-link-alt ms-1" style="font-size:.65em;opacity:.5"></i></a>
+                    <a href="//${a.domain_name}" target="_blank" class="small fw-semibold text-decoration-none">${a.domain_name} <i class="fas fa-external-link-alt ms-1" style="font-size:.65em;opacity:.5"></i></a>
                     <span class="d-flex align-items-center gap-1">${phpPill}<span class="badge ${badge} rounded-pill">${a.status}</span></span></li>`;
             });
         }).catch(() => {
