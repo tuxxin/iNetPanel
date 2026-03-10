@@ -240,7 +240,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             $settings = [
-                'server_hostname'   => $_POST['hostname'],
+                'server_hostname'   => ($ddnsHostname !== '') ? $ddnsHostname : $_POST['hostname'],
                 'timezone'          => $_POST['timezone'],
                 'admin_email'       => ($cfEnabled && !empty($_POST['cf_email'])) ? $_POST['cf_email'] : 'admin@' . $_POST['hostname'],
                 'default_theme'     => 'light',
@@ -292,6 +292,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if (!in_array($tz, DateTimeZone::listIdentifiers())) { $tz = 'UTC'; }
             date_default_timezone_set($tz);
             exec('sudo /usr/bin/timedatectl set-timezone ' . escapeshellarg($tz) . ' 2>&1');
+
+            // Apply system hostname (prefer DDNS hostname if set)
+            $sysHostname = ($ddnsHostname !== '') ? $ddnsHostname : ($_POST['hostname'] ?? '');
+            if ($sysHostname && preg_match('/^[a-zA-Z0-9][a-zA-Z0-9.\-]*$/', $sysHostname)) {
+                exec('sudo /usr/bin/hostnamectl set-hostname ' . escapeshellarg($sysHostname) . ' 2>&1');
+            }
 
             // Create Cloudflare Zero Trust Tunnel if CF is enabled + account ID provided
             if ($cfEnabled && $cfAccountId) {
