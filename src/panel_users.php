@@ -2,7 +2,7 @@
 // FILE: src/panel_users.php
 // iNetPanel — Panel Sub-Admin User Management
 
-Auth::requireAdmin();
+Auth::requireSuperAdmin();
 
 // Load all domains for the multi-select
 $domains = [];
@@ -23,14 +23,14 @@ try {
 <div class="card border-0 shadow-sm">
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
+            <table class="table table-hover align-middle mb-0" id="panel-users-table">
                 <thead class="table-light">
                     <tr>
                         <th class="ps-4">Username</th>
                         <th>Role</th>
                         <th>Assigned Domains</th>
                         <th>Created</th>
-                        <th class="text-end pe-4">Actions</th>
+                        <th class="text-end pe-4 no-sort">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="users-tbody">
@@ -319,5 +319,8 @@ document.getElementById('confirm-delete-user-btn').addEventListener('click', fun
         });
 });
 
-document.addEventListener('DOMContentLoaded', loadUsers);
+document.addEventListener('DOMContentLoaded', function () {
+    loadUsers();
+    TableKit.init('panel-users-table', { filter: true });
+});
 </script>

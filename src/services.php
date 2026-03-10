@@ -1,7 +1,7 @@
 <?php
 // FILE: src/services.php
 // iNetPanel — Service Manager (real status via api/services.php)
-$isAdmin = Auth::isAdmin();
+$isAdmin = Auth::hasFullAccess();
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">

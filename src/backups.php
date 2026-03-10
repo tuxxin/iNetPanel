@@ -31,16 +31,17 @@ $backupRetention   = DB::setting('backup_retention', '3');
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0">
+                    <table class="table table-hover align-middle mb-0" id="backups-table">
                         <thead class="table-light">
                             <tr>
                                 <th class="ps-4">File</th>
                                 <th>Size</th>
                                 <th>Date</th>
+                                <th class="text-end pe-4 no-sort">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="backup-tbody">
-                            <tr><td colspan="3" class="text-center text-muted py-4">Loading…</td></tr>
+                            <tr><td colspan="4" class="text-center text-muted py-4">Loading…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -108,19 +109,20 @@ function loadBackups() {
         .then(data => {
             const tbody = document.getElementById('backup-tbody');
             if (!data.success || !data.data.length) {
-                tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-4">No backups found.</td></tr>'; return;
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">No backups found.</td></tr>'; return;
             }
             tbody.innerHTML = data.data.map(b =>
                 `<tr>
                     <td class="ps-4 small fw-medium"><i class="fas fa-file-archive text-muted me-2"></i>${b.filename}</td>
                     <td class="small">${b.size_hr}</td>
                     <td class="small text-muted">${b.date}</td>
+                    <td class="text-end pe-4"><a href="/api/backups?action=download&file=${encodeURIComponent(b.filename)}" class="btn btn-sm btn-outline-primary" title="Download"><i class="fas fa-download"></i></a></td>
                 </tr>`
             ).join('');
         })
         .catch(() => {
             document.getElementById('backup-tbody').innerHTML =
-                '<tr><td colspan="3" class="text-center text-danger py-4">Failed to load.</td></tr>';
+                '<tr><td colspan="4" class="text-center text-danger py-4">Failed to load.</td></tr>';
         });
 }
 
@@ -162,5 +164,8 @@ document.getElementById('backup-settings-form').addEventListener('submit', funct
         });
 });
 
-document.addEventListener('DOMContentLoaded', loadBackups);
+document.addEventListener('DOMContentLoaded', function () {
+    loadBackups();
+    TableKit.init('backups-table', { filter: true });
+});
 </script>

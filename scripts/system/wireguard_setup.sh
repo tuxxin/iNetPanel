@@ -100,54 +100,59 @@ systemctl enable wg-quick@wg0 >/dev/null 2>&1
 systemctl start  wg-quick@wg0 2>/dev/null
 
 # ==============================================================================
-# Firewall: restrict SSH and FTP to WireGuard subnet + localhost only
+# Firewall: full server lockdown — only WireGuard port open publicly
+# All other services accessible only via VPN subnet + localhost (cloudflared)
 # ==============================================================================
-restrict_public_ports() {
+lockdown_firewall() {
     local WG_NET="${WG_SUBNET}"
 
-    if command -v csf &>/dev/null; then
-        # CSF: Remove 20, 21, 22 from public TCP_IN; add WG port to UDP_IN
-        CURRENT_TCP=$(grep '^TCP_IN' /etc/csf/csf.conf | cut -d'"' -f2)
-        # Remove ports 20, 21, 22 from TCP_IN
-        NEW_TCP=$(echo "$CURRENT_TCP" | sed 's/,\?20\b//g; s/,\?21\b//g; s/,\?22\b//g; s/^,//; s/,,/,/g')
-        sed -i "s|^TCP_IN = \".*\"|TCP_IN = \"${NEW_TCP}\"|" /etc/csf/csf.conf
+    # Detect SSH port from sshd_config (default 1022)
+    local SSH_PORT
+    SSH_PORT=$(grep -E '^Port ' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+    [ -z "$SSH_PORT" ] && SSH_PORT=1022
 
-        # Add WG port to UDP_IN
-        CURRENT_UDP=$(grep '^UDP_IN' /etc/csf/csf.conf | cut -d'"' -f2)
-        if ! echo "$CURRENT_UDP" | grep -qw "$WG_PORT"; then
-            sed -i "s|^UDP_IN = \".*\"|UDP_IN = \"${CURRENT_UDP},${WG_PORT}\"|" /etc/csf/csf.conf
-        fi
-
-        # Allow SSH and FTP from WireGuard subnet
-        cat << EOF >> /etc/csf/csf.allow
-# iNetPanel WireGuard — allow SSH/FTP from VPN subnet
-tcp|in|d=${WG_NET}|d=22
-tcp|in|d=${WG_NET}|d=21
-tcp|in|d=${WG_NET}|d=20
-EOF
-        csf -r >/dev/null 2>&1
-
-    else
-        # iptables fallback: restrict SSH (22) and FTP (20,21) to WG subnet + lo
-        iptables -I INPUT -p tcp --dport 22 -s "$WG_NET" -j ACCEPT
-        iptables -I INPUT -p tcp --dport 22 -s 127.0.0.1  -j ACCEPT
-        iptables -A INPUT -p tcp --dport 22 -j DROP
-
-        iptables -I INPUT -p tcp --dport 21 -s "$WG_NET" -j ACCEPT
-        iptables -I INPUT -p tcp --dport 21 -s 127.0.0.1  -j ACCEPT
-        iptables -A INPUT -p tcp --dport 21 -j DROP
-
-        iptables -I INPUT -p tcp --dport 20 -s "$WG_NET" -j ACCEPT
-        iptables -I INPUT -p tcp --dport 20 -s 127.0.0.1  -j ACCEPT
-        iptables -A INPUT -p tcp --dport 20 -j DROP
-
-        # Allow WG UDP port
-        iptables -I INPUT -p udp --dport "$WG_PORT" -j ACCEPT
-
-        # Persist iptables rules
-        apt-get install -y -qq iptables-persistent 2>/dev/null
-        netfilter-persistent save 2>/dev/null
+    if ! command -v firewall-cmd &>/dev/null; then
+        echo -e "${RED}firewalld not installed — cannot lock down firewall.${NC}"
+        echo -e "${YELLOW}Install with: apt-get install -y firewalld${NC}"
+        return 1
     fi
+
+    # Ensure firewalld is running
+    systemctl enable --now firewalld 2>/dev/null
+
+    # Set default zone to drop (deny all incoming)
+    firewall-cmd --set-default-zone=drop
+
+    # Clear any existing port/service rules from default zone
+    for p in $(firewall-cmd --permanent --list-ports 2>/dev/null); do
+        firewall-cmd --permanent --remove-port="$p" 2>/dev/null
+    done
+    for s in $(firewall-cmd --permanent --list-services 2>/dev/null); do
+        firewall-cmd --permanent --remove-service="$s" 2>/dev/null
+    done
+
+    # Only allow WireGuard UDP port publicly (entry point for VPN)
+    firewall-cmd --permanent --add-port=${WG_PORT}/udp
+
+    # Create "vpn" zone for WireGuard subnet traffic
+    firewall-cmd --permanent --new-zone=vpn 2>/dev/null
+    firewall-cmd --permanent --zone=vpn --add-source="${WG_NET}"
+    firewall-cmd --permanent --zone=vpn --add-port=${SSH_PORT}/tcp
+    firewall-cmd --permanent --zone=vpn --add-port=21/tcp
+    firewall-cmd --permanent --zone=vpn --add-port=20/tcp
+    firewall-cmd --permanent --zone=vpn --add-port=80/tcp
+    firewall-cmd --permanent --zone=vpn --add-port=8888/tcp
+
+    # Allow all traffic on loopback (required for cloudflared, local services)
+    firewall-cmd --permanent --zone=trusted --add-interface=lo
+
+    # Enable masquerade for VPN NAT (forward VPN traffic to internet)
+    firewall-cmd --permanent --add-masquerade
+
+    firewall-cmd --reload
+
+    echo -e "${GREEN}Firewalld: Lockdown active — only port ${WG_PORT}/UDP public${NC}"
+    echo -e "${GREEN}VPN zone created for subnet ${WG_NET}${NC}"
 
     # Restrict vsftpd to WireGuard interface only
     VSFTPD_CONF="/etc/vsftpd.conf"
@@ -168,12 +173,10 @@ EOF
         else
             echo "ListenAddress ${WG_SERVER_IP}" >> "$SSHD_CONF"
         fi
-        # Keep 0.0.0.0 as fallback in case VPN is down — comment it so admin can re-enable
-        # Safer approach: use AllowUsers to lock down access
         systemctl reload sshd 2>/dev/null
     fi
 }
-restrict_public_ports
+lockdown_firewall
 
 # Save WG settings to panel DB
 if [ -f "$PANEL_DB" ] && command -v sqlite3 &>/dev/null; then
@@ -197,5 +200,19 @@ echo -e "  Endpoint:     ${WG_ENDPOINT}:${WG_PORT}"
 echo -e "  Public Key:   ${SERVER_PUBKEY}"
 echo -e "  Config:       ${WG_CONF}"
 echo ""
-echo -e "  ${YELLOW}SSH and FTP are now restricted to WireGuard subnet (${WG_SUBNET})${NC}"
+echo -e "${YELLOW}  ┌─────────────────────────────────────────────────┐${NC}"
+echo -e "${YELLOW}  │  FULL SERVER LOCKDOWN ACTIVE                    │${NC}"
+echo -e "${YELLOW}  │                                                 │${NC}"
+echo -e "${YELLOW}  │  Only port ${WG_PORT}/UDP (WireGuard) is public       │${NC}"
+echo -e "${YELLOW}  │  All other ports: VPN access only               │${NC}"
+echo -e "${YELLOW}  │  Public web traffic routes via Cloudflare       │${NC}"
+echo -e "${YELLOW}  │                                                 │${NC}"
+echo -e "${YELLOW}  │  Blocked from public:                           │${NC}"
+echo -e "${YELLOW}  │    Port 80  (Panel)     → VPN + Cloudflare only │${NC}"
+echo -e "${YELLOW}  │    Port 8888 (phpMyAdmin)→ VPN only             │${NC}"
+echo -e "${YELLOW}  │    SSH               → VPN only              │${NC}"
+echo -e "${YELLOW}  │    Port 20-21 (FTP)     → VPN only              │${NC}"
+echo -e "${YELLOW}  │    Port 1080+ (Sites)   → VPN + Cloudflare only │${NC}"
+echo -e "${YELLOW}  └─────────────────────────────────────────────────┘${NC}"
+echo ""
 echo -e "  Add peers with: ${GREEN}inetp wg_peer --add --name <username>${NC}"

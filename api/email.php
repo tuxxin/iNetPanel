@@ -12,7 +12,8 @@ switch ($action) {
     case 'list_rules':
         $zoneId = trim($_GET['zone_id'] ?? '');
         if (!$zoneId) { echo json_encode(['success' => false, 'error' => 'zone_id required.']); break; }
-        echo json_encode($cf->listEmailRouting($zoneId));
+        $resp = $cf->listEmailRouting($zoneId);
+        echo json_encode(['success' => !empty($resp['success']), 'data' => $resp['result'] ?? []]);
         break;
 
     case 'create_rule':
@@ -29,27 +30,32 @@ switch ($action) {
             'enabled'  => true,
             'name'     => "Forward {$from} → {$to}",
         ];
-        echo json_encode($cf->createEmailRule($zoneId, $data));
+        $resp = $cf->createEmailRule($zoneId, $data);
+        echo json_encode(['success' => !empty($resp['success']), 'data' => $resp['result'] ?? null, 'error' => $resp['errors'][0]['message'] ?? '']);
         break;
 
     case 'delete_rule':
         Auth::requireAdmin();
         $zoneId = trim($_POST['zone_id'] ?? '');
         $ruleId = trim($_POST['rule_id'] ?? '');
-        echo json_encode($cf->deleteEmailRule($zoneId, $ruleId));
+        $resp = $cf->deleteEmailRule($zoneId, $ruleId);
+        echo json_encode(['success' => !empty($resp['success'])]);
         break;
 
     case 'list_addresses':
-        $zoneId = trim($_GET['zone_id'] ?? '');
-        if (!$zoneId) { echo json_encode(['success' => false, 'error' => 'zone_id required.']); break; }
-        echo json_encode($cf->listEmailAddresses($zoneId));
+        $accountId = DB::setting('cf_account_id', '');
+        if (!$accountId) { echo json_encode(['success' => false, 'error' => 'Cloudflare account ID not configured.']); break; }
+        $resp = $cf->listEmailAddresses($accountId);
+        echo json_encode(['success' => !empty($resp['success']), 'data' => $resp['result'] ?? []]);
         break;
 
     case 'create_address':
         Auth::requireAdmin();
-        $zoneId = trim($_POST['zone_id'] ?? '');
-        $email  = trim($_POST['email']   ?? '');
-        echo json_encode($cf->createEmailAddress($zoneId, $email));
+        $accountId = DB::setting('cf_account_id', '');
+        $email     = trim($_POST['email'] ?? '');
+        if (!$accountId) { echo json_encode(['success' => false, 'error' => 'Cloudflare account ID not configured.']); break; }
+        $resp = $cf->createEmailAddress($accountId, $email);
+        echo json_encode(['success' => !empty($resp['success']), 'data' => $resp['result'] ?? null, 'error' => $resp['errors'][0]['message'] ?? '']);
         break;
 
     default:

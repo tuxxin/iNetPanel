@@ -98,14 +98,14 @@ class CloudflareAPI
         return $this->request('DELETE', "/zones/{$zoneId}/email/routing/rules/{$ruleId}");
     }
 
-    public function listEmailAddresses(string $zoneId): array
+    public function listEmailAddresses(string $accountId): array
     {
-        return $this->request('GET', "/zones/{$zoneId}/email/routing/addresses");
+        return $this->request('GET', "/accounts/{$accountId}/email/routing/addresses");
     }
 
-    public function createEmailAddress(string $zoneId, string $email): array
+    public function createEmailAddress(string $accountId, string $email): array
     {
-        return $this->request('POST', "/zones/{$zoneId}/email/routing/addresses", ['email' => $email]);
+        return $this->request('POST', "/accounts/{$accountId}/email/routing/addresses", ['email' => $email]);
     }
 
     // -------------------------------------------------------------------------
@@ -172,7 +172,12 @@ class CloudflareAPI
 
         // Ensure catch-all is last; insert new rule before it
         $catchAll = array_pop($ingress) ?? ['service' => 'http_status:404'];
-        $ingress[] = ['hostname' => $hostname, 'service' => $service];
+        $rule = ['hostname' => $hostname, 'service' => $service];
+        // For HTTPS origins, add originRequest so cloudflared verifies the local cert
+        if (str_starts_with($service, 'https://')) {
+            $rule['originRequest'] = ['originServerName' => $hostname];
+        }
+        $ingress[] = $rule;
         $ingress[] = $catchAll;
 
         $result = $this->updateTunnelConfig($accountId, $tunnelId, $ingress);

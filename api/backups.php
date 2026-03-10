@@ -1,7 +1,7 @@
 <?php
 // FILE: api/backups.php
 // iNetPanel — Backups API
-// Actions: list, run, settings_get, settings_save
+// Actions: list, download, run, settings_get, settings_save
 
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
@@ -10,16 +10,36 @@ $backupDir = DB::setting('backup_destination', '/backup');
 
 switch ($action) {
 
+    case 'download':
+        Auth::requireAdmin();
+        $filename = basename(trim($_GET['file'] ?? ''));
+        $filepath = $backupDir . '/' . $filename;
+        if (!$filename || !preg_match('/^[\w.\-]+\.tgz$/', $filename) || !is_file($filepath)) {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'error' => 'File not found.']);
+            break;
+        }
+        header('Content-Type: application/gzip');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Content-Length: ' . filesize($filepath));
+        readfile($filepath);
+        exit;
+
     case 'list':
         $files = glob($backupDir . '/*.tgz') ?: [];
         rsort($files);
         $data = [];
         foreach ($files as $f) {
+            $bytes = filesize($f);
+            if ($bytes < 1024)          $sizeHr = $bytes . ' B';
+            elseif ($bytes < 1048576)   $sizeHr = round($bytes / 1024, 1) . ' KB';
+            elseif ($bytes < 1073741824)$sizeHr = round($bytes / 1048576, 1) . ' MB';
+            else                        $sizeHr = round($bytes / 1073741824, 2) . ' GB';
             $data[] = [
                 'filename' => basename($f),
                 'path'     => $f,
-                'size'     => filesize($f),
-                'size_hr'  => round(filesize($f) / 1048576, 1) . ' MB',
+                'size'     => $bytes,
+                'size_hr'  => $sizeHr,
                 'date'     => date('Y-m-d H:i:s', filemtime($f)),
             ];
         }

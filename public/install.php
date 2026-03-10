@@ -2,6 +2,10 @@
 header('Cache-Control: no-store, no-cache, must-revalidate');
 header('Pragma: no-cache');
 header('Expires: 0');
+header('X-Frame-Options: DENY');
+header('X-Content-Type-Options: nosniff');
+header('X-Robots-Tag: noindex, nofollow');
+header('Referrer-Policy: strict-origin-when-cross-origin');
 
 // --- LOCK FILE CHECK: redirect to login if already installed ---
 $projectRoot = dirname(__DIR__);
@@ -118,16 +122,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     category TEXT,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )",
+                "CREATE TABLE IF NOT EXISTS hosting_users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    shell TEXT DEFAULT '/bin/bash',
+                    disk_quota INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )",
                 "CREATE TABLE IF NOT EXISTS domains (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
+                    hosting_user_id INTEGER,
                     domain_name TEXT NOT NULL UNIQUE,
                     document_root TEXT NOT NULL,
                     php_version TEXT DEFAULT 'inherit',
                     port INTEGER,
                     status TEXT DEFAULT 'active',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(user_id) REFERENCES users(id)
+                    FOREIGN KEY(hosting_user_id) REFERENCES hosting_users(id)
                 )",
                 "CREATE TABLE IF NOT EXISTS panel_users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -150,7 +161,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 )",
                 "CREATE TABLE IF NOT EXISTS wg_peers (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    domain_name TEXT UNIQUE,
+                    hosting_user TEXT UNIQUE,
                     public_key TEXT,
                     peer_ip TEXT,
                     config_path TEXT,
@@ -261,6 +272,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 'auto_update_time'    => '02:00',
                 // PHP
                 'php_default_version' => $detectedPhpVer,
+                // SSH
+                'ssh_port' => '1022',
             ];
 
             $stmt = $db->prepare("INSERT OR REPLACE INTO settings (key, value, category) VALUES (:k, :v, 'general')");
@@ -354,6 +367,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
     <title>iNetPanel Installation</title>
     
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -624,7 +638,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 <div class="d-flex align-items-center justify-content-between">
                     <div>
                         <label class="form-label mb-0">WireGuard VPN</label>
-                        <div class="form-text mt-0">Secure VPN for SSH/FTP access. Closes public ports 20, 21, 22.</div>
+                        <div class="form-text mt-0">Full server lockdown — only the WireGuard port is publicly open. SSH, FTP, panel, and phpMyAdmin are VPN-only. Public web traffic routes through Cloudflare Tunnel.</div>
                     </div>
                     <div class="form-check form-switch ms-3">
                         <input class="form-check-input" type="checkbox" id="wgEnabled" onchange="toggleWireGuard(this.checked)" style="width:2.5em;height:1.4em;">
@@ -645,6 +659,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     </div>
                 </div>
                 <input type="text" class="form-control form-control-sm" id="wgEndpoint" placeholder="Endpoint hostname (leave blank to use server IP)">
+            </div>
+
+            <hr class="my-3">
+            <div class="alert alert-info border-0 shadow-sm mb-3">
+                <i class="fas fa-shield-halved me-2"></i>
+                <strong>Firewall:</strong> Firewalld + Fail2Ban are installed and active by default.
+                <br><span class="small text-muted">Recommended for public servers (dedicated, VPS, etc). Manage rules from the admin panel after setup.</span>
+            </div>
+
+            <div class="alert alert-info border-0 shadow-sm mb-0">
+                <i class="fas fa-lock me-2"></i>
+                <strong>SSL:</strong> Let's Encrypt certificates are automatically issued for each hosted domain via Cloudflare DNS.
+                <br><span class="small text-muted">All hosted sites use HTTPS. Certificates auto-renew daily. Manage from the admin panel after setup.</span>
             </div>
 
             <div class="d-flex gap-2 mt-4">

@@ -1,19 +1,34 @@
 <?php
 // FILE: src/account/portal.php
-// iNetPanel — Account holder portal (read-only account info)
+// iNetPanel — Account holder portal (multi-domain, read-only account info)
 
-$domain = AccountAuth::domain();
+$accountUser = AccountAuth::user();
+$username = $accountUser['username'] ?? AccountAuth::username();
+$allDomains = $accountUser['domains'] ?? [];
+
+// Domain selector: use query param or default to first domain
+$domain = $_GET['domain'] ?? ($allDomains[0]['domain_name'] ?? $username);
 
 // Load account record from DB
-$row = DB::fetchOne('SELECT * FROM domains WHERE domain_name = ?', [$domain]);
+$row = DB::fetchOne(
+    'SELECT d.*, h.username as hosting_username FROM domains d LEFT JOIN hosting_users h ON d.hosting_user_id = h.id WHERE d.domain_name = ?',
+    [$domain]
+);
 if (!$row) {
     echo '<div class="alert alert-danger">Account not found. Please contact your administrator.</div>';
     return;
 }
 
+// Verify this domain belongs to the logged-in user
+$owner = $row['hosting_username'] ?? $domain;
+if ($owner !== $username && $domain !== $username) {
+    echo '<div class="alert alert-danger">Access denied.</div>';
+    return;
+}
+
 // Derived values
-$dbName  = str_replace(['.', '-'], '_', $domain);
-$docRoot = $row['document_root'] ?? "/home/{$domain}/www";
+$dbName  = $username . '_' . str_replace(['.', '-'], '_', $domain);
+$docRoot = $row['document_root'] ?? "/home/{$username}/{$domain}/www";
 $phpVer  = $row['php_version']  ?? '—';
 $port    = $row['port']         ?? '—';
 $status  = $row['status']       ?? 'active';
@@ -34,12 +49,23 @@ $serverHost = gethostname();
 
 <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
     <div>
-        <h4 class="fw-bold mb-0"><i class="fas fa-globe me-2 text-primary"></i><?= htmlspecialchars($domain) ?></h4>
+        <h4 class="fw-bold mb-0"><i class="fas fa-user me-2 text-primary"></i><?= htmlspecialchars($username) ?></h4>
         <span class="text-muted small">Account Dashboard</span>
     </div>
-    <span class="badge bg-<?= $status === 'active' ? 'success' : 'warning text-dark' ?> rounded-pill fs-6 px-3 py-2">
-        <i class="fas fa-circle me-1" style="font-size:0.5rem;vertical-align:middle;"></i><?= ucfirst($status) ?>
-    </span>
+    <div class="d-flex align-items-center gap-2">
+        <?php if (count($allDomains) > 1): ?>
+        <select class="form-select form-select-sm" style="width:auto" onchange="window.location.href='/user/dashboard?domain='+encodeURIComponent(this.value)">
+            <?php foreach ($allDomains as $d): ?>
+            <option value="<?= htmlspecialchars($d['domain_name']) ?>" <?= $d['domain_name'] === $domain ? 'selected' : '' ?>>
+                <?= htmlspecialchars($d['domain_name']) ?>
+            </option>
+            <?php endforeach; ?>
+        </select>
+        <?php endif; ?>
+        <span class="badge bg-<?= $status === 'active' ? 'success' : 'warning text-dark' ?> rounded-pill fs-6 px-3 py-2">
+            <i class="fas fa-circle me-1" style="font-size:0.5rem;vertical-align:middle;"></i><?= ucfirst($status) ?>
+        </span>
+    </div>
 </div>
 
 <!-- Account Info -->
@@ -78,7 +104,7 @@ $serverHost = gethostname();
                         <tr><td class="ps-4 text-muted fw-semibold" style="width:40%">Database Name</td>
                             <td class="pe-4 fw-bold"><?= htmlspecialchars($dbName) ?></td></tr>
                         <tr><td class="ps-4 text-muted fw-semibold">DB Username</td>
-                            <td class="pe-4"><?= htmlspecialchars($domain) ?></td></tr>
+                            <td class="pe-4"><?= htmlspecialchars($username) ?></td></tr>
                         <tr><td class="ps-4 text-muted fw-semibold">DB Host</td>
                             <td class="pe-4">localhost</td></tr>
                         <tr><td class="ps-4 text-muted fw-semibold">DB Port</td>
@@ -112,24 +138,31 @@ $serverHost = gethostname();
             </div>
             <div class="col-sm-6 col-lg-3">
                 <div class="small text-muted fw-semibold mb-1">SSH Port</div>
-                <code>22</code>
+                <code><?= htmlspecialchars(DB::setting('ssh_port', '1022')) ?></code>
             </div>
             <div class="col-sm-6 col-lg-3">
                 <div class="small text-muted fw-semibold mb-1">Username</div>
-                <code><?= htmlspecialchars($domain) ?></code>
+                <code><?= htmlspecialchars($username) ?></code>
             </div>
         </div>
     </div>
 </div>
 
 <?php if ($cfEnabled): ?>
+<?php $isSubdomain = substr_count($domain, '.') > 1; ?>
+
 <!-- DNS Records -->
-<div class="card border-0 shadow-sm mb-4">
+<div class="card border-0 shadow-sm mb-4<?= $isSubdomain ? ' opacity-50' : '' ?>">
     <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
         <h6 class="mb-0"><i class="fas fa-network-wired me-2 text-primary"></i>DNS Records</h6>
         <span class="badge bg-warning text-dark"><i class="fab fa-cloudflare me-1"></i>Cloudflare</span>
     </div>
-    <div class="card-body p-0">
+    <div class="card-body<?= $isSubdomain ? '' : ' p-0' ?>">
+        <?php if ($isSubdomain): ?>
+        <div class="text-center text-muted py-3">
+            <i class="fas fa-info-circle me-1"></i> DNS management is not available for sub-domains. Contact your administrator to manage DNS for the parent domain.
+        </div>
+        <?php else: ?>
         <div class="table-responsive">
             <table class="table table-sm align-middle mb-0">
                 <thead class="table-light">
@@ -145,16 +178,22 @@ $serverHost = gethostname();
                 </tbody>
             </table>
         </div>
+        <?php endif; ?>
     </div>
 </div>
 
 <!-- Email Routing -->
-<div class="card border-0 shadow-sm mb-4">
+<div class="card border-0 shadow-sm mb-4<?= $isSubdomain ? ' opacity-50' : '' ?>">
     <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
         <h6 class="mb-0"><i class="fas fa-envelope me-2 text-primary"></i>Email Routing</h6>
         <span class="badge bg-warning text-dark"><i class="fab fa-cloudflare me-1"></i>Cloudflare</span>
     </div>
-    <div class="card-body p-0">
+    <div class="card-body<?= $isSubdomain ? '' : ' p-0' ?>">
+        <?php if ($isSubdomain): ?>
+        <div class="text-center text-muted py-3">
+            <i class="fas fa-info-circle me-1"></i> Email routing is not available for sub-domains. Contact your administrator to manage email for the parent domain.
+        </div>
+        <?php else: ?>
         <div class="table-responsive">
             <table class="table table-sm align-middle mb-0">
                 <thead class="table-light">
@@ -169,9 +208,11 @@ $serverHost = gethostname();
                 </tbody>
             </table>
         </div>
+        <?php endif; ?>
     </div>
 </div>
 
+<?php if (!$isSubdomain): ?>
 <script>
 const DOMAIN = <?= json_encode($domain) ?>;
 
@@ -219,4 +260,5 @@ fetch('/api/account?action=email&domain=' + encodeURIComponent(DOMAIN))
         document.getElementById('email-tbody').innerHTML = '<tr><td colspan="3" class="text-muted text-center py-3 small">Failed to load email rules.</td></tr>';
     });
 </script>
+<?php endif; ?>
 <?php endif; ?>

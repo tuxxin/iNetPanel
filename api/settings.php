@@ -15,7 +15,7 @@ switch ($action) {
         foreach ($rows as $r) {
             $result[$r['key']] = $r['value'];
         }
-        if (!Auth::isAdmin()) {
+        if (!Auth::hasFullAccess()) {
             unset($result['cf_api_key'], $result['cf_email']);
         }
         echo json_encode(['success' => true, 'data' => $result]);
@@ -28,7 +28,7 @@ switch ($action) {
             'backup_enabled', 'backup_destination', 'backup_retention',
             'cf_enabled', 'cf_email', 'cf_api_key',
             'cf_ddns_enabled', 'cf_ddns_hostname', 'cf_ddns_zone_id', 'cf_ddns_interval',
-            'wg_enabled', 'wg_port', 'wg_subnet', 'wg_endpoint', 'wg_auto_peer',
+            'wg_enabled', 'wg_port', 'wg_subnet', 'wg_endpoint', 'wg_auto_peer', 'ssh_port',
             // Cron schedule settings
             'update_cron_enabled', 'update_cron_time',
             'backup_cron_time',
@@ -185,6 +185,38 @@ switch ($action) {
         }
         break;
 
+    case 'set_hostname':
+        Auth::requireAdmin();
+        $hostname = trim($_POST['hostname'] ?? '');
+        if (!$hostname || !preg_match('/^[a-zA-Z0-9][a-zA-Z0-9.\-]*$/', $hostname)) {
+            echo json_encode(['success' => false, 'error' => 'Invalid hostname.']);
+            break;
+        }
+        // Update system hostname
+        shell_exec('sudo /usr/bin/hostnamectl set-hostname ' . escapeshellarg($hostname) . ' 2>&1');
+        // Update /etc/hosts — replace old hostname with new one
+        $oldHostname = gethostname();
+        if ($oldHostname && $oldHostname !== $hostname) {
+            $hosts = file_get_contents('/etc/hosts');
+            if ($hosts !== false) {
+                $hosts = str_replace($oldHostname, $hostname, $hosts);
+                file_put_contents('/tmp/inetpanel_hosts', $hosts);
+                shell_exec('sudo cp /tmp/inetpanel_hosts /etc/hosts 2>&1');
+                unlink('/tmp/inetpanel_hosts');
+            }
+        }
+        DB::saveSetting('server_hostname', $hostname);
+        echo json_encode(['success' => true]);
+        break;
+
+    case 'reboot':
+        Auth::requireAdmin();
+        echo json_encode(['success' => true]);
+        // Flush output before reboot
+        if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+        shell_exec('sudo /sbin/reboot &');
+        break;
+
     case 'ddns_test':
         Auth::requireAdmin();
         // Force an immediate DDNS update attempt
@@ -212,13 +244,13 @@ switch ($action) {
 
         if ($enable) {
             // Generate peers for all existing accounts that don't have one
-            $domains = DB::fetchAll('SELECT domain_name FROM domains WHERE status = \'active\'');
-            $existing = array_column(DB::fetchAll('SELECT domain_name FROM wg_peers'), 'domain_name');
+            $users = DB::fetchAll('SELECT DISTINCT h.username FROM hosting_users h JOIN domains d ON d.hosting_user_id = h.id WHERE d.status = \'active\'');
+            $existing = array_column(DB::fetchAll('SELECT hosting_user FROM wg_peers'), 'hosting_user');
             $results  = [];
-            foreach ($domains as $d) {
-                if (!in_array($d['domain_name'], $existing)) {
-                    $r = Shell::run('wg_peer', ['--add', '--name' => $d['domain_name']]);
-                    $results[$d['domain_name']] = $r['success'];
+            foreach ($users as $u) {
+                if (!in_array($u['username'], $existing)) {
+                    $r = Shell::run('wg_peer', ['--add', '--name' => $u['username']]);
+                    $results[$u['username']] = $r['success'];
                 }
             }
             echo json_encode(['success' => true, 'generated' => $results]);

@@ -37,13 +37,13 @@ if (DB::setting('cf_enabled', '0') !== '1') {
     <div class="card-header bg-white py-3"><h6 class="mb-0">Forwarding Rules</h6></div>
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
+            <table class="table table-hover align-middle mb-0" id="email-rules-table">
                 <thead class="table-light">
                     <tr>
                         <th class="ps-4">From (address pattern)</th>
                         <th>Forward To</th>
                         <th>Status</th>
-                        <th class="text-end pe-4">Actions</th>
+                        <th class="text-end pe-4 no-sort">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="rules-tbody">
@@ -156,7 +156,28 @@ fetch('/api/dns?action=zones')
         data.data.forEach(z => {
             sel.innerHTML += `<option value="${z.id}">${z.name}</option>`;
         });
+        // Auto-load first zone
+        if (sel.value) {
+            currentZoneId = sel.value;
+            document.getElementById('rules-card').classList.remove('d-none');
+            document.getElementById('addresses-card').classList.remove('d-none');
+            document.getElementById('add-rule-btn').disabled = false;
+            loadRules();
+            loadAddresses();
+        }
     });
+
+// Reload on zone change
+document.getElementById('zone-sel').addEventListener('change', function () {
+    const zoneId = this.value;
+    if (!zoneId) return;
+    currentZoneId = zoneId;
+    document.getElementById('rules-card').classList.remove('d-none');
+    document.getElementById('addresses-card').classList.remove('d-none');
+    document.getElementById('add-rule-btn').disabled = false;
+    loadRules();
+    loadAddresses();
+});
 
 document.getElementById('load-rules-btn').addEventListener('click', function () {
     const zoneId = document.getElementById('zone-sel').value;
@@ -179,19 +200,34 @@ function loadRules() {
                 tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">No rules configured.</td></tr>'; return;
             }
             tbody.innerHTML = data.data.map(rule => {
-                const from = rule.matchers?.[0]?.value ?? '—';
-                const to   = rule.actions?.[0]?.value ?? '—';
+                const isCatchAll = rule.matchers?.[0]?.type === 'all';
+                const actionType = rule.actions?.[0]?.type ?? '';
+                let from, to;
+                if (isCatchAll) {
+                    from = '<span class="text-muted fst-italic">Catch-all (*@domain)</span>';
+                    if (actionType === 'drop') to = '<span class="text-muted">Drop (discard)</span>';
+                    else if (actionType === 'forward') to = (rule.actions[0].value ?? []).join(', ') || '—';
+                    else if (actionType === 'worker') to = '<span class="text-muted">Worker</span>';
+                    else to = actionType || '—';
+                } else {
+                    from = rule.matchers?.[0]?.value ?? '—';
+                    const rawTo = rule.actions?.[0]?.value ?? '—';
+                    to = Array.isArray(rawTo) ? rawTo.join(', ') : rawTo;
+                }
                 const enabled = rule.enabled !== false;
                 const badge = enabled ? '<span class="badge bg-success">Enabled</span>' : '<span class="badge bg-secondary">Disabled</span>';
+                const deleteBtn = isCatchAll ? '' : `<button class="btn btn-sm btn-outline-danger" onclick="deleteRule('${rule.id}')" title="Delete"><i class="fas fa-trash"></i></button>`;
                 return `<tr>
                     <td class="ps-4 small fw-medium">${from}</td>
-                    <td class="small">${Array.isArray(to) ? to.join(', ') : to}</td>
+                    <td class="small">${to}</td>
                     <td>${badge}</td>
-                    <td class="text-end pe-4">
-                        <button class="btn btn-sm btn-outline-danger" onclick="deleteRule('${rule.id}')" title="Delete"><i class="fas fa-trash"></i></button>
-                    </td>
+                    <td class="text-end pe-4">${deleteBtn}</td>
                 </tr>`;
             }).join('');
+            if (!document.getElementById('email-rules-table')._tkInit) {
+                TableKit.init('email-rules-table', { filter: true });
+                document.getElementById('email-rules-table')._tkInit = true;
+            }
         });
 }
 

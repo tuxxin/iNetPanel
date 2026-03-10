@@ -121,7 +121,7 @@ SERVERBLOCK
     # Save to panel DB
     if [ -f "$PANEL_DB" ] && command -v sqlite3 &>/dev/null; then
         sqlite3 "$PANEL_DB" << SQL 2>/dev/null
-INSERT OR REPLACE INTO wg_peers (domain_name, public_key, peer_ip, config_path, created_at, suspended)
+INSERT OR REPLACE INTO wg_peers (hosting_user, public_key, peer_ip, config_path, created_at, suspended)
 VALUES ('${PEER_NAME}', '${PEER_PUBKEY}', '${PEER_IP}', '${PEER_CONF}', datetime('now'), 0);
 SQL
     fi
@@ -169,7 +169,7 @@ PYEOF
 
     # Remove from panel DB
     if [ -f "$PANEL_DB" ] && command -v sqlite3 &>/dev/null; then
-        sqlite3 "$PANEL_DB" "DELETE FROM wg_peers WHERE domain_name='${PEER_NAME}';" 2>/dev/null
+        sqlite3 "$PANEL_DB" "DELETE FROM wg_peers WHERE hosting_user='${PEER_NAME}';" 2>/dev/null
     fi
 
     echo -e "${GREEN}Peer '${PEER_NAME}' removed.${NC}"

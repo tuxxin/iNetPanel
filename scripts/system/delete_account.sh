@@ -7,7 +7,7 @@
 #   - Linux user + home directory
 #   - MariaDB databases + user
 #   - vsftpd whitelist entry
-#   - CSF port rule (if CSF is installed)
+#   - WireGuard peer (if exists)
 # Usage (interactive):     inetp delete_account
 # Usage (non-interactive): inetp delete_account --domain example.com --confirm [--no-backup]
 # ==============================================================================
@@ -72,14 +72,6 @@ if [ -f "$VHOST_CONF" ]; then
     rm -f "$VHOST_CONF"
     if [ -n "$PORT" ]; then
         sed -i "/^Listen ${PORT}$/d" "$CUSTOM_PORTS_CONF"
-        # CSF: Close port
-        if command -v csf &>/dev/null; then
-            CURRENT=$(grep '^TCP_IN' /etc/csf/csf.conf | cut -d'"' -f2)
-            UPDATED=$(echo "$CURRENT" | sed "s/,${PORT}//g; s/${PORT},//g; s/^${PORT}$//g")
-            sed -i "s|^TCP_IN = \".*\"|TCP_IN = \"${UPDATED}\"|" /etc/csf/csf.conf
-            csf -r > /dev/null 2>&1
-            echo -e "${GREEN}CSF: Port $PORT closed.${NC}"
-        fi
     fi
     systemctl reload apache2
 fi
@@ -115,6 +107,11 @@ for DB in $DBS; do
     mysql -u root -p"$DB_ROOT_PASS" -e "DROP DATABASE \`$DB\`;" 2>/dev/null
     echo -e "  Dropped DB: ${YELLOW}$DB${NC}"
 done
+
+# ----------------------------------------------------------------
+# SSL Certificate
+# ----------------------------------------------------------------
+bash "$SCRIPTS_DIR/ssl_manage.sh" revoke "$DOMAIN" 2>/dev/null
 
 # ----------------------------------------------------------------
 # vsftpd Whitelist

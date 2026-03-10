@@ -35,13 +35,13 @@ Auth::requireAdmin();
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
+                <table class="table table-hover align-middle mb-0" id="pkg-table">
                     <thead class="table-light">
                         <tr>
                             <th class="ps-4">Extension</th>
                             <th>Package</th>
                             <th>Status</th>
-                            <th class="text-end pe-4">Action</th>
+                            <th class="text-end pe-4 no-sort">Action</th>
                         </tr>
                     </thead>
                     <tbody id="pkg-tbody">
@@ -169,11 +169,6 @@ document.getElementById('load-pkgs-btn').addEventListener('click', function () {
     if (ver) loadPackages(ver);
 });
 
-// Filter
-document.getElementById('pkg-search').addEventListener('input', function () {
-    const q = this.value.toLowerCase();
-    document.querySelectorAll('#pkg-tbody tr').forEach(row => {
-        row.style.display = row.dataset.pkg?.includes(q) ? '' : 'none';
-    });
-});
+// Sort + filter (uses existing pkg-search input)
+TableKit.init('pkg-table', { filter: true, filterInput: 'pkg-search' });
 </script>

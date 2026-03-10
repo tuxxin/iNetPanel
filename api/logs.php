@@ -41,7 +41,7 @@ switch ($action) {
         }
 
         // Sub-admin domain check
-        if (!Auth::isAdmin() && !Auth::canAccessDomain($domain)) {
+        if (!Auth::hasFullAccess() && !Auth::canAccessDomain($domain)) {
             echo json_encode(['success' => false, 'error' => 'Access denied.']); break;
         }
 

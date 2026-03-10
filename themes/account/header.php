@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
     <title><?= htmlspecialchars($GLOBALS['_page_title'] ?? 'My Account') ?> — iNetPanel</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="/assets/css/style.css" rel="stylesheet">
+    <link href="/assets/css/style.css?v=<?= @filemtime(__DIR__ . '/../../public/assets/css/style.css') ?: time() ?>" rel="stylesheet">
     <script>(function(){var t=localStorage.getItem('inetp_theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');})()</script>
     <style>
         body { background-color: var(--body-bg); font-family: 'Segoe UI', system-ui, sans-serif; color: var(--text-main); margin: 0; }

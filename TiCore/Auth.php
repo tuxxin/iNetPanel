@@ -83,6 +83,14 @@ class Auth
             return true;
         }
 
+        // Log failed login for fail2ban (inetpanel-auth jail)
+        $clientIp = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+        @file_put_contents(
+            '/var/log/inetpanel_auth.log',
+            date('Y-m-d H:i:s') . " {$clientIp} - LOGIN_FAILED user={$username}\n",
+            FILE_APPEND
+        );
+
         return false;
     }
 
@@ -139,7 +147,7 @@ class Auth
     public static function canAccessDomain(string $domain): bool
     {
         self::startSession();
-        if (self::isAdmin()) {
+        if (self::hasFullAccess()) {
             return true;
         }
         $allowed = $_SESSION['domains'] ?? [];
@@ -147,9 +155,22 @@ class Auth
     }
 
     /**
-     * Require admin role. Redirects to dashboard with 403 if not admin.
+     * Require admin or fulladmin role. Redirects to dashboard with 403 if not.
      */
     public static function requireAdmin(): void
+    {
+        self::check();
+        if (!self::hasFullAccess()) {
+            http_response_code(403);
+            header('Location: /admin/dashboard');
+            exit;
+        }
+    }
+
+    /**
+     * Require superadmin (real admin) only. Used for Panel Users management.
+     */
+    public static function requireSuperAdmin(): void
     {
         self::check();
         if (!self::isAdmin()) {

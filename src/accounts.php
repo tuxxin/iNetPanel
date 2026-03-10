@@ -2,7 +2,7 @@
 // FILE: src/accounts.php
 // iNetPanel — Accounts list (data loaded via AJAX)
 
-$isAdmin = Auth::isAdmin();
+$isAdmin = Auth::hasFullAccess();
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -24,17 +24,18 @@ $isAdmin = Auth::isAdmin();
             <table class="table table-hover align-middle mb-0" id="accounts-table">
                 <thead class="table-light">
                     <tr>
-                        <th class="ps-4">Domain</th>
+                        <th class="ps-4">User</th>
+                        <th>Domain</th>
                         <th>Port</th>
                         <th>Disk</th>
                         <th>PHP</th>
                         <th>Status</th>
                         <th>WG</th>
-                        <th class="text-end pe-4">Actions</th>
+                        <th class="text-end pe-4 no-sort">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="accounts-tbody">
-                    <tr><td colspan="7" class="text-center text-muted py-4">Loading…</td></tr>
+                    <tr><td colspan="8" class="text-center text-muted py-4">Loading…</td></tr>
                 </tbody>
             </table>
         </div>
@@ -203,7 +204,7 @@ function loadAccounts() {
         .then(data => {
             const tbody = document.getElementById('accounts-tbody');
             if (!data.success || !data.data.length) {
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No accounts found. <a href="/admin/add-account">Create one</a>.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No accounts found. <a href="/admin/add-account">Create one</a>.</td></tr>';
                 return;
             }
             tbody.innerHTML = data.data.map(a => {
@@ -212,16 +213,18 @@ function loadAccounts() {
                 const badge     = suspended
                     ? '<span class="badge bg-warning text-dark">Suspended</span>'
                     : '<span class="badge bg-success">Active</span>';
+                const username = a.username || a.domain_name;
                 const wgBadge = a.wg_ip
-                    ? `<span class="badge bg-primary-subtle text-primary" style="cursor:pointer" onclick="showWgConfig('${a.domain_name}')" title="${a.wg_ip}"><i class="fas fa-shield-alt"></i></span>`
+                    ? `<span class="badge bg-primary-subtle text-primary" style="cursor:pointer" onclick="showWgConfig('${username}')" title="${a.wg_ip}"><i class="fas fa-shield-alt"></i></span>`
                     : '<span class="text-muted">—</span>';
                 const suspendBtn = suspended
                     ? `<button class="btn btn-sm btn-outline-success me-1" onclick="suspendAccount('${a.domain_name}','resume')" title="Reactivate"><i class="fas fa-play"></i></button>`
                     : `<button class="btn btn-sm btn-outline-warning me-1" onclick="suspendAccount('${a.domain_name}','suspend')" title="Suspend"><i class="fas fa-pause"></i></button>`;
                 const deleteBtn  = `<button class="btn btn-sm btn-outline-danger" onclick="confirmDelete('${a.domain_name}')" title="Delete"><i class="fas fa-trash"></i></button>`;
-                const sshKeysBtn = `<button class="btn btn-sm btn-outline-secondary me-1" onclick="openSshKeys('${a.domain_name}')" title="SSH Keys"><i class="fas fa-key"></i></button>`;
+                const sshKeysBtn = `<button class="btn btn-sm btn-outline-secondary me-1" onclick="openSshKeys('${username}')" title="SSH Keys"><i class="fas fa-key"></i></button>`;
                 return `<tr class="${rowClass}">
-                    <td class="ps-4 fw-semibold">${a.domain_name}</td>
+                    <td class="ps-4"><span class="badge bg-light text-dark border">${username}</span></td>
+                    <td class="fw-semibold"><a href="https://${a.domain_name}" target="_blank" class="text-decoration-none">${a.domain_name} <i class="fas fa-external-link-alt ms-1" style="font-size:.7em;opacity:.5"></i></a></td>
                     <td>${a.port ?? '—'}</td>
                     <td>${a.disk ?? '—'}</td>
                     <td>${a.php_version ?? '8.4'}</td>
@@ -233,7 +236,7 @@ function loadAccounts() {
         })
         .catch(() => {
             document.getElementById('accounts-tbody').innerHTML =
-                '<tr><td colspan="7" class="text-center text-danger py-4">Failed to load accounts.</td></tr>';
+                '<tr><td colspan="8" class="text-center text-danger py-4">Failed to load accounts.</td></tr>';
         });
 }
 
@@ -315,7 +318,10 @@ document.getElementById('wg-download-btn').addEventListener('click', function ()
     a.click();
 });
 
-document.addEventListener('DOMContentLoaded', loadAccounts);
+document.addEventListener('DOMContentLoaded', function () {
+    loadAccounts();
+    TableKit.init('accounts-table', { filter: true });
+});
 
 // ── SSH Key Manager ──────────────────────────────────────────────────────────
 let sshCurrentDomain = null;

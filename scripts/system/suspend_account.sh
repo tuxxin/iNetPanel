@@ -25,16 +25,19 @@ BOLD='\033[1m'; RED='\033[1;31m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; NC='\
 
 # --- Parse flags ---
 ACTION=""
+USERNAME=""
 NON_INTERACTIVE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --domain)  DOMAIN="$2"; shift 2 ;;
-        --suspend) ACTION="suspend"; shift ;;
-        --resume)  ACTION="resume";  shift ;;
+        --domain)   DOMAIN="$2";   shift 2 ;;
+        --username) USERNAME="$2"; shift 2 ;;
+        --suspend)  ACTION="suspend"; shift ;;
+        --resume)   ACTION="resume";  shift ;;
         *) shift ;;
     esac
 done
 [ -n "$DOMAIN" ] && [ -n "$ACTION" ] && NON_INTERACTIVE=1
+[ -n "$USERNAME" ] && [ -n "$ACTION" ] && NON_INTERACTIVE=1
 
 # --- Interactive mode ---
 if [ "$NON_INTERACTIVE" -eq 0 ]; then
@@ -44,8 +47,50 @@ if [ "$NON_INTERACTIVE" -eq 0 ]; then
     read -p "Action [suspend/resume]: " ACTION
 fi
 
-[ -z "$DOMAIN" ]  && { echo -e "${RED}Domain required.${NC}"; exit 1; }
 [ -z "$ACTION" ]  && { echo -e "${RED}Action must be 'suspend' or 'resume'.${NC}"; exit 1; }
+
+# If --username provided without --domain, suspend ALL domains for that user
+if [ -n "$USERNAME" ] && [ -z "$DOMAIN" ]; then
+    echo -e "${BOLD}${ACTION^}ing all domains for user: ${USERNAME}${NC}"
+    # Lock/unlock the user account itself
+    if id "$USERNAME" &>/dev/null; then
+        if [ "$ACTION" = "suspend" ]; then
+            usermod -L "$USERNAME" 2>/dev/null
+        else
+            usermod -U "$USERNAME" 2>/dev/null
+        fi
+    fi
+    # Find all domains for this user from Apache vhosts
+    for conf in /etc/apache2/sites-available/*.conf; do
+        NAME=$(basename "$conf" .conf)
+        [[ "$NAME" == "000-default" || "$NAME" == "phpmyadmin" ]] && continue
+        DOC=$(grep -oP 'DocumentRoot\s+\K\S+' "$conf" 2>/dev/null)
+        if echo "$DOC" | grep -q "/home/$USERNAME/"; then
+            bash "$0" --domain "$NAME" --$ACTION
+        fi
+    done
+    exit 0
+fi
+
+[ -z "$DOMAIN" ]  && { echo -e "${RED}Domain required.${NC}"; exit 1; }
+
+# Auto-detect username from vhost DocumentRoot
+if [ -z "$USERNAME" ]; then
+    VHOST_CHECK="/etc/apache2/sites-available/${DOMAIN}.conf"
+    [ -f "${VHOST_CHECK}.orig" ] && VHOST_CHECK="${VHOST_CHECK}.orig"
+    if [ -f "$VHOST_CHECK" ]; then
+        DOC_ROOT_LINE=$(grep -oP 'DocumentRoot\s+\K\S+' "$VHOST_CHECK" 2>/dev/null)
+        # New format: /home/username/domain/www → extract username
+        if echo "$DOC_ROOT_LINE" | grep -qP '^/home/[^/]+/[^/]+/www'; then
+            USERNAME=$(echo "$DOC_ROOT_LINE" | cut -d/ -f3)
+        else
+            # Legacy format: /home/domain/www → username=domain
+            USERNAME="$DOMAIN"
+        fi
+    else
+        USERNAME="$DOMAIN"
+    fi
+fi
 
 VHOST_CONF="/etc/apache2/sites-available/${DOMAIN}.conf"
 VHOST_BACKUP="/etc/apache2/sites-available/${DOMAIN}.conf.orig"
@@ -89,20 +134,22 @@ if [ "$ACTION" = "suspend" ]; then
 
     ErrorDocument 503 /index.html
 
-    ErrorLog  /home/${DOMAIN}/logs/apache_error.log
-    CustomLog /home/${DOMAIN}/logs/apache_access.log combined
+    ErrorLog  /home/${USERNAME}/${DOMAIN}/logs/apache_error.log
+    CustomLog /home/${USERNAME}/${DOMAIN}/logs/apache_access.log combined
 </VirtualHost>
 VHOST
     systemctl reload apache2 2>/dev/null
 
     # 2. FTP/SSH — lock Linux user
-    if id "$DOMAIN" &>/dev/null; then
-        usermod -L "$DOMAIN" 2>/dev/null
+    if id "$USERNAME" &>/dev/null; then
+        usermod -L "$USERNAME" 2>/dev/null
     fi
 
     # 3. WireGuard — disable peer (comment out [Peer] block)
     if [ -f "$WG_CONF" ] && command -v wg &>/dev/null; then
-        PEER_CONF="${WG_PEERS_DIR}/${DOMAIN}.conf"
+        # Check both new (username) and legacy (domain) peer naming
+        PEER_CONF="${WG_PEERS_DIR}/${USERNAME}.conf"
+        [ -f "$PEER_CONF" ] || PEER_CONF="${WG_PEERS_DIR}/${DOMAIN}.conf"
         if [ -f "$PEER_CONF" ]; then
             # Extract public key from peer conf to find the block in wg0.conf
             WG_PUBKEY=$(grep '^PublicKey' "$PEER_CONF" | awk '{print $3}')
@@ -130,7 +177,7 @@ PYEOF
     # 4. Update SQLite panel DB
     if [ -f "$PANEL_DB" ] && command -v sqlite3 &>/dev/null; then
         sqlite3 "$PANEL_DB" "UPDATE domains SET status='suspended' WHERE domain_name='${DOMAIN}';" 2>/dev/null
-        sqlite3 "$PANEL_DB" "UPDATE wg_peers SET suspended=1 WHERE domain_name='${DOMAIN}';" 2>/dev/null
+        sqlite3 "$PANEL_DB" "UPDATE wg_peers SET suspended=1 WHERE hosting_user='${USERNAME}';" 2>/dev/null
     fi
 
     echo -e "${GREEN}Account '${DOMAIN}' suspended.${NC}"
@@ -159,13 +206,14 @@ if [ "$ACTION" = "resume" ]; then
     systemctl reload apache2 2>/dev/null
 
     # 2. FTP/SSH — unlock Linux user
-    if id "$DOMAIN" &>/dev/null; then
-        usermod -U "$DOMAIN" 2>/dev/null
+    if id "$USERNAME" &>/dev/null; then
+        usermod -U "$USERNAME" 2>/dev/null
     fi
 
     # 3. WireGuard — re-enable peer
     if [ -f "$WG_CONF" ] && command -v wg &>/dev/null; then
-        PEER_CONF="${WG_PEERS_DIR}/${DOMAIN}.conf"
+        PEER_CONF="${WG_PEERS_DIR}/${USERNAME}.conf"
+        [ -f "$PEER_CONF" ] || PEER_CONF="${WG_PEERS_DIR}/${DOMAIN}.conf"
         if [ -f "$PEER_CONF" ]; then
             WG_PUBKEY=$(grep '^PublicKey' "$PEER_CONF" | awk '{print $3}')
             if [ -n "$WG_PUBKEY" ]; then
@@ -179,7 +227,7 @@ if [ "$ACTION" = "resume" ]; then
     # 4. Update SQLite panel DB
     if [ -f "$PANEL_DB" ] && command -v sqlite3 &>/dev/null; then
         sqlite3 "$PANEL_DB" "UPDATE domains SET status='active' WHERE domain_name='${DOMAIN}';" 2>/dev/null
-        sqlite3 "$PANEL_DB" "UPDATE wg_peers SET suspended=0 WHERE domain_name='${DOMAIN}';" 2>/dev/null
+        sqlite3 "$PANEL_DB" "UPDATE wg_peers SET suspended=0 WHERE hosting_user='${USERNAME}';" 2>/dev/null
     fi
 
     echo -e "${GREEN}Account '${DOMAIN}' reactivated.${NC}"

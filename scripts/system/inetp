@@ -11,24 +11,47 @@ COMMAND="$1"; shift
 case "$COMMAND" in
     create_account)   bash "$SCRIPTS_DIR/create_account.sh"   "$@" ;;
     delete_account)   bash "$SCRIPTS_DIR/delete_account.sh"   "$@" ;;
+    create_user)      bash "$SCRIPTS_DIR/create_user.sh"      "$@" ;;
+    delete_user)      bash "$SCRIPTS_DIR/delete_user.sh"      "$@" ;;
+    add_domain)       bash "$SCRIPTS_DIR/add_domain.sh"       "$@" ;;
+    remove_domain)    bash "$SCRIPTS_DIR/remove_domain.sh"    "$@" ;;
     suspend_account)  bash "$SCRIPTS_DIR/suspend_account.sh"  "$@" ;;
     optimize_images)  bash "$SCRIPTS_DIR/optimize_images.sh"  "$@" ;;
     backup_accounts)  bash "$SCRIPTS_DIR/backup_accounts.sh"  "$@" ;;
     update)           bash "$SCRIPTS_DIR/inetp-update.sh"     "$@" ;;
-    wireguard_setup)  bash "$SCRIPTS_DIR/wireguard_setup.sh"  "$@" ;;
-    wg_peer)           bash "$SCRIPTS_DIR/wg_peer.sh"           "$@" ;;
+    wireguard_setup)     bash "$SCRIPTS_DIR/wireguard_setup.sh"     "$@" ;;
+    wireguard_uninstall) bash "$SCRIPTS_DIR/wireguard_uninstall.sh" "$@" ;;
+    wg_peer)             bash "$SCRIPTS_DIR/wg_peer.sh"             "$@" ;;
+    firewall)          bash "$SCRIPTS_DIR/firewall_manage.sh"   "$@" ;;
+    ssl_manage)        bash "$SCRIPTS_DIR/ssl_manage.sh"       "$@" ;;
     get_account_hash)  bash "$SCRIPTS_DIR/get_account_hash.sh"  "$@" ;;
     verify_account)    python3 "$SCRIPTS_DIR/verify_account_credentials.py" "$@" ;;
     list)
-        echo -e "${BOLD}Active Accounts:${NC}"
+        echo -e "${BOLD}Hosted Accounts:${NC}"
         FOUND=0
+        LAST_USER=""
         for conf in /etc/apache2/sites-available/*.conf; do
             NAME=$(basename "$conf" .conf)
             [[ "$NAME" == "000-default" || "$NAME" == "phpmyadmin" ]] && continue
             PORT=$(grep '<VirtualHost' "$conf" | grep -oP '(?<=:)\d+')
+            DOC=$(grep -oP 'DocumentRoot\s+\K\S+' "$conf" 2>/dev/null)
             STATUS="active"
             [ -L "/etc/apache2/sites-enabled/${NAME}.conf" ] || STATUS="suspended"
-            echo -e "  ${GREEN}${NAME}${NC}  →  port ${PORT}  [${STATUS}]"
+            # Detect username from DocumentRoot /home/<user>/<domain>/www
+            USER=""
+            if echo "$DOC" | grep -qP '^/home/[^/]+/[^/]+/www'; then
+                USER=$(echo "$DOC" | cut -d/ -f3)
+            fi
+            if [ -n "$USER" ] && [ "$USER" != "$LAST_USER" ]; then
+                [ "$FOUND" -gt 0 ] && echo ""
+                echo -e "  ${BOLD}${USER}${NC}"
+                LAST_USER="$USER"
+            fi
+            if [ -n "$USER" ]; then
+                echo -e "    ${GREEN}${NAME}${NC}  →  port ${PORT}  [${STATUS}]"
+            else
+                echo -e "  ${GREEN}${NAME}${NC}  →  port ${PORT}  [${STATUS}]"
+            fi
             FOUND=$((FOUND + 1))
         done
         [ "$FOUND" -eq 0 ] && echo "  No accounts found."
@@ -39,14 +62,21 @@ case "$COMMAND" in
         echo "  Usage: inetp <command>"
         echo ""
         echo "  Commands:"
-        echo -e "    ${GREEN}create_account${NC}    Create a new hosting account"
-        echo -e "    ${GREEN}delete_account${NC}    Delete an account and all its data"
-        echo -e "    ${GREEN}suspend_account${NC}   Suspend or resume an account"
+        echo -e "    ${GREEN}create_user${NC}       Create a new hosting user"
+        echo -e "    ${GREEN}delete_user${NC}       Delete a hosting user (must have no domains)"
+        echo -e "    ${GREEN}add_domain${NC}        Add a domain to an existing user"
+        echo -e "    ${GREEN}remove_domain${NC}     Remove a domain from a user"
+        echo -e "    ${GREEN}create_account${NC}    Create user + first domain (legacy convenience)"
+        echo -e "    ${GREEN}delete_account${NC}    Delete an account and all its data (legacy)"
+        echo -e "    ${GREEN}suspend_account${NC}   Suspend or resume an account/user"
         echo -e "    ${GREEN}optimize_images${NC}   Optimize images in a target directory"
         echo -e "    ${GREEN}backup_accounts${NC}   Backup all accounts to /backup"
         echo -e "    ${GREEN}update${NC}            Run system package update"
-        echo -e "    ${GREEN}wireguard_setup${NC}   Set up WireGuard VPN server"
+        echo -e "    ${GREEN}wireguard_setup${NC}   Set up WireGuard VPN (full server lockdown)"
+        echo -e "    ${GREEN}wireguard_uninstall${NC} Remove WireGuard and restore public access"
         echo -e "    ${GREEN}wg_peer${NC}           Manage WireGuard peers"
+        echo -e "    ${GREEN}firewall${NC}          Firewall management (status, flush, ban, unban)"
+        echo -e "    ${GREEN}ssl_manage${NC}        SSL certificate management (issue, revoke, renew, status)"
         echo -e "    ${GREEN}list${NC}              List all active accounts and ports"
         echo ""
         ;;

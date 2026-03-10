@@ -53,6 +53,15 @@ $app    = App::getInstance();
 $router = $app->getRouter();
 $config = $app->getConfig();
 
+// -------------------------------------------------------------------
+// SECURITY HEADERS — applied to every response
+// -------------------------------------------------------------------
+header('X-Frame-Options: DENY');
+header('X-Content-Type-Options: nosniff');
+header('X-Robots-Tag: noindex, nofollow');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+
 // Apply saved timezone to PHP runtime (after App init so DB can connect)
 try {
     date_default_timezone_set(DB::setting('timezone', 'UTC'));
@@ -149,6 +158,20 @@ $router->add('/admin/services', function () use ($view) {
     $view->renderAdmin('Services Status', SRC_PATH . '/services.php');
 });
 
+// Firewall
+$router->add('/admin/firewall', function () use ($view) {
+    Auth::check();
+    Auth::requireAdmin();
+    $view->renderAdmin('Firewall', SRC_PATH . '/firewall.php');
+});
+
+// SSL Certificates
+$router->add('/admin/ssl', function () use ($view) {
+    Auth::check();
+    Auth::requireAdmin();
+    $view->renderAdmin('SSL Certificates', SRC_PATH . '/ssl.php');
+});
+
 // Multi-PHP
 $router->add('/admin/multi-php', function () use ($view) {
     Auth::check();
@@ -185,9 +208,9 @@ $router->add('/admin/email', function () use ($view) {
     $view->renderAdmin('Email Routing', SRC_PATH . '/email.php');
 });
 
-// Panel Users (admin only)
+// Panel Users (superadmin only)
 $router->add('/admin/panel-users', function () use ($view) {
-    Auth::requireAdmin();
+    Auth::requireSuperAdmin();
     $view->renderAdmin('Panel Users', SRC_PATH . '/panel_users.php');
 });
 
@@ -243,6 +266,8 @@ $router->add('/api/account', function () {
 foreach ([
     '/api/accounts'    => 'accounts.php',
     '/api/services'    => 'services.php',
+    '/api/firewall'    => 'firewall.php',
+    '/api/ssl'         => 'ssl.php',
     '/api/multiphp'    => 'multiphp.php',
     '/api/packages'    => 'packages.php',
     '/api/dns'         => 'dns.php',

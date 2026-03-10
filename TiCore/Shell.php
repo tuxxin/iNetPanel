@@ -12,6 +12,10 @@ class Shell
     private static array $allowedCommands = [
         'create_account',
         'delete_account',
+        'create_user',
+        'delete_user',
+        'add_domain',
+        'remove_domain',
         'suspend_account',
         'optimize_images',
         'backup_accounts',
@@ -19,6 +23,7 @@ class Shell
         'wireguard_setup',
         'wg_peer',
         'manage_ssh_keys',
+        'ssl_manage',
         'list',
     ];
 

@@ -83,10 +83,42 @@ class AccountAuth
         exit;
     }
 
-    /** Returns the domain/username of the logged-in account holder, or null. */
-    public static function domain(): ?string
+    /** Returns the username of the logged-in account holder, or null. */
+    public static function username(): ?string
     {
         self::startSession();
         return $_SESSION['account_domain'] ?? null;
+    }
+
+    /** @deprecated Use username() — kept for backward compat */
+    public static function domain(): ?string
+    {
+        return self::username();
+    }
+
+    /**
+     * Returns the logged-in user's info including all their domains.
+     * @return array{username: string, domains: array}|null
+     */
+    public static function user(): ?array
+    {
+        $username = self::username();
+        if (!$username) return null;
+
+        $hostingUser = DB::fetchOne('SELECT * FROM hosting_users WHERE username = ?', [$username]);
+        if ($hostingUser) {
+            $domains = DB::fetchAll(
+                'SELECT domain_name, port, status FROM domains WHERE hosting_user_id = ? ORDER BY domain_name',
+                [$hostingUser['id']]
+            );
+        } else {
+            // Legacy fallback: single-domain account where username = domain
+            $domains = DB::fetchAll('SELECT domain_name, port, status FROM domains WHERE domain_name = ?', [$username]);
+        }
+
+        return [
+            'username' => $username,
+            'domains'  => $domains,
+        ];
     }
 }

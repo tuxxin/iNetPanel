@@ -4,7 +4,7 @@
 // Actions: list, create, update, delete
 
 
-Auth::requireAdmin();
+Auth::requireSuperAdmin();
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
 switch ($action) {

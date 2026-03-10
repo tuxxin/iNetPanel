@@ -8,7 +8,9 @@
 #   - File ownership is preserved after each operation
 # Quality defaults: JPEG=85%, PNG=65-80, WebP=80%, GIF=O3
 # Usage (interactive):     inetp optimize_images
-# Usage (non-interactive): inetp optimize_images --domain example.com
+# Usage (non-interactive): inetp optimize_images --username user1
+#                          inetp optimize_images --username user1 --domain example.com
+#                          inetp optimize_images --domain example.com
 #                          inetp optimize_images --dir /path/to/dir
 # ==============================================================================
 BOLD='\033[1m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; RED='\033[1;31m'; BLUE='\033[1;34m'; NC='\033[0m'
@@ -20,17 +22,43 @@ GIF_OPT_LEVEL=3
 
 # --- Parse non-interactive flags ---
 NON_INTERACTIVE=0
+USERNAME=""
+DOMAIN=""
+TARGET_DIR=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --domain) DOMAIN="$2"; shift 2 ;;
-        --dir)    TARGET_DIR="$2"; shift 2 ;;
+        --username) USERNAME="$2"; shift 2 ;;
+        --domain)   DOMAIN="$2";   shift 2 ;;
+        --dir)      TARGET_DIR="$2"; shift 2 ;;
         *) shift ;;
     esac
 done
-if [ -n "$DOMAIN" ] && [ -z "$TARGET_DIR" ]; then
-    TARGET_DIR="/home/$DOMAIN/www"
+
+if [ -n "$TARGET_DIR" ]; then
+    # Explicit directory — use as-is
     NON_INTERACTIVE=1
-elif [ -n "$TARGET_DIR" ]; then
+elif [ -n "$USERNAME" ] && [ -n "$DOMAIN" ]; then
+    # User + domain: optimize specific domain under user
+    TARGET_DIR="/home/${USERNAME}/${DOMAIN}/www"
+    NON_INTERACTIVE=1
+elif [ -n "$USERNAME" ]; then
+    # User-level: optimize all domains under this user
+    TARGET_DIR="/home/${USERNAME}"
+    NON_INTERACTIVE=1
+elif [ -n "$DOMAIN" ]; then
+    # Domain only: try new structure first, fall back to legacy
+    # Look up username from panel DB
+    PANEL_DB="/var/www/inetpanel/db/inetpanel.db"
+    if [ -f "$PANEL_DB" ]; then
+        DB_USER=$(sqlite3 "$PANEL_DB" "SELECT h.username FROM hosting_users h JOIN domains d ON d.hosting_user_id = h.id WHERE d.domain_name='${DOMAIN}' LIMIT 1;" 2>/dev/null)
+    fi
+    if [ -n "$DB_USER" ] && [ -d "/home/${DB_USER}/${DOMAIN}/www" ]; then
+        TARGET_DIR="/home/${DB_USER}/${DOMAIN}/www"
+    elif [ -d "/home/${DOMAIN}/www" ]; then
+        TARGET_DIR="/home/${DOMAIN}/www"
+    else
+        TARGET_DIR="/home/${DOMAIN}/www"
+    fi
     NON_INTERACTIVE=1
 fi
 

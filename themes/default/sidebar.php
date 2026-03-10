@@ -60,6 +60,12 @@
         <a href="/admin/services" class="<?= sidebarActive('services') ?>">
             <i class="fas fa-server"></i> <span>Services</span>
         </a>
+        <a href="/admin/firewall" class="<?= sidebarActive('firewall') ?>">
+            <i class="fas fa-shield-halved"></i> <span>Firewall</span>
+        </a>
+        <a href="/admin/ssl" class="<?= sidebarActive('/ssl') ?>">
+            <i class="fas fa-lock"></i> <span>SSL Certificates</span>
+        </a>
         <a href="/admin/multi-php" class="<?= sidebarActive('multi-php') ?>">
             <i class="fab fa-php" style="font-size: 1.2rem;"></i> <span>Multi-PHP</span>
         </a>

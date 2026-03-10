@@ -29,11 +29,21 @@ if (empty($phpVersions)) {
         <form id="create-form">
             <div class="row mb-3">
                 <div class="col-md-6">
+                    <label class="form-label fw-semibold">Username</label>
+                    <input type="text" class="form-control" id="username" name="username"
+                           placeholder="Auto-generated from domain if blank" autocomplete="off"
+                           pattern="[a-z][a-z0-9\-]{0,31}">
+                    <div class="form-text">Hosting user account. Leave blank to auto-generate from domain. If user exists, domain is added to them.</div>
+                </div>
+                <div class="col-md-6">
                     <label class="form-label fw-semibold">Domain Name <span class="text-danger">*</span></label>
                     <input type="text" class="form-control" id="domain" name="domain"
                            placeholder="example.com" autocomplete="off" required>
-                    <div class="form-text">Used as the Linux username, DB name, and site directory.</div>
+                    <div class="form-text">The website domain. Each domain gets its own vhost, database, and SSL certificate.</div>
                 </div>
+            </div>
+
+            <div class="row mb-3">
                 <div class="col-md-6">
                     <label class="form-label fw-semibold">PHP Version</label>
                     <select class="form-select" id="php_version" name="php_version">
@@ -125,6 +135,8 @@ document.getElementById('create-form').addEventListener('submit', function (e) {
     fd.append('domain', domain);
     fd.append('password', pass);
     fd.append('php_version', document.getElementById('php_version').value);
+    const usernameVal = document.getElementById('username').value.trim();
+    if (usernameVal) fd.append('username', usernameVal);
 
     fetch('/api/accounts', { method: 'POST', body: fd })
         .then(r => r.json())
@@ -134,7 +146,8 @@ document.getElementById('create-form').addEventListener('submit', function (e) {
             btn.disabled = false;
             if (data.success) {
                 alert.className = 'alert alert-success';
-                alert.innerHTML = `<strong>Account created!</strong> Domain: <code>${domain}</code> on port <code>${data.port ?? '—'}</code>. <a href="/admin/accounts">View all accounts &rarr;</a>`;
+                const uname = data.username || usernameVal || domain;
+                alert.innerHTML = `<strong>Account created!</strong> User: <code>${uname}</code> / Domain: <code>${domain}</code> on port <code>${data.port ?? '—'}</code>. <a href="/admin/accounts">View all accounts &rarr;</a>`;
                 document.getElementById('create-form').reset();
             } else {
                 alert.className = 'alert alert-danger';

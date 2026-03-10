@@ -1,7 +1,8 @@
 #!/bin/bash
 # ==============================================================================
 # inetp-update.sh — Unattended system package update
-#   Runs: apt-get update, upgrade, dist-upgrade, autoremove, autoclean
+#   Runs: apt-get update, upgrade, autoremove, autoclean
+#   Note: Uses 'upgrade' (not dist-upgrade) to prevent major version jumps
 #   Log:  /var/log/lamp_update.log
 # Usage: inetp update   (or runs automatically at midnight via cron)
 # ==============================================================================
@@ -17,13 +18,9 @@ echo "============================================================" >> "$LOG"
 apt-get update -q >> "$LOG" 2>&1
 
 # Upgrade installed packages (non-interactive, keep existing configs)
+# Uses 'upgrade' instead of 'dist-upgrade' to prevent installing new
+# packages or removing existing ones (e.g. PHP major version jumps)
 apt-get upgrade -y -qq \
-    -o Dpkg::Options::="--force-confdef" \
-    -o Dpkg::Options::="--force-confold" \
-    >> "$LOG" 2>&1
-
-# Upgrade packages that require dependency changes (new kernel, etc.)
-apt-get dist-upgrade -y -qq \
     -o Dpkg::Options::="--force-confdef" \
     -o Dpkg::Options::="--force-confold" \
     >> "$LOG" 2>&1

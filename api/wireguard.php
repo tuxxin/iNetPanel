@@ -136,18 +136,19 @@ switch ($action) {
     // AUTO CONFIGURE ALL — generate peers for every domain without one
     // ------------------------------------------------------------------
     case 'auto_configure_all':
-        $domains = DB::fetchAll("
-            SELECT d.domain_name
-            FROM domains d
-            LEFT JOIN wg_peers w ON w.domain_name = d.domain_name
+        $users = DB::fetchAll("
+            SELECT DISTINCT h.username
+            FROM hosting_users h
+            JOIN domains d ON d.hosting_user_id = h.id
+            LEFT JOIN wg_peers w ON w.hosting_user = h.username
             WHERE d.status = 'active' AND w.id IS NULL
         ");
 
         $added  = [];
         $errors = [];
 
-        foreach ($domains as $row) {
-            $dname  = $row['domain_name'];
+        foreach ($users as $row) {
+            $dname  = $row['username'];
             $result = Shell::run('wg_peer', ['--add', '--name', $dname]);
             if ($result['success']) {
                 $added[] = $dname;

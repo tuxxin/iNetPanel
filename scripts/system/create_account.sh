@@ -6,7 +6,7 @@
 #   - Apache vhost (IP:port, proxied to per-user FPM socket)
 #   - MariaDB user + database
 #   - vsftpd whitelist entry
-#   - CSF port rule (if CSF is installed)
+#   - Default landing page
 # Usage (interactive):     inetp create_account
 # Usage (non-interactive): inetp create_account --domain example.com --password secret
 # ==============================================================================
@@ -54,10 +54,11 @@ if [ "$NON_INTERACTIVE" -eq 0 ]; then
 fi
 [ -z "$PASSWORD" ] && { echo -e "${RED}Password cannot be empty.${NC}"; exit 1; }
 
-# Find next available port
+# Find next available port (skip 1443 — reserved for WireGuard)
 LAST_PORT=$(grep "^Listen" "$CUSTOM_PORTS_CONF" 2>/dev/null | awk '{print $2}' | sort -n | tail -1)
 PORT=${LAST_PORT:+$((LAST_PORT + 1))}
 PORT=${PORT:-$BASE_PORT}
+[ "$PORT" -eq 1443 ] && PORT=1444
 echo -e "${YELLOW}Assigning port: $PORT${NC}"
 
 # ----------------------------------------------------------------
@@ -128,11 +129,22 @@ fi
 # ----------------------------------------------------------------
 VHOST_CONF="/etc/apache2/sites-available/${DOMAIN}.conf"
 
+# ----------------------------------------------------------------
+# SSL Certificate — issue via Let's Encrypt (fallback to self-signed)
+# ----------------------------------------------------------------
+bash "$SCRIPTS_DIR/ssl_manage.sh" issue "$DOMAIN"
+SSL_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+SSL_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+
 cat << VHOST > "$VHOST_CONF"
 <VirtualHost *:${PORT}>
     ServerAdmin webmaster@${DOMAIN}
     ServerName  ${DOMAIN}
     DocumentRoot ${DOC_ROOT}
+
+    SSLEngine on
+    SSLCertificateFile    ${SSL_CERT}
+    SSLCertificateKeyFile ${SSL_KEY}
 
     <FilesMatch "\.php\$">
         SetHandler "proxy:unix:${FPM_SOCK}|fcgi://localhost"
@@ -182,18 +194,6 @@ sed -i "s/{{PORT}}/$PORT/g"         "$DOC_ROOT/index.php"
 sed -i "s|{{DOC_ROOT}}|$DOC_ROOT|g" "$DOC_ROOT/index.php"
 chown "$DOMAIN:www-data" "$DOC_ROOT/index.php"
 chmod 644 "$DOC_ROOT/index.php"
-
-# ----------------------------------------------------------------
-# CSF: Open port (if CSF is installed)
-# ----------------------------------------------------------------
-if command -v csf &>/dev/null; then
-    CURRENT_TCP=$(grep '^TCP_IN' /etc/csf/csf.conf | cut -d'"' -f2)
-    if ! echo "$CURRENT_TCP" | grep -qw "$PORT"; then
-        sed -i "s|^TCP_IN = \".*\"|TCP_IN = \"${CURRENT_TCP},${PORT}\"|" /etc/csf/csf.conf
-        csf -r > /dev/null 2>&1
-        echo -e "${GREEN}CSF: Port $PORT opened.${NC}"
-    fi
-fi
 
 echo ""
 echo -e "${GREEN}==============================${NC}"

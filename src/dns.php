@@ -36,7 +36,7 @@ if (DB::setting('cf_enabled', '0') !== '1') {
 <div class="card border-0 shadow-sm d-none" id="dns-table-card">
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
+            <table class="table table-hover align-middle mb-0" id="dns-table">
                 <thead class="table-light">
                     <tr>
                         <th class="ps-4">Type</th>
@@ -44,7 +44,7 @@ if (DB::setting('cf_enabled', '0') !== '1') {
                         <th>Content</th>
                         <th>TTL</th>
                         <th>Proxied</th>
-                        <th class="text-end pe-4">Actions</th>
+                        <th class="text-end pe-4 no-sort">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="dns-tbody">
@@ -151,6 +151,10 @@ document.getElementById('load-dns-btn').addEventListener('click', function () {
             const tbody = document.getElementById('dns-tbody');
             if (!data.success || !data.data.length) {
                 tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No records found.</td></tr>'; return;
+            }
+            if (!document.getElementById('dns-table')._tkInit) {
+                TableKit.init('dns-table', { filter: true });
+                document.getElementById('dns-table')._tkInit = true;
             }
             tbody.innerHTML = data.data.map(r => {
                 const proxied = r.proxied ? '<span class="badge bg-warning text-dark"><i class="fas fa-cloud"></i></span>' : '<span class="text-muted">—</span>';

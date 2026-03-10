@@ -210,8 +210,14 @@ function s(string $key, string $default = ''): string {
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label class="form-label fw-semibold">Server Hostname</label>
-                            <input type="text" class="form-control bg-light" value="<?= htmlspecialchars(gethostname()) ?>" readonly>
-                            <div class="form-text">Managed by OS.</div>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="server-hostname" value="<?= htmlspecialchars(gethostname()) ?>" placeholder="e.g. myserver.example.com">
+                                <button class="btn btn-outline-primary" type="button" id="save-hostname-btn">
+                                    <span class="spinner-border spinner-border-sm d-none me-1" id="hostname-spinner"></span>
+                                    Apply
+                                </button>
+                            </div>
+                            <div class="form-text">Changes the system hostname. A reboot is recommended after changing.</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-semibold">Timezone</label>
@@ -225,6 +231,19 @@ function s(string $key, string $default = ''): string {
                                 }
                                 ?>
                             </select>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">SSH Port</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="ssh-port" value="<?= htmlspecialchars(s('ssh_port', '1022')) ?>" min="1" max="65535" placeholder="1022">
+                                <button class="btn btn-outline-primary" type="button" id="save-ssh-port-btn">
+                                    <span class="spinner-border spinner-border-sm d-none me-1" id="ssh-port-spinner"></span>
+                                    Apply
+                                </button>
+                            </div>
+                            <div class="form-text">Changes SSH port in sshd, firewalld, and fail2ban. Current connections may drop.</div>
                         </div>
                     </div>
                     <button type="submit" class="btn btn-primary">Save General</button>
@@ -349,13 +368,29 @@ function s(string $key, string $default = ''): string {
                     <i class="fas fa-exclamation-triangle mt-1"></i>
                     <div>
                         <div class="fw-semibold">WireGuard is not installed</div>
-                        <div class="small mt-1">WireGuard was not selected during installation. To install it, run the following command on your server:</div>
-                        <code class="d-block mt-2 p-2 bg-white rounded border small">sudo apt-get install -y wireguard wireguard-tools</code>
+                        <div class="small mt-1">WireGuard was not selected during installation. To install it, run the setup script on your server:</div>
+                        <code class="d-block mt-2 p-2 bg-white rounded border small">sudo /root/scripts/wireguard_setup.sh --port 1443 --subnet 10.10.0.0/24</code>
                         <div class="small text-muted mt-2">After installation, reload this page to manage WireGuard from the panel.</div>
                     </div>
                 </div>
 
                 <?php else: ?>
+
+                <!-- Lockdown notice -->
+                <div class="alert alert-info border-0 mb-4" style="background: #e8f4f8;">
+                    <div class="d-flex align-items-start gap-2">
+                        <i class="fas fa-lock mt-1 text-primary"></i>
+                        <div>
+                            <div class="fw-semibold">Full Server Lockdown</div>
+                            <div class="small mt-1">When WireGuard is active, only port <?= htmlspecialchars(s('wg_port', '1443')) ?>/UDP is publicly open. All other services (SSH, FTP, panel, phpMyAdmin, hosted sites) are accessible only via VPN or Cloudflare Tunnel.</div>
+                            <div class="small text-muted mt-2">
+                                <i class="fas fa-shield-alt me-1"></i> Port 80 (Panel) &mdash; VPN + Cloudflare only &nbsp;
+                                <i class="fas fa-database me-1 ms-2"></i> Port 8888 (phpMyAdmin) &mdash; VPN only &nbsp;
+                                <i class="fas fa-terminal me-1 ms-2"></i> SSH/FTP &mdash; VPN only
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- Status row -->
                 <div class="d-flex align-items-center gap-3 mb-4 p-3 bg-light rounded border" id="wg-status-row">
@@ -421,6 +456,30 @@ function s(string $key, string $default = ''): string {
                 <?php endif; ?>
             </div>
 
+        </div>
+    </div>
+</div>
+
+<!-- Hostname Reboot Modal -->
+<div class="modal fade" id="rebootModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-sync-alt me-2 text-warning"></i>Hostname Changed</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>The hostname has been updated to <strong id="reboot-new-hostname"></strong>.</p>
+                <div class="alert alert-warning py-2 small mb-0">
+                    <i class="fas fa-exclamation-triangle me-1"></i>A reboot is recommended for the change to fully take effect across all services.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Reboot Later</button>
+                <button type="button" class="btn btn-warning" id="reboot-now-btn">
+                    <i class="fas fa-power-off me-1"></i>Reboot Now
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -743,6 +802,81 @@ if (updateNowBtn) {
             .catch(() => { spinner.classList.add('d-none'); this.disabled = false; showAlert('Request failed.', 'danger'); });
     });
 }
+
+// ── Hostname change ──────────────────────────────────────────────────────────
+document.getElementById('save-hostname-btn').addEventListener('click', function () {
+    const input    = document.getElementById('server-hostname');
+    const hostname = input.value.trim();
+    if (!hostname) { showAlert('Hostname cannot be empty.', 'warning'); return; }
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9.\-]*$/.test(hostname)) {
+        showAlert('Invalid hostname. Use letters, numbers, dots, and hyphens.', 'warning'); return;
+    }
+    const spinner = document.getElementById('hostname-spinner');
+    spinner.classList.remove('d-none');
+    this.disabled = true;
+    const fd = new FormData();
+    fd.append('action', 'set_hostname');
+    fd.append('hostname', hostname);
+    fetch('/api/settings', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            spinner.classList.add('d-none');
+            this.disabled = false;
+            if (data.success) {
+                showAlert('Hostname updated successfully.');
+                document.getElementById('reboot-new-hostname').textContent = hostname;
+                new bootstrap.Modal(document.getElementById('rebootModal')).show();
+            } else {
+                showAlert(data.error || 'Failed to update hostname.', 'danger');
+            }
+        })
+        .catch(() => { spinner.classList.add('d-none'); this.disabled = false; showAlert('Request failed.', 'danger'); });
+});
+
+document.getElementById('reboot-now-btn').addEventListener('click', function () {
+    this.disabled = true;
+    this.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Rebooting…';
+    const fd = new FormData();
+    fd.append('action', 'reboot');
+    fetch('/api/settings', { method: 'POST', body: fd })
+        .then(() => {
+            showAlert('Server is rebooting. This page will reload automatically…', 'warning');
+            bootstrap.Modal.getInstance(document.getElementById('rebootModal'))?.hide();
+            // Poll until the server comes back
+            const poll = setInterval(() => {
+                fetch('/api/settings?action=get', { signal: AbortSignal.timeout(3000) })
+                    .then(r => { if (r.ok) { clearInterval(poll); location.reload(); } })
+                    .catch(() => {});
+            }, 5000);
+        })
+        .catch(() => { this.disabled = false; this.innerHTML = '<i class="fas fa-power-off me-1"></i>Reboot Now'; });
+});
+
+// ── SSH port change ──────────────────────────────────────────────────────────
+document.getElementById('save-ssh-port-btn').addEventListener('click', function () {
+    const input = document.getElementById('ssh-port');
+    const port  = parseInt(input.value, 10);
+    if (!port || port < 1 || port > 65535) { showAlert('Invalid port (1–65535).', 'warning'); return; }
+    if (!confirm(`Change SSH port to ${port}? Active SSH connections may drop.`)) return;
+    const spinner = document.getElementById('ssh-port-spinner');
+    spinner.classList.remove('d-none');
+    this.disabled = true;
+    const fd = new FormData();
+    fd.append('action', 'set_ssh_port');
+    fd.append('port', port);
+    fetch('/api/firewall', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            spinner.classList.add('d-none');
+            this.disabled = false;
+            if (data.success) {
+                showAlert(`SSH port changed to ${port}. Firewalld and Fail2Ban updated.`);
+            } else {
+                showAlert(data.error || 'Failed to change SSH port.', 'danger');
+            }
+        })
+        .catch(() => { spinner.classList.add('d-none'); this.disabled = false; showAlert('Request failed.', 'danger'); });
+});
 
 // Activate tab from URL hash (e.g. /admin/settings#tab-updates)
 (function () {

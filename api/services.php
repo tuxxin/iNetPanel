@@ -14,6 +14,9 @@ $serviceList = [
     ['name' => 'mariadb',      'label' => 'MariaDB',                    'icon' => 'fas fa-database'],
     ['name' => 'vsftpd',       'label' => 'vsftpd (FTP)',               'icon' => 'fas fa-folder-open'],
     ['name' => 'wg-quick@wg0', 'label' => 'WireGuard',                 'icon' => 'fas fa-shield-halved'],
+    ['name' => 'firewalld',    'label' => 'Firewalld',                  'icon' => 'fas fa-shield-halved'],
+    ['name' => 'fail2ban',     'label' => 'Fail2Ban',                   'icon' => 'fas fa-ban'],
+    ['name' => 'cloudflared',  'label' => 'Cloudflared',                'icon' => 'fas fa-cloud'],
     ['name' => 'cron',         'label' => 'Cron',                       'icon' => 'fas fa-clock'],
 ];
 

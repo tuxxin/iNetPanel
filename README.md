@@ -1,36 +1,71 @@
 # iNetPanel
 
-A self-hosted web hosting control panel built for home servers. iNetPanel uses **Cloudflare Zero Trust Tunnels** to expose multiple domains from a single machine — no open ports, no exposed IP address, no port forwarding. Each hosting account you create automatically gets a published application routed through the tunnel, making your domains publicly accessible while keeping your home network completely private.
+**A modern, self-hosted web hosting control panel built for home servers and VPS.**
 
-Manage Apache virtual hosts, PHP versions, MariaDB databases, FTP accounts, SSH keys, DNS records, email forwarding, backups, and WireGuard VPN — all from a single admin interface.
+iNetPanel uses **Cloudflare Zero Trust Tunnels** to expose multiple domains from a single machine — no open ports, no exposed IP, no port forwarding required. Each domain you add is automatically routed through the tunnel, making it publicly accessible while keeping your server completely private.
 
----
+Manage hosting accounts, domains, SSL certificates, PHP versions, databases, DNS, email routing, backups, firewalls, and WireGuard VPN — all from a clean admin interface or CLI.
 
-## The Story
-
-I've always wanted to build a cPanel-like system for home hosting — a proper control panel that gives you full ownership over your server without the cost or complexity of commercial solutions. Before AI-assisted development, the ongoing upkeep and breadth of a project like this simply wasn't feasible as an open-source effort. With the help of AI, it has finally come to fruition.
-
-iNetPanel is the result: a capable, modern hosting panel built for people who want to self-host seriously — with Cloudflare integration, VPN-secured access, and automated management that doesn't require a team to maintain.
+> **Full documentation, screenshots, and FAQ:** [inetpanel.tuxxin.com](https://inetpanel.tuxxin.com)
 
 ---
 
-## Features
+## Quick Install
 
-- **Account Management** — Create and delete hosting accounts (Apache vhost + PHP-FPM pool + Linux user + FTP) from the panel
-- **Multi-PHP** — Install and switch between multiple PHP versions (5.6–8.5) per domain using sury.org packages
-- **SSH Key Manager** — Import, generate, and delete SSH keys for any hosting account or the root user without touching the command line
-- **Cloudflare Zero Trust Tunnel** — Automatic tunnel created at install; each new hosting account gets a published public hostname routed through the tunnel (no open ports required)
-- **Cloudflare DNS** — Full DNS record management via Cloudflare API (A, CNAME, MX, TXT, etc.)
-- **Email Forwarding** — Manage Cloudflare Email Routing rules per domain
-- **Cloudflare DDNS** — Automatically update a DNS A record when your server's IP changes
-- **WireGuard VPN** — Optional VPN with auto-provisioned peer configs per hosting account; locks SSH/FTP to VPN-only when enabled (requires router port-forwarding)
-- **Account Suspension** — Suspend/resume accounts (blocks HTTP, FTP, SSH, and WireGuard peer simultaneously)
-- **Backups** — Per-account and full backups to `/backup/` with configurable retention
-- **Service Manager** — Start, stop, and restart system services (Apache, PHP-FPM, MariaDB, vsftpd, WireGuard) from the panel
-- **Scheduled Jobs** — Configurable cron times for system updates, account backups, and panel auto-update (all written to `/etc/cron.d/` in real time)
-- **Panel Updates** — One-click update from GitHub releases with optional auto-update on a schedule
-- **Sub-Admin Users** — Create panel users restricted to specific hosting accounts
-- **phpMyAdmin** — Served on port 8888 via Apache
+```bash
+bash <(curl -s https://inetpanel.tuxxin.com/latest)
+```
+
+Then open `http://<YOUR_SERVER_IP>/install.php` to complete setup.
+
+> Requires a **clean Debian 12** server with root access.
+> Full installation guide at [inetpanel.tuxxin.com](https://inetpanel.tuxxin.com)
+
+---
+
+## Key Features
+
+### Hosting & Account Management
+- **Multi-Domain Users** — One hosting user can own multiple domains, each with its own vhost, database, and SSL certificate
+- **One-Click Account Creation** — Creates Linux user, Apache vhost, PHP-FPM pool, MariaDB database, FTP access, and SSL certificate in one step
+- **Account Suspension** — Suspend/resume accounts (blocks HTTP, FTP, SSH, and WireGuard simultaneously)
+- **Client Portal** — Hosting users log in at `/user/` to view their account info, DNS records, email routing, and connection details
+
+### SSL & Security
+- **Automatic SSL** — Let's Encrypt certificates issued via DNS-01 challenge (Cloudflare API) for every domain
+- **Self-Signed Fallback** — If Let's Encrypt fails, a self-signed cert is generated so the site still works through Cloudflare
+- **SSL Dashboard** — View all certificates, expiry dates, issue/revoke/renew from the admin panel
+- **Automatic Renewal** — Certbot cron renews certificates daily
+- **Firewall Management** — firewalld + fail2ban with SSH brute-force protection, managed from the panel
+- **Security Headers** — X-Frame-Options, X-Content-Type-Options, noindex/nofollow on all panel pages
+
+### Cloudflare Integration
+- **Zero Trust Tunnel** — Created automatically during install; every domain is published through the tunnel
+- **DNS Management** — Full Cloudflare DNS record management (A, AAAA, CNAME, MX, TXT, SRV, etc.)
+- **Email Routing** — Manage Cloudflare Email Routing rules per domain from the panel
+- **DDNS** — Automatically updates your DNS A record when your server IP changes
+
+### Server Management
+- **Multi-PHP** — Install and switch between PHP 5.6–8.5 per domain using sury.org packages
+- **PHP Package Manager** — Install/remove PHP extensions per version from the panel
+- **Service Manager** — Start, stop, restart Apache, PHP-FPM, MariaDB, vsftpd, lighttpd, WireGuard
+- **System Logs** — View Apache error/access logs, PHP-FPM logs, auth logs from the panel
+- **Image Optimizer** — Bulk optimize JPEG/PNG/GIF images with WebP generation (per-user, per-domain, or per-directory)
+- **Backups** — Per-user automated backups (all domains in one archive) with configurable retention and scheduling
+
+### VPN & Remote Access
+- **WireGuard VPN** — Optional full server lockdown; only the WireGuard port (1443/UDP) is publicly open
+- **Auto-Provisioned Peers** — One VPN peer per hosting user, auto-generated with QR code
+- **SSH Key Manager** — Import, generate, and manage SSH keys per hosting account
+
+### Panel Administration
+- **Role-Based Access** — Superadmin, full admin, and sub-admin (domain-restricted) roles
+- **Panel Updates** — One-click update from GitHub releases with optional auto-update scheduling
+- **Scheduled Jobs** — Configurable cron for system updates, backups, and panel auto-update
+- **Dark Mode** — Toggle between light and dark themes
+- **CLI Tool** — `inetp` command for all operations from the terminal
+
+> Complete feature list with screenshots: [inetpanel.tuxxin.com](https://inetpanel.tuxxin.com)
 
 ---
 
@@ -38,134 +73,119 @@ iNetPanel is the result: a capable, modern hosting panel built for people who wa
 
 | Layer | Technology | Port |
 |---|---|---|
-| Admin panel | lighttpd + PHP 8.4-FPM | 80 |
+| Admin panel | lighttpd + PHP-FPM | 80 |
+| Client portal | lighttpd (same) | 80 |
 | phpMyAdmin | Apache2 vhost | 8888 |
-| Hosting sites | Apache2 vhosts | 1080+ |
+| Hosting sites | Apache2 SSL vhosts | 1080+ |
 | Panel database | SQLite | — |
-| MariaDB | localhost-only | 3306 (internal) |
+| Site databases | MariaDB (localhost) | 3306 |
+| VPN | WireGuard | 1443/UDP |
 
-- Panel source: `/var/www/inetpanel/`
-- System scripts: `/root/scripts/`
-- Account home dirs: `/home/<domain>/`
-- Backups: `/backup/`
+### Directory Layout
+
+```
+/var/www/inetpanel/          Panel installation
+  ├── public/                Web root (only dir served by lighttpd)
+  ├── TiCore/                Core PHP classes
+  ├── api/                   JSON API endpoints
+  ├── src/                   Admin page views
+  ├── themes/                Layout templates (admin + client portal)
+  └── db/                    SQLite database
+
+/home/<username>/            Hosting user home
+  ├── <domain>/www/          Document root
+  ├── <domain>/logs/         Apache logs
+  └── tmp/                   PHP upload/session temp
+
+/root/scripts/               System scripts (deployed from repo)
+/backup/                     Automated backups
+```
+
+> **Security:** Only `public/` is web-accessible. All other directories (`TiCore/`, `api/`, `src/`, `scripts/`) are loaded internally by PHP and are unreachable via HTTP.
+
+---
+
+## CLI Tool
+
+```
+inetp --help
+```
+
+| Command | Description |
+|---|---|
+| `create_user` | Create a new hosting user (Linux + MariaDB + FTP) |
+| `delete_user` | Delete a hosting user (must have no domains) |
+| `add_domain` | Add a domain to an existing user |
+| `remove_domain` | Remove a domain from a user |
+| `create_account` | Create user + first domain in one step |
+| `delete_account` | Remove all domains + delete user |
+| `suspend_account` | Suspend or resume an account/user |
+| `ssl_manage` | SSL certificate management (issue, revoke, renew, status) |
+| `optimize_images` | Optimize images (per-user, per-domain, or directory) |
+| `backup_accounts` | Backup all accounts to /backup |
+| `firewall` | Firewall management (status, flush, ban, unban) |
+| `wireguard_setup` | Set up WireGuard VPN with full server lockdown |
+| `wg_peer` | Manage WireGuard VPN peers |
+| `update` | Run system package update |
+| `list` | List all hosting users and their domains |
 
 ---
 
 ## Requirements
 
-- Debian 12 (Bookworm) — **clean install recommended**
-- Root access
-- A domain or static IP (optional but recommended for DDNS/WireGuard)
-- Cloudflare account (optional — required for DNS management, email forwarding, and DDNS)
+- **Debian 12** (Bookworm) — clean install recommended
+- **Root access**
+- **Cloudflare account** — required for tunnel, DNS management, email routing, DDNS, and SSL (DNS-01 challenge)
 
 ---
 
 ## Installation
 
-### Step 1 — Run the server installer
+### 1. Run the installer
 
 ```bash
 bash <(curl -s https://inetpanel.tuxxin.com/latest)
 ```
 
-Or download and run manually:
+This installs and configures: lighttpd, Apache2, PHP 8.5-FPM, MariaDB, phpMyAdmin, vsftpd, Node.js 22, certbot, WireGuard (optional), all system scripts, sudoers rules, and cron jobs. **SSH is moved to port 1022** — reconnect with `ssh -p 1022` after install.
 
-```bash
-curl -O https://inetpanel.tuxxin.com/latest
-bash latest
-```
+### 2. Complete setup in the browser
 
-This installs and configures:
-- lighttpd (panel web server on port 80)
-- Apache2 (phpMyAdmin on port 8888, hosting sites on port 1080+)
-- PHP 8.4-FPM with common extensions
-- MariaDB (bound to 127.0.0.1 only)
-- phpMyAdmin
-- vsftpd (FTP server)
-- Node.js 22
-- All iNetPanel system scripts (`/root/scripts/`)
-- Sudoers rules for the panel
-- Cron jobs for system updates and account backups
+Open `http://<YOUR_SERVER_IP>/install.php` — the wizard walks through admin account creation, Cloudflare connection, timezone, WireGuard setup, and database initialization.
 
-> The installer detects conflicting services and exits safely on non-clean systems.
-> To override: `FORCE_INSTALL=1 bash latest`
+### 3. Log in
 
-### Step 2 — Complete setup in the browser
+- **Admin:** `http://<SERVER_IP>/admin`
+- **Client portal:** `http://<SERVER_IP>/user`
 
-After the installer finishes, open:
-
-```
-http://<YOUR_SERVER_IP>/install.php
-```
-
-The setup wizard will:
-1. Create the admin account
-2. Configure server hostname and timezone
-3. Optionally connect Cloudflare (API key + email)
-4. Optionally enable Cloudflare DDNS
-5. Optionally install WireGuard VPN
-6. Initialize the SQLite database
-7. Write the `.installed` lock file and redirect to login
-
-### Step 3 — Log in
-
-```
-http://<YOUR_SERVER_IP>/login
-```
+> Step-by-step guide with screenshots: [inetpanel.tuxxin.com](https://inetpanel.tuxxin.com)
 
 ---
 
 ## Updating
 
-### Manual update
-Settings → Updates → **Update Now**
-
-### Automatic update
-Settings → Updates → enable **Panel Auto-Update** and set a time.
-
-### CLI update
-```bash
-# Run on your server as root:
-php /var/www/inetpanel/scripts/panel_update.php --force
-```
-
-The updater downloads the latest release from GitHub, rsyncs the panel files (preserving `db/` and `.installed`), updates the version constant in `TiCore/Version.php`, and redeploys system scripts to `/root/scripts/`.
+| Method | How |
+|---|---|
+| **Web UI** | Settings > Updates > Update Now |
+| **Auto-update** | Settings > Updates > enable Panel Auto-Update |
+| **CLI** | `php /var/www/inetpanel/scripts/panel_update.php --force` |
 
 ---
 
-## Repository Structure
+## Security
 
-```
-inetpanel/
-├── TiCore/              # Core PHP classes (DB, Auth, Shell, Router, View, etc.)
-├── api/                 # AJAX API endpoints (JSON responses)
-├── conf/                # Configuration (Config.php)
-├── db/                  # SQLite database (gitignored)
-├── public/              # ← Web root (lighttpd docroot — only this directory is served)
-│   ├── index.php        #   Front controller / router
-│   ├── install.php      #   Setup wizard (blocked after install)
-│   └── assets/          #   CSS, JS, images
-├── scripts/
-│   ├── system/          # Bash system scripts (deployed to /root/scripts/ on update)
-│   ├── panel_update.php # Self-update script (CLI only — not web-accessible)
-│   └── ddns_update.php  # DDNS cron script (CLI only — not web-accessible)
-├── src/                 # Admin page views
-└── themes/default/      # Layout templates (header, sidebar, footer, login)
-```
-
-> **Security note:** Only `public/` is served by lighttpd (`server.document-root = "/var/www/inetpanel/public"`).
-> `TiCore/`, `api/`, `src/`, and `scripts/` are sibling directories — they are completely
-> unreachable via HTTP and are only ever loaded by PHP internally through `require_once`.
-
----
-
-## Security Notes
-
-- MariaDB is bound to `127.0.0.1` only — not accessible from outside
-- All privileged operations run through `sudo` with a strict NOPASSWD whitelist in `/etc/sudoers.d/inetpanel`
-- When WireGuard is enabled, SSH and FTP are locked to the VPN subnet; public ports 20/21/22 are closed via CSF
-- SSH private keys generated by the panel are returned once and never stored server-side
+- All hosting sites served over **HTTPS** with Let's Encrypt certificates
+- Cloudflare Tunnel means **no ports exposed** to the public internet
+- **SSH port changed to 1022** during install (configurable from panel Settings > SSH Port)
+- MariaDB bound to `127.0.0.1` only
+- All privileged operations use `sudo` with a strict NOPASSWD whitelist
+- WireGuard lockdown restricts all TCP ports to VPN subnet + localhost
+- SSH keys generated by the panel are returned once and never stored
+- Panel enforces `X-Frame-Options`, `X-Content-Type-Options`, `noindex/nofollow`, and `Referrer-Policy` headers
 - Sub-admin users can only access their assigned domains
+- Fail2ban protects SSH and panel login
+
+> Security details: [inetpanel.tuxxin.com](https://inetpanel.tuxxin.com)
 
 ---
 
@@ -175,4 +195,4 @@ MIT — see [LICENSE](LICENSE)
 
 ---
 
-Created by [Tuxxin](https://tuxxin.com) — [inetpanel.tuxxin.com](https://inetpanel.tuxxin.com)
+Created by [Tuxxin](https://tuxxin.com) | [inetpanel.tuxxin.com](https://inetpanel.tuxxin.com)

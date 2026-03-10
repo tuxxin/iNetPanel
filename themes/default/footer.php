@@ -1,5 +1,6 @@
 </div> </div> <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script src="/assets/js/main.js"></script>
+<script src="/assets/js/main.js?v=<?= @filemtime(__DIR__ . '/../../public/assets/js/main.js') ?: time() ?>"></script>
+<script src="/assets/js/tablekit.js?v=<?= @filemtime(__DIR__ . '/../../public/assets/js/tablekit.js') ?: time() ?>"></script>
 <script>
 (function () {
     var menu = document.querySelector('.sidebar-menu');
