@@ -47,11 +47,12 @@ $currentVersion = class_exists('Version') ? Version::get() : '0.000';
 log_msg("iNetPanel update check — current version: {$currentVersion}");
 
 // Fetch latest release info from GitHub
+$ghHeaders = class_exists('Version') ? Version::githubHeaders() : ['User-Agent: iNetPanel/' . $currentVersion];
 $ch = curl_init(GH_API_URL);
 curl_setopt_array($ch, [
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_TIMEOUT        => 15,
-    CURLOPT_HTTPHEADER     => ['User-Agent: iNetPanel/' . $currentVersion],
+    CURLOPT_HTTPHEADER     => $ghHeaders,
 ]);
 $raw  = curl_exec($ch);
 $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -110,7 +111,7 @@ curl_setopt_array($ch, [
     CURLOPT_FILE           => $fh,
     CURLOPT_FOLLOWLOCATION => true,
     CURLOPT_TIMEOUT        => 120,
-    CURLOPT_HTTPHEADER     => ['User-Agent: iNetPanel/' . $currentVersion],
+    CURLOPT_HTTPHEADER     => $ghHeaders,
 ]);
 curl_exec($ch);
 $curlErr  = curl_error($ch);

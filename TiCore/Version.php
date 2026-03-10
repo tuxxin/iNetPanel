@@ -27,6 +27,24 @@ class Version
     }
 
     /**
+     * Build standard GitHub API request headers, including auth token if configured.
+     */
+    public static function githubHeaders(): array
+    {
+        $headers = [
+            'User-Agent: iNetPanel/' . self::APP_VERSION,
+            'Accept: application/vnd.github+json',
+        ];
+        if (class_exists('DB')) {
+            $token = DB::setting('github_token', '');
+            if ($token !== '') {
+                $headers[] = 'Authorization: token ' . $token;
+            }
+        }
+        return $headers;
+    }
+
+    /**
      * Check if a newer version is available.
      * Fetches the latest release tag from GitHub releases.
      * Returns ['available' => bool, 'latest' => string].
@@ -40,16 +58,14 @@ class Version
             if (is_array($data)) return $data;
         }
 
-        $ctx = stream_context_create(['http' => [
-            'timeout'       => 4,
-            'user_agent'    => 'iNetPanel/' . self::APP_VERSION,
-            'ignore_errors' => true,
-        ]]);
-
-        $body = @file_get_contents(
-            'https://api.github.com/repos/tuxxin/iNetPanel/releases/latest',
-            false, $ctx
-        );
+        $ch = curl_init('https://api.github.com/repos/tuxxin/iNetPanel/releases/latest');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 4,
+            CURLOPT_HTTPHEADER     => self::githubHeaders(),
+        ]);
+        $body = curl_exec($ch);
+        curl_close($ch);
 
         if (!$body) {
             return ['available' => false, 'latest' => self::APP_VERSION];

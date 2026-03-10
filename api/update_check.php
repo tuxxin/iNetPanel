@@ -17,10 +17,7 @@ function fetchLatestRelease(): array
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT        => 10,
-        CURLOPT_HTTPHEADER     => [
-            'User-Agent: iNetPanel/' . Version::get(),
-            'Accept: application/vnd.github+json',
-        ],
+        CURLOPT_HTTPHEADER     => Version::githubHeaders(),
     ]);
     $raw  = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);

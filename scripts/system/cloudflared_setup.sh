@@ -45,7 +45,7 @@ Type=notify
 TimeoutStartSec=0
 Restart=on-failure
 RestartSec=5s
-ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --token ${TOKEN}
+ExecStart=$(command -v cloudflared) tunnel --no-autoupdate run --token ${TOKEN}
 
 [Install]
 WantedBy=multi-user.target

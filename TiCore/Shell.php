@@ -99,6 +99,7 @@ class Shell
             'php8.0-fpm', 'php7.4-fpm', 'php7.3-fpm', 'php7.2-fpm', 'php7.1-fpm',
             'php7.0-fpm', 'php5.6-fpm',
             'vsftpd', 'wg-quick@wg0', 'cron',
+            'firewalld', 'fail2ban', 'cloudflared',
         ];
 
         if (!in_array($action, $allowedActions, true)) {

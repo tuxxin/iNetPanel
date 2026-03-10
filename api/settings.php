@@ -16,7 +16,7 @@ switch ($action) {
             $result[$r['key']] = $r['value'];
         }
         if (!Auth::hasFullAccess()) {
-            unset($result['cf_api_key'], $result['cf_email']);
+            unset($result['cf_api_key'], $result['cf_email'], $result['github_token']);
         }
         echo json_encode(['success' => true, 'data' => $result]);
         break;
@@ -33,12 +33,13 @@ switch ($action) {
             'update_cron_enabled', 'update_cron_time',
             'backup_cron_time',
             'auto_update_enabled', 'auto_update_time',
+            'github_token',
         ];
         $saved = [];
         foreach ($allowed as $key) {
             if (isset($_POST[$key])) {
-                // Don't overwrite CF API key with the masked placeholder value
-                if ($key === 'cf_api_key' && preg_match('/^\*+$/', trim($_POST[$key]))) {
+                // Don't overwrite sensitive keys with the masked placeholder value
+                if (in_array($key, ['cf_api_key', 'github_token']) && preg_match('/^\*+$/', trim($_POST[$key]))) {
                     continue;
                 }
                 DB::saveSetting($key, $_POST[$key]);
@@ -128,7 +129,7 @@ switch ($action) {
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT        => 10,
-            CURLOPT_HTTPHEADER     => ['User-Agent: iNetPanel/' . Version::get()],
+            CURLOPT_HTTPHEADER     => Version::githubHeaders(),
         ]);
         $raw  = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
