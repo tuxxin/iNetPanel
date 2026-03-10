@@ -24,6 +24,7 @@ USERNAME=""
 DOMAIN=""
 PORT=""
 PHP_VER=""
+NO_CF=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -31,6 +32,7 @@ while [[ $# -gt 0 ]]; do
         --domain)      DOMAIN="$2";    shift 2 ;;
         --port)        PORT="$2";      shift 2 ;;
         --php-version) PHP_VER="$2";   shift 2 ;;
+        --no-cf)       NO_CF=1;        shift ;;
         *) shift ;;
     esac
 done
@@ -119,7 +121,11 @@ systemctl reload "php${PHP_VER}-fpm" 2>/dev/null
 # ----------------------------------------------------------------
 # SSL Certificate
 # ----------------------------------------------------------------
-bash "$SCRIPTS_DIR/ssl_manage.sh" issue "$DOMAIN"
+if [ "$NO_CF" -eq 1 ]; then
+    bash "$SCRIPTS_DIR/ssl_manage.sh" issue "$DOMAIN" --self-signed
+else
+    bash "$SCRIPTS_DIR/ssl_manage.sh" issue "$DOMAIN"
+fi
 SSL_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 SSL_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 

@@ -57,8 +57,15 @@ generate_self_signed() {
 
 case "$COMMAND" in
     issue)
-        DOMAIN="$1"
-        [ -z "$DOMAIN" ] && { echo -e "${RED}Usage: ssl_manage.sh issue <domain>${NC}"; exit 1; }
+        DOMAIN="$1"; shift
+        FORCE_SELF_SIGNED=0
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --self-signed) FORCE_SELF_SIGNED=1; shift ;;
+                *) shift ;;
+            esac
+        done
+        [ -z "$DOMAIN" ] && { echo -e "${RED}Usage: ssl_manage.sh issue <domain> [--self-signed]${NC}"; exit 1; }
 
         # Check if cert already exists and is valid
         if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
@@ -71,6 +78,13 @@ case "$COMMAND" in
                     exit 0
                 fi
             fi
+        fi
+
+        # Self-signed only mode (no Cloudflare / no Let's Encrypt)
+        if [ "$FORCE_SELF_SIGNED" -eq 1 ]; then
+            echo -e "${BOLD}Generating self-signed certificate for ${DOMAIN}...${NC}"
+            generate_self_signed "$DOMAIN"
+            exit 0
         fi
 
         ensure_credentials

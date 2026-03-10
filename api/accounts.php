@@ -125,6 +125,8 @@ switch ($action) {
         $username = trim($_POST['username'] ?? '');
         $domain   = trim($_POST['domain'] ?? '');
         $phpVer   = trim($_POST['php_version'] ?? '');
+        $skipCf   = ($_POST['skip_cf'] ?? '0') === '1';
+        $cfActive = DB::setting('cf_enabled', '0') === '1' && !$skipCf;
 
         if (!$username || !$domain) {
             echo json_encode(['success' => false, 'error' => 'Username and domain are required.']);
@@ -135,8 +137,25 @@ switch ($action) {
             break;
         }
 
+        // Pre-flight: check tunnel route conflict
+        if ($cfActive) {
+            $tunnelId  = DB::setting('cf_tunnel_id',  '');
+            $accountId = DB::setting('cf_account_id', '');
+            if ($tunnelId && $accountId) {
+                try {
+                    $cf = new CloudflareAPI();
+                    $routed = $cf->getRoutedHostnames($accountId, $tunnelId);
+                    if (isset($routed[$domain])) {
+                        echo json_encode(['success' => false, 'error' => "Domain '{$domain}' is already routed on this Cloudflare tunnel."]);
+                        break;
+                    }
+                } catch (Throwable) {}
+            }
+        }
+
         $args = ['--username' => $username, '--domain' => $domain];
         if ($phpVer) $args['--php-version'] = $phpVer;
+        if (!$cfActive) $args[] = '--no-cf';
 
         $result = Shell::run('add_domain', $args);
 
@@ -165,12 +184,12 @@ switch ($action) {
             }
 
             $warnings = [];
-            if ($port && DB::setting('cf_enabled', '0') === '1') {
+            if ($port && $cfActive) {
                 $tunnelId  = DB::setting('cf_tunnel_id',  '');
                 $accountId = DB::setting('cf_account_id', '');
                 if ($tunnelId && $accountId) {
                     try {
-                        $cf = new CloudflareAPI();
+                        if (!isset($cf)) $cf = new CloudflareAPI();
                         $cfResult = $cf->addTunnelHostname($accountId, $tunnelId, $domain, "https://localhost:{$port}");
                         if (!empty($cfResult['dns_skipped'])) {
                             $warnings[] = "Domain added to tunnel but DNS CNAME was not created — the zone for '{$domain}' is not in your Cloudflare account. Add the domain to Cloudflare and create a CNAME record pointing to {$tunnelId}.cfargotunnel.com";
@@ -179,6 +198,10 @@ switch ($action) {
                         $warnings[] = "Cloudflare tunnel setup failed: " . $e->getMessage() . ". The domain was created locally but is not routed through Cloudflare.";
                     }
                 }
+            } elseif ($port && !$cfActive) {
+                // Not using CF — open firewall port for direct access
+                shell_exec("sudo /usr/bin/firewall-cmd --permanent --add-port={$port}/tcp 2>&1");
+                shell_exec("sudo /usr/bin/firewall-cmd --reload 2>&1");
             }
             if ($warnings) $result['warnings'] = $warnings;
         }
@@ -272,6 +295,25 @@ switch ($action) {
             break;
         }
 
+        $skipCf   = ($_POST['skip_cf'] ?? '0') === '1';
+        $cfActive = DB::setting('cf_enabled', '0') === '1' && !$skipCf;
+
+        // Pre-flight: check if domain is already routed via CF tunnel
+        if ($cfActive) {
+            $tunnelId  = DB::setting('cf_tunnel_id',  '');
+            $accountId = DB::setting('cf_account_id', '');
+            if ($tunnelId && $accountId) {
+                try {
+                    $cf = new CloudflareAPI();
+                    $routed = $cf->getRoutedHostnames($accountId, $tunnelId);
+                    if (isset($routed[$domain])) {
+                        echo json_encode(['success' => false, 'error' => "Domain '{$domain}' is already routed on this Cloudflare tunnel."]);
+                        break;
+                    }
+                } catch (Throwable) {}
+            }
+        }
+
         // Step 1: Create hosting user if not exists
         $existingUser = DB::fetchOne('SELECT id FROM hosting_users WHERE username = ?', [$username]);
         if (!$existingUser) {
@@ -287,7 +329,9 @@ switch ($action) {
         }
 
         // Step 2: Add domain
-        $result = Shell::run('add_domain', ['--username' => $username, '--domain' => $domain, '--php-version' => $phpVer]);
+        $addArgs = ['--username' => $username, '--domain' => $domain, '--php-version' => $phpVer];
+        if (!$cfActive) $addArgs[] = '--no-cf';
+        $result = Shell::run('add_domain', $addArgs);
 
         if ($result['success']) {
             $hostingUser = DB::fetchOne('SELECT id FROM hosting_users WHERE username = ?', [$username]);
@@ -315,12 +359,12 @@ switch ($action) {
             }
 
             $warnings = [];
-            if ($port && DB::setting('cf_enabled', '0') === '1') {
+            if ($port && $cfActive) {
                 $tunnelId  = DB::setting('cf_tunnel_id',  '');
                 $accountId = DB::setting('cf_account_id', '');
                 if ($tunnelId && $accountId) {
                     try {
-                        $cf = new CloudflareAPI();
+                        if (!isset($cf)) $cf = new CloudflareAPI();
                         $cfResult = $cf->addTunnelHostname($accountId, $tunnelId, $domain, "https://localhost:{$port}");
                         if (!empty($cfResult['dns_skipped'])) {
                             $warnings[] = "Domain added to tunnel but DNS CNAME was not created — the zone for '{$domain}' is not in your Cloudflare account. Add the domain to Cloudflare and create a CNAME record pointing to {$tunnelId}.cfargotunnel.com";
@@ -329,6 +373,10 @@ switch ($action) {
                         $warnings[] = "Cloudflare tunnel setup failed: " . $e->getMessage() . ". The domain was created locally but is not routed through Cloudflare.";
                     }
                 }
+            } elseif ($port && !$cfActive) {
+                // Not using CF — open firewall port for direct access
+                shell_exec("sudo /usr/bin/firewall-cmd --permanent --add-port={$port}/tcp 2>&1");
+                shell_exec("sudo /usr/bin/firewall-cmd --reload 2>&1");
             }
             if ($warnings) $result['warnings'] = $warnings;
         }
@@ -499,6 +547,127 @@ switch ($action) {
         }
 
         echo json_encode(['success' => true, 'data' => $domains]);
+        break;
+
+    // =========================================================================
+    // CLOUDFLARE DOMAIN HELPERS
+    // =========================================================================
+
+    case 'domain_options':
+        Auth::requireAdmin();
+        $cfEnabled = DB::setting('cf_enabled', '0') === '1';
+        if (!$cfEnabled) {
+            echo json_encode(['success' => true, 'cf_enabled' => false, 'zones' => [], 'routed_hostnames' => []]);
+            break;
+        }
+
+        $tunnelId  = DB::setting('cf_tunnel_id',  '');
+        $accountId = DB::setting('cf_account_id', '');
+        $force     = ($_GET['force'] ?? '0') === '1';
+        $cacheTs   = (int)DB::setting('cf_domain_cache_ts', '0');
+
+        // Return cached data if fresh (5 min) and not forced
+        if (!$force && $cacheTs && (time() - $cacheTs < 300)) {
+            $cached = DB::setting('cf_domain_cache_json', '');
+            if ($cached) {
+                echo $cached;
+                break;
+            }
+        }
+
+        $cf = new CloudflareAPI();
+
+        // Get zones
+        $zonesRaw = $cf->listZones();
+        $zones = [];
+        foreach ($zonesRaw['result'] ?? [] as $z) {
+            $zones[] = ['id' => $z['id'], 'name' => $z['name'], 'status' => $z['status'] ?? 'unknown'];
+        }
+
+        // Get routed hostnames from our tunnel
+        $routedHostnames = [];
+        if ($tunnelId && $accountId) {
+            $routedHostnames = $cf->getRoutedHostnames($accountId, $tunnelId);
+        }
+
+        // Check CNAME targets per zone for external tunnel conflicts
+        foreach ($zones as &$z) {
+            $cnames = $cf->getZoneCnameTargets($z['id']);
+            $z['routed']   = isset($routedHostnames[$z['name']]);
+            $z['available'] = !$z['routed'];
+            // Check if root domain has a CNAME to another tunnel
+            if (isset($cnames[$z['name']]) && str_contains($cnames[$z['name']], 'cfargotunnel.com')
+                && !str_contains($cnames[$z['name']], $tunnelId)) {
+                $z['cname_conflict'] = true;
+                $z['available'] = false;
+            } else {
+                $z['cname_conflict'] = false;
+            }
+            $z['cnames'] = $cnames;
+        }
+        unset($z);
+
+        $response = json_encode([
+            'success'           => true,
+            'cf_enabled'        => true,
+            'tunnel_id'         => $tunnelId,
+            'zones'             => $zones,
+            'routed_hostnames'  => array_keys($routedHostnames),
+        ]);
+
+        DB::saveSetting('cf_domain_cache_json', $response);
+        DB::saveSetting('cf_domain_cache_ts', (string)time());
+
+        echo $response;
+        break;
+
+    case 'check_domain':
+        Auth::requireAdmin();
+        $domain = trim($_GET['domain'] ?? '');
+        if (!$domain) {
+            echo json_encode(['success' => false, 'error' => 'Domain required.']);
+            break;
+        }
+
+        $cfEnabled = DB::setting('cf_enabled', '0') === '1';
+        if (!$cfEnabled) {
+            echo json_encode(['success' => true, 'available' => true, 'cf_enabled' => false, 'cf_managed' => false]);
+            break;
+        }
+
+        $tunnelId  = DB::setting('cf_tunnel_id',  '');
+        $accountId = DB::setting('cf_account_id', '');
+        $cf = new CloudflareAPI();
+
+        // Check our tunnel ingress
+        $routed = [];
+        if ($tunnelId && $accountId) {
+            $routed = $cf->getRoutedHostnames($accountId, $tunnelId);
+        }
+        if (isset($routed[$domain])) {
+            echo json_encode(['success' => true, 'available' => false, 'reason' => 'Already routed on this Cloudflare tunnel.', 'cf_managed' => true]);
+            break;
+        }
+
+        // Check if zone exists in CF
+        $zoneId = $cf->findZoneForHostname($domain);
+        if (!$zoneId) {
+            echo json_encode(['success' => true, 'available' => true, 'cf_managed' => false,
+                'warning' => 'Domain zone not found in Cloudflare. It will be created locally only unless added to Cloudflare first.']);
+            break;
+        }
+
+        // Check CNAME records for tunnel conflicts
+        $cnames = $cf->listDNSRecords($zoneId, ['type' => 'CNAME', 'name' => $domain]);
+        foreach ($cnames['result'] ?? [] as $r) {
+            if (str_contains($r['content'] ?? '', 'cfargotunnel.com')) {
+                echo json_encode(['success' => true, 'available' => false,
+                    'reason' => 'A CNAME record for this domain already points to a Cloudflare tunnel.', 'cf_managed' => true]);
+                break 2;
+            }
+        }
+
+        echo json_encode(['success' => true, 'available' => true, 'cf_managed' => true]);
         break;
 
     // =========================================================================

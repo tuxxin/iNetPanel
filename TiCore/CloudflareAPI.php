@@ -251,7 +251,7 @@ class CloudflareAPI
      * Find the CF zone ID that manages the given hostname.
      * Matches by stripping subdomains until a zone is found.
      */
-    private function findZoneForHostname(string $hostname): string|null
+    public function findZoneForHostname(string $hostname): string|null
     {
         $parts = explode('.', $hostname);
         while (count($parts) >= 2) {
@@ -263,6 +263,41 @@ class CloudflareAPI
             array_shift($parts);
         }
         return null;
+    }
+
+    // -------------------------------------------------------------------------
+    // Tunnel Inspection
+    // -------------------------------------------------------------------------
+
+    /**
+     * Get all hostnames currently routed through a tunnel.
+     * Returns hostname => service map, excluding the catch-all rule.
+     */
+    public function getRoutedHostnames(string $accountId, string $tunnelId): array
+    {
+        $config  = $this->getTunnelConfig($accountId, $tunnelId);
+        $ingress = $config['result']['config']['ingress'] ?? [];
+        $map = [];
+        foreach ($ingress as $rule) {
+            if (!empty($rule['hostname'])) {
+                $map[$rule['hostname']] = $rule['service'] ?? '';
+            }
+        }
+        return $map;
+    }
+
+    /**
+     * Get all CNAME records for a zone, returning name => target map.
+     * Useful for detecting hostnames routed via other tunnels.
+     */
+    public function getZoneCnameTargets(string $zoneId): array
+    {
+        $records = $this->listDNSRecords($zoneId, ['type' => 'CNAME', 'per_page' => 100]);
+        $map = [];
+        foreach ($records['result'] ?? [] as $r) {
+            $map[$r['name']] = $r['content'];
+        }
+        return $map;
     }
 
     // -------------------------------------------------------------------------
