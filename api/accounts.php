@@ -541,9 +541,11 @@ switch ($action) {
                 [$username]
             );
             if (($remaining['cnt'] ?? 0) === 0) {
-                Shell::run('delete_user', ['--username' => $username]);
-                DB::delete('hosting_users', 'username = ?', [$username]);
-                DB::delete('wg_peers', 'hosting_user = ?', [$username]);
+                $delResult = Shell::run('delete_user', ['--username' => $username]);
+                if ($delResult['success']) {
+                    DB::delete('hosting_users', 'username = ?', [$username]);
+                    DB::delete('wg_peers', 'hosting_user = ?', [$username]);
+                }
             }
         }
 

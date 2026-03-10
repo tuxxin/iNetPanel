@@ -46,10 +46,13 @@ if ! id "$USERNAME" &>/dev/null; then
     exit 1
 fi
 
-# Check domain not already configured
+# If domain already configured, clean up old vhost and recreate
 if [ -f "/etc/apache2/sites-available/${DOMAIN}.conf" ]; then
-    echo -e "${RED}Domain '${DOMAIN}' already has a vhost configured.${NC}"
-    exit 1
+    echo -e "${YELLOW}Domain '${DOMAIN}' vhost already exists — recreating.${NC}"
+    OLD_PORT=$(grep '<VirtualHost' "/etc/apache2/sites-available/${DOMAIN}.conf" | grep -oP '(?<=:)\d+')
+    a2dissite "${DOMAIN}.conf" > /dev/null 2>&1
+    rm -f "/etc/apache2/sites-available/${DOMAIN}.conf"
+    [ -n "$OLD_PORT" ] && sed -i "/^Listen ${OLD_PORT}$/d" "$CUSTOM_PORTS_CONF"
 fi
 
 # Default PHP version

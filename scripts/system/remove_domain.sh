@@ -53,7 +53,7 @@ if [ -f "$VHOST_CONF" ]; then
     if [ -n "$PORT" ]; then
         sed -i "/^Listen ${PORT}$/d" "$CUSTOM_PORTS_CONF"
     fi
-    systemctl reload apache2
+    systemctl reload apache2 || systemctl restart apache2
 fi
 
 # ----------------------------------------------------------------

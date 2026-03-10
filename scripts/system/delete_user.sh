@@ -24,12 +24,6 @@ done
 
 [ -z "$USERNAME" ] && { echo -e "${RED}Username required (--username).${NC}"; exit 1; }
 
-# Check user exists
-if ! id "$USERNAME" &>/dev/null; then
-    echo -e "${RED}System user '${USERNAME}' does not exist.${NC}"
-    exit 1
-fi
-
 # Check for remaining domains (directories under /home/username/ that contain www/)
 REMAINING=0
 if [ -d "/home/$USERNAME" ]; then
@@ -41,6 +35,10 @@ fi
 if [ "$REMAINING" -gt 0 ] && [ "$FORCE" -eq 0 ]; then
     echo -e "${RED}User '${USERNAME}' still has ${REMAINING} domain(s). Remove all domains first, or use --force.${NC}"
     exit 1
+fi
+
+if ! id "$USERNAME" &>/dev/null; then
+    echo -e "${YELLOW}System user '${USERNAME}' does not exist — cleaning up remaining records.${NC}"
 fi
 
 echo -e "${BOLD}--- Deleting Hosting User: ${USERNAME} ---${NC}"
@@ -63,10 +61,16 @@ systemctl reload vsftpd 2>/dev/null || systemctl restart vsftpd
 # ----------------------------------------------------------------
 # Linux User + Home Directory
 # ----------------------------------------------------------------
-killall -u "$USERNAME" 2>/dev/null
-sleep 1
-userdel -r "$USERNAME" 2>/dev/null
-echo -e "  Linux user and home directory removed."
+if id "$USERNAME" &>/dev/null; then
+    killall -9 -u "$USERNAME" 2>/dev/null
+    sleep 1
+    userdel -r "$USERNAME" 2>/dev/null
+    echo -e "  Linux user and home directory removed."
+else
+    # User already gone — clean up home directory if it remains
+    [ -d "/home/$USERNAME" ] && rm -rf "/home/$USERNAME"
+    echo -e "  Home directory cleaned up."
+fi
 
 echo ""
 echo -e "${GREEN}Hosting user '${USERNAME}' fully deleted.${NC}"

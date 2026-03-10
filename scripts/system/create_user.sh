@@ -31,25 +31,22 @@ if ! echo "$USERNAME" | grep -qP '^[a-z][a-z0-9\-]{0,31}$'; then
     exit 1
 fi
 
-# Check if user already exists
-if id "$USERNAME" &>/dev/null; then
-    echo -e "${RED}System user '${USERNAME}' already exists.${NC}"
-    exit 1
-fi
-
 echo -e "${BOLD}--- Creating Hosting User: ${USERNAME} ---${NC}"
 
 # ----------------------------------------------------------------
 # Linux User
 # Primary group www-data: FTP-uploaded files will be group www-data
 # ----------------------------------------------------------------
-useradd -m -d "/home/$USERNAME" -s "$SHELL_PATH" -g www-data "$USERNAME"
-echo "$USERNAME:$PASSWORD" | chpasswd
-
-# ll alias for the new user
-printf "\n# Custom Aliases\nalias ll='ls -alh'\n" >> "/home/$USERNAME/.bashrc"
-chown "$USERNAME:www-data" "/home/$USERNAME/.bashrc"
-chmod 750 "/home/$USERNAME"
+if id "$USERNAME" &>/dev/null; then
+    echo -e "${YELLOW}System user '${USERNAME}' already exists — updating password.${NC}"
+    echo "$USERNAME:$PASSWORD" | chpasswd
+else
+    useradd -m -d "/home/$USERNAME" -s "$SHELL_PATH" -g www-data "$USERNAME"
+    echo "$USERNAME:$PASSWORD" | chpasswd
+    printf "\n# Custom Aliases\nalias ll='ls -alh'\n" >> "/home/$USERNAME/.bashrc"
+    chown "$USERNAME:www-data" "/home/$USERNAME/.bashrc"
+    chmod 750 "/home/$USERNAME"
+fi
 
 # ----------------------------------------------------------------
 # MariaDB User (shared across all domains for this hosting user)
