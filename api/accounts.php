@@ -530,6 +530,11 @@ switch ($action) {
         }
 
         echo json_encode(shellResult($result));
+        // Flush response to client, then reload FPM to unload the removed pool.
+        if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+        $delPhpVer = $domainRow['php_version'] ?? '8.4';
+        $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $delPhpVer) . '-fpm';
+        exec("sudo systemctl reload " . escapeshellarg($fpmService) . " 2>/dev/null");
         break;
 
     // =========================================================================
