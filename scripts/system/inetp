@@ -4,11 +4,98 @@
 # Usage: inetp <command>
 # ==============================================================================
 SCRIPTS_DIR="/root/scripts"
-BOLD='\033[1m'; GREEN='\033[1;32m'; NC='\033[0m'
+BOLD='\033[1m'; GREEN='\033[1;32m'; CYAN='\033[1;36m'; DIM='\033[2m'; NC='\033[0m'
+PANEL_DIR="/var/www/inetpanel"
 
 COMMAND="$1"; shift
 
 case "$COMMAND" in
+    -v|--version|version)
+        # Panel version
+        PANEL_VER=$(php -r "require '${PANEL_DIR}/TiCore/Version.php'; echo Version::get();" 2>/dev/null || echo "unknown")
+        echo -e "${BOLD}inetp${NC} v${PANEL_VER}"
+        echo ""
+
+        # OS
+        if [ -f /etc/os-release ]; then
+            OS_NAME=$(. /etc/os-release && echo "$PRETTY_NAME")
+        else
+            OS_NAME=$(uname -sr)
+        fi
+        echo -e "  ${GREEN}OS${NC}            $OS_NAME"
+        echo -e "  ${GREEN}Kernel${NC}        $(uname -r)"
+
+        # Apache
+        APACHE_VER=$(apache2 -v 2>/dev/null | head -1 | grep -oP 'Apache/\K\S+' || echo "not installed")
+        echo -e "  ${GREEN}Apache${NC}        $APACHE_VER"
+
+        # lighttpd
+        LIGHTY_VER=$(lighttpd -v 2>/dev/null | grep -oP 'lighttpd/\K\S+' || echo "not installed")
+        echo -e "  ${GREEN}lighttpd${NC}      $LIGHTY_VER"
+
+        # PHP versions
+        PHP_VERS=""
+        for fpm in /usr/sbin/php-fpm*; do
+            [ -f "$fpm" ] || continue
+            v=$(echo "$fpm" | grep -oP '[0-9]+\.[0-9]+')
+            [ -n "$v" ] && PHP_VERS="${PHP_VERS} ${v}"
+        done
+        PHP_DEFAULT=$(php -r "echo PHP_VERSION;" 2>/dev/null || echo "unknown")
+        echo -e "  ${GREEN}PHP (CLI)${NC}     $PHP_DEFAULT"
+        echo -e "  ${GREEN}PHP-FPM${NC}      ${PHP_VERS:- none}"
+
+        # MariaDB / MySQL
+        DB_VER=$(mysql --version 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1 || echo "not installed")
+        echo -e "  ${GREEN}MariaDB${NC}       $DB_VER"
+
+        # Node.js
+        NODE_VER=$(node -v 2>/dev/null || echo "not installed")
+        echo -e "  ${GREEN}Node.js${NC}       $NODE_VER"
+
+        # Certbot
+        CB_VER=$(certbot --version 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' || echo "not installed")
+        echo -e "  ${GREEN}Certbot${NC}       $CB_VER"
+
+        # WireGuard
+        if command -v wg &>/dev/null; then
+            WG_STATUS="installed"
+            [ -f /etc/wireguard/wg0.conf ] && WG_STATUS="configured"
+            systemctl is-active wg-quick@wg0 &>/dev/null && WG_STATUS="active"
+        else
+            WG_STATUS="not installed"
+        fi
+        echo -e "  ${GREEN}WireGuard${NC}     $WG_STATUS"
+
+        # cloudflared
+        CF_VER=$(cloudflared --version 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' || echo "not installed")
+        echo -e "  ${GREEN}cloudflared${NC}   $CF_VER"
+
+        # Firewall
+        FW_STATUS="not installed"
+        if command -v firewall-cmd &>/dev/null; then
+            FW_STATUS=$(firewall-cmd --state 2>/dev/null || echo "inactive")
+        fi
+        echo -e "  ${GREEN}Firewall${NC}      $FW_STATUS"
+
+        # Fail2Ban
+        F2B_VER=$(fail2ban-client --version 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' || echo "not installed")
+        echo -e "  ${GREEN}Fail2Ban${NC}      $F2B_VER"
+
+        # vsftpd
+        VSFTPD_VER=$(dpkg -s vsftpd 2>/dev/null | grep -oP 'Version: \K[\d]+\.[\d]+\.[\d]+' || echo "not installed")
+        echo -e "  ${GREEN}vsftpd${NC}        $VSFTPD_VER"
+
+        # Disk
+        DISK_USAGE=$(df -h / 2>/dev/null | awk 'NR==2{print $3 "/" $2 " (" $5 ")"}')
+        echo ""
+        echo -e "  ${GREEN}Disk${NC}          $DISK_USAGE"
+
+        # Accounts
+        ACCT_COUNT=$(ls /etc/apache2/sites-available/*.conf 2>/dev/null | grep -v -cE '000-default|default-ssl|phpmyadmin')
+        echo -e "  ${GREEN}Accounts${NC}      $ACCT_COUNT hosted domain(s)"
+        echo ""
+        ;;
+
     create_account)   bash "$SCRIPTS_DIR/create_account.sh"   "$@" ;;
     delete_account)   bash "$SCRIPTS_DIR/delete_account.sh"   "$@" ;;
     create_user)      bash "$SCRIPTS_DIR/create_user.sh"      "$@" ;;
@@ -80,6 +167,7 @@ case "$COMMAND" in
         echo -e "    ${GREEN}firewall${NC}          Firewall management (status, flush, ban, unban)"
         echo -e "    ${GREEN}ssl_manage${NC}        SSL certificate management (issue, revoke, renew, status)"
         echo -e "    ${GREEN}list${NC}              List all active accounts and ports"
+        echo -e "    ${GREEN}-v${NC}                Show version and system info"
         echo ""
         ;;
 esac
