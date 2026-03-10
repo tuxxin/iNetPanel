@@ -227,6 +227,18 @@ if ($systemScripts) {
     log_msg('Deployed ' . count($systemScripts) . ' system script(s) to ' . $scriptDest . '/');
 }
 
+// Ensure sudoers allows www-data to run panel_update.php via sudo
+$sudoersFile = '/etc/sudoers.d/inetpanel';
+if (file_exists($sudoersFile)) {
+    $sudoers = file_get_contents($sudoersFile);
+    $needLine = 'www-data ALL=(root) NOPASSWD: /usr/bin/php* /var/www/inetpanel/scripts/panel_update.php *';
+    if (strpos($sudoers, 'panel_update.php') === false) {
+        file_put_contents($sudoersFile, $sudoers . "\n" . $needLine . "\n");
+        chmod($sudoersFile, 0440);
+        log_msg('Added panel_update.php sudo rule.');
+    }
+}
+
 // Update SQLite record
 if (class_exists('DB')) {
     try {

@@ -106,7 +106,7 @@ switch ($action) {
             if ($autoEnabled === '1') {
                 $phpBin2  = 'php' . DB::setting('php_default_version', '8.4');
                 $autoCron = "# iNetPanel managed — panel auto-update\n"
-                    . "{$aMin} {$aHour} * * * www-data {$phpBin2} /var/www/inetpanel/scripts/panel_update.php >> /var/log/inetpanel_update.log 2>&1\n";
+                    . "{$aMin} {$aHour} * * * root {$phpBin2} /var/www/inetpanel/scripts/panel_update.php >> /var/log/inetpanel_update.log 2>&1\n";
                 $proc = popen('sudo /root/scripts/manage_cron.sh write inetpanel_autoupdate', 'w');
                 fwrite($proc, $autoCron); pclose($proc);
             } else {
@@ -118,7 +118,8 @@ switch ($action) {
 
     case 'update_now':
         Auth::requireAdmin();
-        $output = shell_exec('php /var/www/inetpanel/scripts/panel_update.php --force 2>&1');
+        $phpBin = 'php' . DB::setting('php_default_version', '8.4');
+        $output = shell_exec("sudo {$phpBin} /var/www/inetpanel/scripts/panel_update.php --force 2>&1");
         echo json_encode(['success' => true, 'output' => trim($output ?: 'No output.')]);
         break;
 
