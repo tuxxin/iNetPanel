@@ -1,123 +1,141 @@
 #!/bin/bash
 # ==============================================================================
-# delete_account.sh — Fully removes a hosted account
+# delete_account.sh — Fully removes a hosting account (user + all domains)
+#   - Removes all domains via remove_domain.sh
+#   - Removes the hosting user via delete_user.sh
 #   - Optional backup before deletion
-#   - Apache vhost + port entry
-#   - PHP-FPM pool config
-#   - Linux user + home directory
-#   - MariaDB databases + user
-#   - vsftpd whitelist entry
-#   - WireGuard peer (if exists)
+#   - Cloudflare tunnel routes removed via panel API (not handled here)
 # Usage (interactive):     inetp delete_account
-# Usage (non-interactive): inetp delete_account --domain example.com --confirm [--no-backup]
+# Usage (non-interactive): inetp delete_account --username <user> --confirm [--no-backup]
+# Legacy compat:           inetp delete_account --domain <domain> --confirm [--no-backup]
 # ==============================================================================
-CUSTOM_PORTS_CONF="/etc/apache2/ports_domains.conf"
-DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
-PHP_VER="8.4"
 SCRIPTS_DIR="/root/scripts"
+PANEL_DB="/var/www/inetpanel/db/inetpanel.db"
 
 BOLD='\033[1m'; RED='\033[1;31m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
-# --- Parse non-interactive flags ---
-NON_INTERACTIVE=0
+# --- Parse flags ---
+USERNAME=""
+DOMAIN=""
 NO_BACKUP=0
 CONFIRM=""
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --domain)    DOMAIN="$2";  shift 2 ;;
+        --username)  USERNAME="$2"; shift 2 ;;
+        --domain)    DOMAIN="$2";   shift 2 ;;
         --confirm)   CONFIRM="yes"; shift ;;
         --no-backup) NO_BACKUP=1;   shift ;;
         *) shift ;;
     esac
 done
-[ -n "$DOMAIN" ] && [ "$CONFIRM" = "yes" ] && NON_INTERACTIVE=1
 
 echo -e "${BOLD}--- Delete Account ---${NC}"
 
-if [ "$NON_INTERACTIVE" -eq 0 ]; then
-    read -p "Enter Domain to delete: " DOMAIN
+# If --domain given without --username, resolve the username
+if [ -n "$DOMAIN" ] && [ -z "$USERNAME" ]; then
+    # Try to find username from Apache vhost DocumentRoot
+    VHOST="/etc/apache2/sites-available/${DOMAIN}.conf"
+    if [ -f "$VHOST" ]; then
+        DOC_ROOT=$(grep -oP 'DocumentRoot\s+\K\S+' "$VHOST" 2>/dev/null)
+        if echo "$DOC_ROOT" | grep -qP '^/home/[^/]+/[^/]+/www'; then
+            USERNAME=$(echo "$DOC_ROOT" | cut -d/ -f3)
+        fi
+    fi
+    # Fallback: try panel DB
+    if [ -z "$USERNAME" ] && [ -f "$PANEL_DB" ]; then
+        USERNAME=$(sqlite3 "$PANEL_DB" "SELECT h.username FROM hosting_users h JOIN domains d ON d.hosting_user_id = h.id WHERE d.domain_name = '${DOMAIN}' LIMIT 1" 2>/dev/null)
+    fi
+    if [ -z "$USERNAME" ]; then
+        echo -e "${RED}Could not resolve username for domain '${DOMAIN}'.${NC}"
+        exit 1
+    fi
 fi
-[ -z "$DOMAIN" ] && exit 1
 
-if ! id "$DOMAIN" &>/dev/null && [ ! -f "/etc/apache2/sites-available/${DOMAIN}.conf" ]; then
-    echo -e "${RED}Account '$DOMAIN' not found.${NC}"; exit 1
+# Interactive mode: ask for username
+if [ -z "$USERNAME" ]; then
+    read -p "Enter username to delete: " USERNAME
+fi
+[ -z "$USERNAME" ] && { echo -e "${RED}No username provided.${NC}"; exit 1; }
+
+# Verify user exists
+if ! id "$USERNAME" &>/dev/null; then
+    echo -e "${RED}System user '${USERNAME}' does not exist.${NC}"
+    exit 1
 fi
 
-if [ "$NON_INTERACTIVE" -eq 0 ]; then
-    echo -e "${YELLOW}WARNING: This permanently deletes all files and databases for '$DOMAIN'.${NC}"
+# Find all domains for this user
+DOMAINS=()
+if [ -d "/home/$USERNAME" ]; then
+    for dir in /home/$USERNAME/*/www; do
+        [ -d "$dir" ] || continue
+        D=$(basename "$(dirname "$dir")")
+        # Skip tmp and other non-domain dirs
+        [ "$D" = "tmp" ] && continue
+        DOMAINS+=("$D")
+    done
+fi
+
+echo -e "  User:    ${BOLD}$USERNAME${NC}"
+echo -e "  Domains: ${BOLD}${#DOMAINS[@]}${NC}"
+if [ ${#DOMAINS[@]} -gt 0 ]; then
+    for D in "${DOMAINS[@]}"; do
+        echo -e "    - $D"
+    done
+fi
+
+# Confirm
+if [ "$CONFIRM" != "yes" ]; then
+    echo ""
+    echo -e "${YELLOW}WARNING: This permanently deletes user '${USERNAME}', all their domains, files, and databases.${NC}"
     read -p "Type 'yes' to confirm: " CONFIRM
 fi
 [[ "$CONFIRM" != "yes" ]] && { echo "Aborted."; exit 0; }
 
-# ----------------------------------------------------------------
-# Optional backup before deletion
-# ----------------------------------------------------------------
-if [ "$NON_INTERACTIVE" -eq 0 ]; then
-    read -p "Create a backup before deleting? (y/n): " DO_BACKUP
-    [[ "$DO_BACKUP" == "y" ]] && NO_BACKUP=0 || NO_BACKUP=1
-fi
+# Optional backup
 if [ "$NO_BACKUP" -eq 0 ]; then
-    echo -e "${YELLOW}Backing up $DOMAIN...${NC}"
-    bash "$SCRIPTS_DIR/backup_accounts.sh" --single "$DOMAIN"
-    echo -e "${GREEN}Backup complete. Proceeding with deletion.${NC}"
-fi
-
-# ----------------------------------------------------------------
-# Apache VHost
-# ----------------------------------------------------------------
-VHOST_CONF="/etc/apache2/sites-available/${DOMAIN}.conf"
-if [ -f "$VHOST_CONF" ]; then
-    PORT=$(grep '<VirtualHost' "$VHOST_CONF" | grep -oP '(?<=:)\d+')
-    a2dissite "${DOMAIN}.conf" > /dev/null 2>&1
-    rm -f "$VHOST_CONF"
-    if [ -n "$PORT" ]; then
-        sed -i "/^Listen ${PORT}$/d" "$CUSTOM_PORTS_CONF"
+    if [ "$CONFIRM" = "yes" ] && [ -z "$DOMAIN" ]; then
+        # Non-interactive with --confirm but no --no-backup
+        read -p "Create a backup before deleting? (y/n): " DO_BACKUP 2>/dev/null || DO_BACKUP="n"
+        [[ "$DO_BACKUP" != "y" ]] && NO_BACKUP=1
     fi
-    systemctl reload apache2
+fi
+if [ "$NO_BACKUP" -eq 0 ] && [ ${#DOMAINS[@]} -gt 0 ]; then
+    echo -e "${YELLOW}Backing up ${USERNAME}...${NC}"
+    bash "$SCRIPTS_DIR/backup_accounts.sh" --single "$USERNAME" 2>/dev/null
+    echo -e "${GREEN}Backup complete.${NC}"
 fi
 
 # ----------------------------------------------------------------
-# PHP-FPM Pool
+# Remove each domain
 # ----------------------------------------------------------------
-POOL_CONF="/etc/php/${PHP_VER}/fpm/pool.d/${DOMAIN}.conf"
-if [ -f "$POOL_CONF" ]; then
-    rm -f "$POOL_CONF"
-    systemctl reload php${PHP_VER}-fpm
-fi
-
-# ----------------------------------------------------------------
-# Linux User
-# ----------------------------------------------------------------
-if id "$DOMAIN" &>/dev/null; then
-    killall -u "$DOMAIN" 2>/dev/null
-    sleep 1
-    userdel -r "$DOMAIN" 2>/dev/null
-fi
-
-# ----------------------------------------------------------------
-# MariaDB
-# ----------------------------------------------------------------
-DB_NAME=$(echo "$DOMAIN" | tr '.-' '_')
-DBS=$(mysql -u root -p"$DB_ROOT_PASS" -N -e "SHOW DATABASES LIKE '${DB_NAME}%'" 2>/dev/null)
-mysql -u root -p"$DB_ROOT_PASS" << MYSQL 2>/dev/null
-DROP USER IF EXISTS '${DOMAIN}'@'localhost';
-FLUSH PRIVILEGES;
-MYSQL
-for DB in $DBS; do
-    mysql -u root -p"$DB_ROOT_PASS" -e "DROP DATABASE \`$DB\`;" 2>/dev/null
-    echo -e "  Dropped DB: ${YELLOW}$DB${NC}"
+for D in "${DOMAINS[@]}"; do
+    echo -e "\n${BOLD}Removing domain: ${D}${NC}"
+    bash "$SCRIPTS_DIR/remove_domain.sh" --username "$USERNAME" --domain "$D" --no-backup
 done
 
 # ----------------------------------------------------------------
-# SSL Certificate
+# Delete the user
 # ----------------------------------------------------------------
-bash "$SCRIPTS_DIR/ssl_manage.sh" revoke "$DOMAIN" 2>/dev/null
+echo -e "\n${BOLD}Deleting user: ${USERNAME}${NC}"
+bash "$SCRIPTS_DIR/delete_user.sh" --username "$USERNAME" --force
 
 # ----------------------------------------------------------------
-# vsftpd Whitelist
+# Clean up panel DB if accessible
 # ----------------------------------------------------------------
-sed -i "/^${DOMAIN}$/d" /etc/vsftpd.userlist
-systemctl reload vsftpd 2>/dev/null || systemctl restart vsftpd
+if [ -f "$PANEL_DB" ]; then
+    sqlite3 "$PANEL_DB" "DELETE FROM wg_peers WHERE hosting_user = '${USERNAME}';" 2>/dev/null
+    USER_ID=$(sqlite3 "$PANEL_DB" "SELECT id FROM hosting_users WHERE username = '${USERNAME}';" 2>/dev/null)
+    if [ -n "$USER_ID" ]; then
+        sqlite3 "$PANEL_DB" "DELETE FROM domains WHERE hosting_user_id = ${USER_ID};" 2>/dev/null
+        sqlite3 "$PANEL_DB" "DELETE FROM account_ports WHERE domain_name IN (SELECT domain_name FROM domains WHERE hosting_user_id = ${USER_ID});" 2>/dev/null
+        sqlite3 "$PANEL_DB" "DELETE FROM hosting_users WHERE id = ${USER_ID};" 2>/dev/null
+    fi
+fi
 
 echo ""
-echo -e "${GREEN}Account '${DOMAIN}' fully deleted.${NC}"
+echo -e "${GREEN}==============================${NC}"
+echo -e "${GREEN} Account Deleted!${NC}"
+echo -e "${GREEN}==============================${NC}"
+echo -e "  User:    ${BOLD}$USERNAME${NC}"
+echo -e "  Domains: ${BOLD}${#DOMAINS[@]} removed${NC}"
