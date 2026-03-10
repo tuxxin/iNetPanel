@@ -29,6 +29,11 @@ function getInstalledExtensions(string $ver): array
     foreach (PHP_EXTENSIONS as $ext) {
         $pkg = "php{$ver}-{$ext}";
         exec("dpkg -l {$pkg} 2>/dev/null | grep -q '^ii'", $out, $rc);
+        // opcache is bundled in php-common on some versions (no separate package)
+        if ($ext === 'opcache' && $rc !== 0) {
+            exec("php{$ver} -m 2>/dev/null | grep -qi opcache", $out2, $rc2);
+            if ($rc2 === 0) $rc = 0;
+        }
         if ($rc === 0) {
             $installed[] = $ext;
         }
@@ -51,6 +56,11 @@ switch ($action) {
         foreach (PHP_EXTENSIONS as $ext) {
             $pkg = "php{$ver}-{$ext}";
             exec("dpkg -l {$pkg} 2>/dev/null | grep -q '^ii'", $out, $rc);
+            // opcache is bundled in php-common on some versions (no separate package)
+            if ($ext === 'opcache' && $rc !== 0) {
+                exec("php{$ver} -m 2>/dev/null | grep -qi opcache", $out2, $rc2);
+                if ($rc2 === 0) $rc = 0;
+            }
             $packages[] = [
                 'extension'   => $ext,
                 'package'     => $pkg,
@@ -79,6 +89,15 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => "Extension '{$ext}' is required by the panel and cannot be removed."]); break;
         }
 
+        // opcache may be bundled in php-common with no separate package
+        if ($action === 'install' && $ext === 'opcache') {
+            exec("php{$ver} -m 2>/dev/null | grep -qi opcache", $chk, $chkRc);
+            if ($chkRc === 0) {
+                echo json_encode(['success' => true, 'output' => 'OPcache is already loaded (bundled in php-common).']);
+                break;
+            }
+        }
+
         $pkg  = "php{$ver}-{$ext}";
         $flag = ($action === 'install') ? 'install' : 'remove';
         $cmd  = "DEBIAN_FRONTEND=noninteractive sudo /usr/bin/apt-get {$flag} -y " . escapeshellarg($pkg) . " 2>&1";
@@ -89,10 +108,10 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => "apt-get failed (exit {$rc})", 'output' => $output]); break;
         }
 
-        // Restart FPM after package change so extensions are loaded/unloaded
-        Shell::systemctl('restart', "php{$ver}-fpm");
-
         echo json_encode(['success' => true, 'output' => $output]);
+        // Flush response before restarting FPM — restart kills the panel worker
+        if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+        Shell::systemctl('restart', "php{$ver}-fpm");
         break;
 
     case 'installed_versions':
