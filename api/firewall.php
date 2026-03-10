@@ -82,6 +82,31 @@ switch ($action) {
         break;
 
     // -------------------------------------------------------------------------
+    case 'auto_configure':
+        $sshPort = DB::setting('ssh_port', '1022');
+        $ports = [
+            "{$sshPort}/tcp",
+            '20/tcp',
+            '21/tcp',
+            '80/tcp',
+            '8888/tcp',
+        ];
+        if (DB::setting('wg_enabled', '0') === '1') {
+            $wgPort = DB::setting('wg_port', '1443');
+            $ports[] = "{$wgPort}/udp";
+        }
+        shell_exec('sudo systemctl enable --now firewalld 2>&1');
+        shell_exec('sudo firewall-cmd --set-default-zone=drop 2>&1');
+        foreach ($ports as $p) {
+            shell_exec('sudo firewall-cmd --permanent --add-port=' . escapeshellarg($p) . ' 2>&1');
+        }
+        shell_exec('sudo firewall-cmd --permanent --zone=trusted --add-interface=lo 2>&1');
+        shell_exec('sudo firewall-cmd --reload 2>&1');
+        shell_exec('sudo systemctl enable --now fail2ban 2>&1');
+        echo json_encode(['success' => true, 'ports' => $ports]);
+        break;
+
+    // -------------------------------------------------------------------------
     case 'open_port':
         $port = trim($_POST['port'] ?? '');
         $proto = trim($_POST['protocol'] ?? 'tcp');

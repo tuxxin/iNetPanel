@@ -6,9 +6,16 @@ $isAdmin = Auth::hasFullAccess();
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h4 class="mb-0"><i class="fas fa-shield-halved me-2"></i>Firewall</h4>
-    <button class="btn btn-outline-secondary btn-sm" onclick="loadFirewallStatus()">
-        <i class="fas fa-sync-alt me-1"></i>Refresh
-    </button>
+    <div class="d-flex gap-2">
+        <?php if ($isAdmin): ?>
+        <button class="btn btn-primary btn-sm" onclick="fwAutoConfigure()">
+            <i class="fas fa-wand-magic-sparkles me-1"></i>Auto Configure
+        </button>
+        <?php endif; ?>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadFirewallStatus()">
+            <i class="fas fa-sync-alt me-1"></i>Refresh
+        </button>
+    </div>
 </div>
 
 <div id="fw-alert" class="d-none mb-3"></div>
@@ -413,6 +420,14 @@ function wlRemove(ip) {
     fwAction('f2b_whitelist_remove', { ip }).then(d => {
         showFwToast(d.success ? `${ip} removed` : (d.error || 'Failed'), d.success ? 'success' : 'danger');
         loadWhitelist();
+    });
+}
+
+function fwAutoConfigure() {
+    if (!confirm('Auto-configure firewall with standard iNetPanel ports (SSH, FTP, HTTP, phpMyAdmin)?\n\nDefault zone will be set to DROP — all incoming traffic is denied except explicitly opened ports.')) return;
+    fwAction('auto_configure').then(d => {
+        showFwToast(d.success ? 'Firewall configured: ' + (d.ports||[]).join(', ') : (d.error || 'Failed'), d.success ? 'success' : 'danger');
+        loadFirewallStatus();
     });
 }
 

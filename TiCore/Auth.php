@@ -65,6 +65,13 @@ class Auth
             $_SESSION['username']  = $user['username'];
             $_SESSION['role']      = 'admin';
             $_SESSION['domains']   = null; // admin sees all
+            try {
+                DB::insert('logs', [
+                    'source' => 'auth', 'level' => 'INFO',
+                    'message' => "Admin login: {$username}",
+                    'user' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
+                ]);
+            } catch (\Throwable $e) {}
             return true;
         }
 
@@ -80,6 +87,13 @@ class Auth
             $_SESSION['username']  = $panelUser['username'];
             $_SESSION['role']      = $panelUser['role'] ?? 'subadmin';
             $_SESSION['domains']   = json_decode($panelUser['assigned_domains'] ?? '[]', true);
+            try {
+                DB::insert('logs', [
+                    'source' => 'auth', 'level' => 'INFO',
+                    'message' => "Panel user login: {$username} (role: " . ($panelUser['role'] ?? 'subadmin') . ")",
+                    'user' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
+                ]);
+            } catch (\Throwable $e) {}
             return true;
         }
 
@@ -91,12 +105,29 @@ class Auth
             FILE_APPEND
         );
 
+        // Log to DB for panel logs
+        try {
+            DB::insert('logs', [
+                'source' => 'auth', 'level' => 'WARN',
+                'message' => "Failed login attempt: {$username}",
+                'user' => $username, 'ip_address' => $clientIp,
+            ]);
+        } catch (\Throwable $e) {}
+
         return false;
     }
 
     public static function logout(): void
     {
         self::startSession();
+        $username = $_SESSION['username'] ?? 'unknown';
+        try {
+            DB::insert('logs', [
+                'source' => 'auth', 'level' => 'INFO',
+                'message' => "Logout: {$username}",
+                'user' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
+            ]);
+        } catch (\Throwable $e) {}
         $_SESSION = [];
         if (ini_get('session.use_cookies')) {
             $p = session_get_cookie_params();

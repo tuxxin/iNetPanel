@@ -19,12 +19,17 @@ $SYSTEM_LOGS = [
     'panel_auth' => '/var/log/inetpanel_auth.log',
 ];
 
-function tailFile(string $path, int $lines = 300): string
+// Logs that require sudo to read (root-owned, not readable by www-data)
+$RESTRICTED_LOGS = ['auth', 'fail2ban'];
+
+function tailFile(string $path, int $lines = 300, bool $useSudo = false): string
 {
-    if (!file_exists($path)) return "(No log entries yet.)";
+    if (!$useSudo && !file_exists($path)) return "(Log file not found: {$path})";
+    $cmd = ($useSudo ? 'sudo ' : '') . 'tail -n ' . (int)$lines . ' ' . escapeshellarg($path) . ' 2>&1';
     $out = [];
-    exec('tail -n ' . (int)$lines . ' ' . escapeshellarg($path) . ' 2>&1', $out);
-    return implode("\n", $out) ?: '(Log is empty)';
+    exec($cmd, $out);
+    $result = implode("\n", $out);
+    return $result ?: '(Log is empty)';
 }
 
 switch ($action) {
@@ -34,7 +39,27 @@ switch ($action) {
         if (!isset($SYSTEM_LOGS[$key])) {
             echo json_encode(['success' => false, 'error' => 'Unknown log.']); break;
         }
-        echo json_encode(['success' => true, 'content' => tailFile($SYSTEM_LOGS[$key])]);
+        $useSudo = in_array($key, $RESTRICTED_LOGS);
+        echo json_encode(['success' => true, 'content' => tailFile($SYSTEM_LOGS[$key], 300, $useSudo)]);
+        break;
+
+    case 'panel':
+        $limit = min((int)($_GET['limit'] ?? 200), 500);
+        $rows = DB::fetchAll(
+            'SELECT created_at, level, source, message, details, user, ip_address FROM logs ORDER BY id DESC LIMIT ?',
+            [$limit]
+        );
+        $lines = [];
+        foreach ($rows as $r) {
+            $ts   = $r['created_at'] ?? '';
+            $lvl  = $r['level'] ?? 'INFO';
+            $src  = $r['source'] ?? 'panel';
+            $msg  = $r['message'] ?? '';
+            $usr  = $r['user'] ? " ({$r['user']})" : '';
+            $det  = $r['details'] ? " — {$r['details']}" : '';
+            $lines[] = "{$ts} [{$lvl}] {$src}: {$msg}{$usr}{$det}";
+        }
+        echo json_encode(['success' => true, 'content' => implode("\n", $lines) ?: '(No activity logged yet.)']);
         break;
 
     case 'domain':

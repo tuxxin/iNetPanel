@@ -12,7 +12,7 @@ $systemLogs = [
     'ssl_renew'  => ['label' => 'SSL Renewal',      'file' => '/var/log/certbot_renew.log'],
     'auth'       => ['label' => 'Auth / SSH',       'file' => '/var/log/auth.log'],
     'fail2ban'   => ['label' => 'Fail2Ban',         'file' => '/var/log/fail2ban.log'],
-    'panel_auth' => ['label' => 'Panel Login',      'file' => '/var/log/inetpanel_auth.log'],
+    'panel_logs' => ['label' => 'Panel Logs',        'source' => 'db'],
 ];
 
 // Domain log selector
@@ -70,7 +70,11 @@ function readLogTail(string $file, int $lines = 300): string
             <!-- System log tabs -->
             <?php $first = true; foreach ($systemLogs as $key => $info): ?>
             <div class="tab-pane fade <?= $first ? 'show active' : '' ?>" id="log-<?= $key ?>">
+                <?php if (isset($info['source']) && $info['source'] === 'db'): ?>
+                <pre id="pre-<?= $key ?>" class="m-0 p-3 bg-dark text-light rounded-bottom" style="height:500px;overflow-y:auto;font-size:.82rem;white-space:pre-wrap;word-break:break-all">(Loading...)</pre>
+                <?php else: ?>
                 <pre id="pre-<?= $key ?>" class="m-0 p-3 bg-dark text-light rounded-bottom" style="height:500px;overflow-y:auto;font-size:.82rem;white-space:pre-wrap;word-break:break-all"><?= htmlspecialchars(readLogTail($info['file'])) ?></pre>
+                <?php endif; ?>
             </div>
             <?php $first = false; endforeach; ?>
 
@@ -111,8 +115,22 @@ function scrollToBottom(preId) {
     if (el) el.scrollTop = el.scrollHeight;
 }
 
-// Scroll all system log panes to bottom on load
+// Load DB-sourced logs and scroll all panes to bottom on load
+function loadPanelLogs() {
+    fetch('/api/logs?action=panel')
+        .then(r => r.json())
+        .then(data => {
+            const pre = document.getElementById('pre-panel_logs');
+            if (pre) { pre.textContent = data.content || '(No activity logged yet.)'; pre.scrollTop = pre.scrollHeight; }
+        })
+        .catch(() => {
+            const pre = document.getElementById('pre-panel_logs');
+            if (pre) pre.textContent = '(Failed to load panel logs)';
+        });
+}
+
 document.addEventListener('DOMContentLoaded', function () {
+    loadPanelLogs();
     <?php foreach (array_keys($systemLogs) as $key): ?>
     scrollToBottom('pre-<?= $key ?>');
     <?php endforeach; ?>
@@ -136,12 +154,16 @@ document.getElementById('refresh-log-btn').addEventListener('click', function ()
         document.getElementById('load-domain-log-btn').click();
     } else {
         const key = active.dataset.logkey;
-        fetch(`/api/logs?action=tail&key=${encodeURIComponent(key)}`)
-            .then(r => r.json())
-            .then(data => {
-                const pre = document.getElementById(`pre-${key}`);
-                if (pre) { pre.textContent = data.content || '(empty)'; pre.scrollTop = pre.scrollHeight; }
-            });
+        if (key === 'panel_logs') {
+            loadPanelLogs();
+        } else {
+            fetch(`/api/logs?action=tail&key=${encodeURIComponent(key)}`)
+                .then(r => r.json())
+                .then(data => {
+                    const pre = document.getElementById(`pre-${key}`);
+                    if (pre) { pre.textContent = data.content || '(empty)'; pre.scrollTop = pre.scrollHeight; }
+                });
+        }
     }
 });
 

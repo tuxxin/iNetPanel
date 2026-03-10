@@ -183,8 +183,9 @@ class CloudflareAPI
         $result = $this->updateTunnelConfig($accountId, $tunnelId, $ingress);
 
         // Auto-create CNAME DNS record if the zone is in this CF account
-        $this->upsertTunnelCname($tunnelId, $hostname);
+        $dnsCreated = $this->upsertTunnelCname($tunnelId, $hostname);
 
+        $result['dns_skipped'] = !$dnsCreated;
         return $result;
     }
 
@@ -213,11 +214,11 @@ class CloudflareAPI
      * Create or update a CNAME DNS record pointing to the tunnel.
      * Looks up the CF zone by matching the hostname's root domain.
      */
-    private function upsertTunnelCname(string $tunnelId, string $hostname): void
+    private function upsertTunnelCname(string $tunnelId, string $hostname): bool
     {
         $cname = "{$tunnelId}.cfargotunnel.com";
         $zoneId = $this->findZoneForHostname($hostname);
-        if (!$zoneId) return;
+        if (!$zoneId) return false;
 
         $records = $this->listDNSRecords($zoneId, ['type' => 'CNAME', 'name' => $hostname]);
         $existing = $records['result'][0] ?? null;
@@ -227,6 +228,7 @@ class CloudflareAPI
         } else {
             $this->createDNSRecord($zoneId, $data);
         }
+        return true;
     }
 
     /**

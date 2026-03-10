@@ -242,7 +242,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $settings = [
                 'server_hostname'   => $_POST['hostname'],
                 'timezone'          => $_POST['timezone'],
-                'admin_email'       => 'admin@' . $_POST['hostname'],
+                'admin_email'       => ($cfEnabled && !empty($_POST['cf_email'])) ? $_POST['cf_email'] : 'admin@' . $_POST['hostname'],
                 'default_theme'     => 'light',
                 'backup_enabled'    => '0',
                 'backup_destination'=> '/backup',
@@ -349,7 +349,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             // Set up DDNS cron if enabled
             if ($ddnsEnabled === '1' && $ddnsInterval > 0) {
-                $phpBin   = 'php' . DB::setting('php_default_version', '8.4');
+                $phpVerStmt = $db->prepare("SELECT value FROM settings WHERE key = 'php_default_version'");
+                $phpVerStmt->execute();
+                $phpVerRow = $phpVerStmt->fetch(PDO::FETCH_ASSOC);
+                $phpBin   = 'php' . ($phpVerRow['value'] ?? '8.4');
                 $cronLine = "*/{$ddnsInterval} * * * * www-data {$phpBin} /var/www/inetpanel/scripts/ddns_update.php >> /var/log/inetpanel_ddns.log 2>&1\n";
                 $proc = popen('sudo /root/scripts/manage_cron.sh write inetpanel_ddns', 'w');
                 fwrite($proc, $cronLine); pclose($proc);
@@ -868,7 +871,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         // Collect DDNS + WG values before going to step 4
         if (document.getElementById('ddnsEnabled').checked) {
             installData.ddns_enabled  = '1';
-            installData.ddns_hostname = document.getElementById('ddnsHostname').value;
+            const ddnsHost = document.getElementById('ddnsHostname');
+            if (!ddnsHost.value) ddnsHost.value = document.getElementById('serverHostname').value;
+            installData.ddns_hostname = ddnsHost.value;
             installData.ddns_zone_id  = document.getElementById('ddnsZoneId').value;
             installData.ddns_interval = document.getElementById('ddnsInterval').value;
         }

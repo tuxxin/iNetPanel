@@ -147,7 +147,11 @@ document.getElementById('create-form').addEventListener('submit', function (e) {
             if (data.success) {
                 alert.className = 'alert alert-success';
                 const uname = data.username || usernameVal || domain;
-                alert.innerHTML = `<strong>Account created!</strong> User: <code>${uname}</code> / Domain: <code>${domain}</code> on port <code>${data.port ?? '—'}</code>. <a href="/admin/accounts">View all accounts &rarr;</a>`;
+                let msg = `<strong>Account created!</strong> User: <code>${uname}</code> / Domain: <code>${domain}</code> on port <code>${data.port ?? '—'}</code>. <a href="/admin/accounts">View all accounts &rarr;</a>`;
+                if (data.warnings && data.warnings.length) {
+                    msg += '<div class="alert alert-warning mt-2 mb-0 py-2 small">' + data.warnings.map(w => `<div>${w}</div>`).join('') + '</div>';
+                }
+                alert.innerHTML = msg;
                 document.getElementById('create-form').reset();
             } else {
                 alert.className = 'alert alert-danger';

@@ -7,6 +7,12 @@
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
+// Normalize Shell::run result for JSON API response
+function shellResult(array $r): array {
+    if ($r['success']) return $r;
+    return ['success' => false, 'error' => $r['output'] ?: $r['error'] ?: 'Script execution failed.'];
+}
+
 switch ($action) {
 
     // =========================================================================
@@ -88,7 +94,7 @@ switch ($action) {
                 [$username]
             );
         }
-        echo json_encode($result);
+        echo json_encode(shellResult($result));
         break;
 
     case 'delete_user':
@@ -107,7 +113,7 @@ switch ($action) {
             DB::delete('hosting_users', 'username = ?', [$username]);
             DB::delete('wg_peers', 'hosting_user = ?', [$username]);
         }
-        echo json_encode($result);
+        echo json_encode(shellResult($result));
         break;
 
     // =========================================================================
@@ -158,19 +164,26 @@ switch ($action) {
                 }
             }
 
+            $warnings = [];
             if ($port && DB::setting('cf_enabled', '0') === '1') {
                 $tunnelId  = DB::setting('cf_tunnel_id',  '');
                 $accountId = DB::setting('cf_account_id', '');
                 if ($tunnelId && $accountId) {
                     try {
                         $cf = new CloudflareAPI();
-                        $cf->addTunnelHostname($accountId, $tunnelId, $domain, "https://localhost:{$port}");
-                    } catch (Throwable) {}
+                        $cfResult = $cf->addTunnelHostname($accountId, $tunnelId, $domain, "https://localhost:{$port}");
+                        if (!empty($cfResult['dns_skipped'])) {
+                            $warnings[] = "Domain added to tunnel but DNS CNAME was not created — the zone for '{$domain}' is not in your Cloudflare account. Add the domain to Cloudflare and create a CNAME record pointing to {$tunnelId}.cfargotunnel.com";
+                        }
+                    } catch (Throwable $e) {
+                        $warnings[] = "Cloudflare tunnel setup failed: " . $e->getMessage() . ". The domain was created locally but is not routed through Cloudflare.";
+                    }
                 }
             }
+            if ($warnings) $result['warnings'] = $warnings;
         }
 
-        echo json_encode($result);
+        echo json_encode(shellResult($result));
         if (function_exists('fastcgi_finish_request')) {
             fastcgi_finish_request();
         }
@@ -209,7 +222,7 @@ switch ($action) {
                 }
             }
         }
-        echo json_encode($result);
+        echo json_encode(shellResult($result));
         break;
 
     case 'list_domains':
@@ -264,7 +277,7 @@ switch ($action) {
         if (!$existingUser) {
             $userResult = Shell::run('create_user', ['--username' => $username, '--password' => $password]);
             if (!$userResult['success']) {
-                echo json_encode($userResult);
+                echo json_encode(['success' => false, 'error' => $userResult['output'] ?: $userResult['error'] ?: 'Failed to create user.']);
                 break;
             }
             DB::query(
@@ -301,19 +314,26 @@ switch ($action) {
                 }
             }
 
+            $warnings = [];
             if ($port && DB::setting('cf_enabled', '0') === '1') {
                 $tunnelId  = DB::setting('cf_tunnel_id',  '');
                 $accountId = DB::setting('cf_account_id', '');
                 if ($tunnelId && $accountId) {
                     try {
                         $cf = new CloudflareAPI();
-                        $cf->addTunnelHostname($accountId, $tunnelId, $domain, "https://localhost:{$port}");
-                    } catch (Throwable) {}
+                        $cfResult = $cf->addTunnelHostname($accountId, $tunnelId, $domain, "https://localhost:{$port}");
+                        if (!empty($cfResult['dns_skipped'])) {
+                            $warnings[] = "Domain added to tunnel but DNS CNAME was not created — the zone for '{$domain}' is not in your Cloudflare account. Add the domain to Cloudflare and create a CNAME record pointing to {$tunnelId}.cfargotunnel.com";
+                        }
+                    } catch (Throwable $e) {
+                        $warnings[] = "Cloudflare tunnel setup failed: " . $e->getMessage() . ". The domain was created locally but is not routed through Cloudflare.";
+                    }
                 }
             }
+            if ($warnings) $result['warnings'] = $warnings;
         }
 
-        echo json_encode($result);
+        echo json_encode(shellResult($result));
         if (function_exists('fastcgi_finish_request')) {
             fastcgi_finish_request();
         }
@@ -366,7 +386,7 @@ switch ($action) {
             }
         }
 
-        echo json_encode($result);
+        echo json_encode(shellResult($result));
         break;
 
     // =========================================================================
@@ -396,7 +416,7 @@ switch ($action) {
                 }
             }
         }
-        echo json_encode($result);
+        echo json_encode(shellResult($result));
         break;
 
     case 'resume':
@@ -422,7 +442,7 @@ switch ($action) {
                 }
             }
         }
-        echo json_encode($result);
+        echo json_encode(shellResult($result));
         break;
 
     // =========================================================================
