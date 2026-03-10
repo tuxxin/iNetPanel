@@ -271,7 +271,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 'update_cron_enabled' => '1',
                 'update_cron_time'    => '00:00',
                 'backup_cron_time'    => '03:00',
-                'auto_update_enabled' => '0',
+                'auto_update_enabled' => '1',
                 'auto_update_time'    => '02:00',
                 // PHP
                 'php_default_version' => $detectedPhpVer,
