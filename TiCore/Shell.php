@@ -13,6 +13,7 @@ class Shell
         'create_account',
         'delete_account',
         'create_user',
+        'change_password',
         'delete_user',
         'add_domain',
         'remove_domain',

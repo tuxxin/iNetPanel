@@ -176,6 +176,41 @@ $isAdmin = Auth::hasFullAccess();
     </div>
 </div>
 
+<!-- Change Password Modal -->
+<div class="modal fade" id="changePasswordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-lock me-2"></i>Change Password — <span id="pw-modal-username"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="pw-modal-alert" class="d-none mb-3"></div>
+                <p class="text-muted small mb-3">Updates the password for FTP, SSH, phpMyAdmin, and the user portal.</p>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold small">New Password</label>
+                    <div class="input-group">
+                        <input type="password" class="form-control" id="pw-new-password" minlength="8" placeholder="Minimum 8 characters">
+                        <button class="btn btn-outline-secondary" type="button" id="pw-toggle-btn" title="Show/hide"><i class="fas fa-eye"></i></button>
+                        <button class="btn btn-outline-primary" type="button" id="pw-generate-btn" title="Generate"><i class="fas fa-random"></i></button>
+                    </div>
+                </div>
+                <div class="mb-0">
+                    <label class="form-label fw-semibold small">Confirm Password</label>
+                    <input type="password" class="form-control" id="pw-confirm-password" placeholder="Re-enter password">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="pw-save-btn">
+                    <span class="spinner-border spinner-border-sm d-none me-1" id="pw-spinner"></span>
+                    Save Password
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- WG Config Modal -->
 <div class="modal fade" id="wgModal" tabindex="-1">
     <div class="modal-dialog">
@@ -240,6 +275,7 @@ function loadAccounts() {
                 const sshKeysBtn = `<button class="btn btn-sm btn-outline-secondary me-1" onclick="openSshKeys('${username}')" title="SSH Keys"><i class="fas fa-key"></i></button>`;
                 const addDomainBtn = `<a class="btn btn-sm btn-outline-primary me-1" href="/admin/add-domain?user=${encodeURIComponent(username)}" title="Add domain to ${username}"><i class="fas fa-plus-circle"></i></a>`;
                 const loginAsBtn = `<button class="btn btn-sm btn-outline-info me-1" onclick="loginAsUser('${username}')" title="Login as ${username}"><i class="fas fa-sign-in-alt"></i></button>`;
+                const pwBtn = `<button class="btn btn-sm btn-outline-dark me-1" onclick="openChangePassword('${username}')" title="Change password"><i class="fas fa-lock"></i></button>`;
                 return `<tr class="${rowClass}">
                     <td class="ps-4"><span class="badge bg-light text-dark border">${username}</span></td>
                     <td class="fw-semibold"><a href="https://${a.domain_name}" target="_blank" class="text-decoration-none">${a.domain_name} <i class="fas fa-external-link-alt ms-1" style="font-size:.7em;opacity:.5"></i></a></td>
@@ -248,7 +284,7 @@ function loadAccounts() {
                     <td>${a.php_version ?? '8.4'}</td>
                     <td>${badge}</td>
                     <td>${wgBadge}</td>
-                    <td class="text-end pe-4">${loginAsBtn}${addDomainBtn}${sshKeysBtn}${suspendBtn}${deleteBtn}</td>
+                    <td class="text-end pe-4">${loginAsBtn}${addDomainBtn}${sshKeysBtn}${pwBtn}${suspendBtn}${deleteBtn}</td>
                 </tr>`;
             }).join('');
         })
@@ -406,6 +442,84 @@ function loginAsUser(username) {
 document.addEventListener('DOMContentLoaded', function () {
     loadAccounts();
     TableKit.init('accounts-table', { filter: true });
+});
+
+// ── Change Password ─────────────────────────────────────────────────────────
+let pwCurrentUser = null;
+
+function openChangePassword(username) {
+    pwCurrentUser = username;
+    document.getElementById('pw-modal-username').textContent = username;
+    document.getElementById('pw-new-password').value = '';
+    document.getElementById('pw-confirm-password').value = '';
+    document.getElementById('pw-new-password').type = 'password';
+    document.getElementById('pw-modal-alert').classList.add('d-none');
+    new bootstrap.Modal(document.getElementById('changePasswordModal')).show();
+}
+
+function showPwAlert(msg, type = 'success') {
+    const el = document.getElementById('pw-modal-alert');
+    el.className = `alert alert-${type} py-2 small`;
+    el.textContent = msg;
+    el.classList.remove('d-none');
+    setTimeout(() => el.classList.add('d-none'), 5000);
+}
+
+document.getElementById('pw-toggle-btn').addEventListener('click', function () {
+    const inp = document.getElementById('pw-new-password');
+    const conf = document.getElementById('pw-confirm-password');
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    conf.type = show ? 'text' : 'password';
+    this.innerHTML = show ? '<i class="fas fa-eye-slash"></i>' : '<i class="fas fa-eye"></i>';
+});
+
+document.getElementById('pw-generate-btn').addEventListener('click', function () {
+    const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%&*';
+    let pw = '';
+    const arr = new Uint32Array(16);
+    crypto.getRandomValues(arr);
+    for (let i = 0; i < 16; i++) pw += chars[arr[i] % chars.length];
+    document.getElementById('pw-new-password').value = pw;
+    document.getElementById('pw-confirm-password').value = pw;
+    document.getElementById('pw-new-password').type = 'text';
+    document.getElementById('pw-confirm-password').type = 'text';
+    document.getElementById('pw-toggle-btn').innerHTML = '<i class="fas fa-eye-slash"></i>';
+});
+
+document.getElementById('pw-save-btn').addEventListener('click', function () {
+    const pw = document.getElementById('pw-new-password').value;
+    const confirm = document.getElementById('pw-confirm-password').value;
+
+    if (!pw) { showPwAlert('Enter a password.', 'warning'); return; }
+    if (pw.length < 8) { showPwAlert('Password must be at least 8 characters.', 'warning'); return; }
+    if (pw !== confirm) { showPwAlert('Passwords do not match.', 'warning'); return; }
+
+    const spinner = document.getElementById('pw-spinner');
+    spinner.classList.remove('d-none');
+    this.disabled = true;
+
+    const fd = new FormData();
+    fd.append('action', 'change_password');
+    fd.append('username', pwCurrentUser);
+    fd.append('password', pw);
+    fetch('/api/accounts', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            spinner.classList.add('d-none');
+            this.disabled = false;
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('changePasswordModal')).hide();
+                showToast(`Password changed for '${pwCurrentUser}'.`);
+            } else {
+                showPwAlert(data.error || 'Failed to change password.', 'danger');
+            }
+        })
+        .catch(() => {
+            spinner.classList.add('d-none');
+            this.disabled = false;
+            showPwAlert('Connection error.', 'danger');
+        });
 });
 
 // ── SSH Key Manager ──────────────────────────────────────────────────────────

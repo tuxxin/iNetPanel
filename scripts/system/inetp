@@ -99,6 +99,7 @@ case "$COMMAND" in
     create_account)   bash "$SCRIPTS_DIR/create_account.sh"   "$@" ;;
     delete_account)   bash "$SCRIPTS_DIR/delete_account.sh"   "$@" ;;
     create_user)      bash "$SCRIPTS_DIR/create_user.sh"      "$@" ;;
+    change_password)  bash "$SCRIPTS_DIR/change_password.sh"  "$@" ;;
     delete_user)      bash "$SCRIPTS_DIR/delete_user.sh"      "$@" ;;
     add_domain)       bash "$SCRIPTS_DIR/add_domain.sh"       "$@" ;;
     remove_domain)    bash "$SCRIPTS_DIR/remove_domain.sh"    "$@" ;;

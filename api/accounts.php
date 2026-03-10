@@ -389,6 +389,24 @@ switch ($action) {
         exec("sudo systemctl reload " . escapeshellarg($fpmService) . " 2>/dev/null");
         break;
 
+    case 'change_password':
+        Auth::requireAdmin();
+        $username = trim($_POST['username'] ?? '');
+        $password = trim($_POST['password'] ?? '');
+
+        if (!$username || !$password) {
+            echo json_encode(['success' => false, 'error' => 'Username and password are required.']);
+            break;
+        }
+        if (strlen($password) < 8) {
+            echo json_encode(['success' => false, 'error' => 'Password must be at least 8 characters.']);
+            break;
+        }
+
+        $result = Shell::run('change_password', ['--username' => $username, '--password' => $password]);
+        echo json_encode(shellResult($result));
+        break;
+
     case 'add_domain':
         Auth::requireAdmin();
         $domain   = trim($_POST['domain']   ?? '');
