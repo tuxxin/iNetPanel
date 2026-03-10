@@ -712,10 +712,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         </div>
 
         <div class="step-content" id="step4">
-            <div id="installSpinner" class="text-center py-5">
-                <div class="spinner-border text-primary mb-3" style="width: 4rem; height: 4rem;" role="status"></div>
-                <h4 class="fw-bold">Installing iNetPanel...</h4>
-                <p class="text-muted" id="installStatusText">Initializing database structure...</p>
+            <div id="installSpinner" class="text-center py-4">
+                <div class="spinner-border text-primary mb-3" style="width:3rem;height:3rem" role="status"></div>
+                <h5 class="fw-bold mb-2">Installing iNetPanel...</h5>
+                <p class="small text-muted mb-3" id="installStage">Checking permissions...</p>
+                <div class="progress mx-auto" style="height:6px;max-width:300px">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" id="installBar" style="width:5%"></div>
+                </div>
+                <div class="small text-muted mt-2" id="installPct">5%</div>
             </div>
             
             <div id="installError" class="d-none text-center">
@@ -892,6 +896,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } else { runInstallation(); }
     }
 
+    // ---- Install progress helpers ----
+    let installTimers = [];
+
+    function showInstallProgress() {
+        const hasCf = installData.dns_mode === 'cloudflare' && installData.cf_account_id;
+        const stages = hasCf ? [
+            { pct: 5,  text: 'Checking permissions...',        delay: 0 },
+            { pct: 15, text: 'Creating database...',           delay: 1500 },
+            { pct: 25, text: 'Building schema...',             delay: 3000 },
+            { pct: 35, text: 'Seeding configuration...',       delay: 5000 },
+            { pct: 45, text: 'Setting timezone & hostname...', delay: 7000 },
+            { pct: 55, text: 'Creating Cloudflare tunnel...',  delay: 9000 },
+            { pct: 70, text: 'Installing cloudflared...',      delay: 14000 },
+            { pct: 80, text: 'Issuing SSL certificate...',     delay: 20000 },
+            { pct: 92, text: 'Configuring web servers...',     delay: 35000 },
+            { pct: 95, text: 'Finalizing...',                  delay: 50000 },
+        ] : [
+            { pct: 5,  text: 'Checking permissions...',        delay: 0 },
+            { pct: 20, text: 'Creating database...',           delay: 1500 },
+            { pct: 35, text: 'Building schema...',             delay: 3000 },
+            { pct: 50, text: 'Seeding configuration...',       delay: 5000 },
+            { pct: 60, text: 'Setting timezone & hostname...', delay: 7000 },
+            { pct: 75, text: 'Issuing SSL certificate...',     delay: 10000 },
+            { pct: 90, text: 'Configuring web servers...',     delay: 30000 },
+            { pct: 95, text: 'Finalizing...',                  delay: 45000 },
+        ];
+
+        document.getElementById('installBar').style.width = '5%';
+        document.getElementById('installStage').textContent = 'Checking permissions...';
+        document.getElementById('installPct').textContent = '5%';
+
+        stages.forEach(s => {
+            installTimers.push(setTimeout(() => {
+                document.getElementById('installBar').style.width = s.pct + '%';
+                document.getElementById('installStage').textContent = s.text;
+                document.getElementById('installPct').textContent = s.pct + '%';
+            }, s.delay));
+        });
+    }
+
+    function hideInstallProgress(success) {
+        installTimers.forEach(t => clearTimeout(t));
+        installTimers = [];
+        if (success) {
+            document.getElementById('installBar').style.width = '100%';
+            document.getElementById('installStage').textContent = 'Complete! Redirecting...';
+            document.getElementById('installPct').textContent = '100%';
+        }
+    }
+
     async function runInstallation() {
         // Collect DDNS + WG values before going to step 4
         if (document.getElementById('ddnsEnabled').checked) {
@@ -910,9 +964,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
         showStep(4);
-        // Reset Error State
         document.getElementById('installSpinner').classList.remove('d-none');
         document.getElementById('installError').classList.add('d-none');
+        showInstallProgress();
 
         const fd = new FormData();
         fd.append('action', 'install');
@@ -923,15 +977,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             const res = await req.json();
 
             if(res.success) {
-                document.getElementById('installStatusText').textContent = "Complete! Redirecting to login...";
+                hideInstallProgress(true);
                 setTimeout(() => window.location.href = res.redirectUrl || '/login', 1500);
             } else {
+                hideInstallProgress(false);
                 document.getElementById('installSpinner').classList.add('d-none');
                 document.getElementById('installError').classList.remove('d-none');
                 document.getElementById('installErrorMessage').innerHTML = res.message || 'Unknown Error';
             }
         } catch(e) {
-            alert("Critical Error: " + e.message);
+            hideInstallProgress(false);
+            document.getElementById('installSpinner').classList.add('d-none');
+            document.getElementById('installError').classList.remove('d-none');
+            document.getElementById('installErrorMessage').innerHTML = "Critical Error: " + e.message;
         }
     }
 </script>

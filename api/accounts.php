@@ -381,10 +381,6 @@ switch ($action) {
             if ($warnings) $result['warnings'] = $warnings;
         }
 
-        // Reload FPM after all work is done (deferred so the response gets sent first)
-        $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
-        shell_exec("(sleep 2 && systemctl reload " . escapeshellarg($fpmService) . ") > /dev/null 2>&1 &");
-
         echo json_encode(shellResult($result));
         break;
 
@@ -473,10 +469,6 @@ switch ($action) {
             if ($warnings) $result['warnings'] = $warnings;
         }
 
-        // Reload FPM after all work is done
-        $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
-        shell_exec("(sleep 2 && systemctl reload " . escapeshellarg($fpmService) . ") > /dev/null 2>&1 &");
-
         echo json_encode(shellResult($result));
         break;
 
@@ -493,6 +485,21 @@ switch ($action) {
         $domainRow = DB::fetchOne('SELECT d.*, h.username FROM domains d LEFT JOIN hosting_users h ON d.hosting_user_id = h.id WHERE d.domain_name = ?', [$domain]);
         $username = $domainRow['username'] ?? $domain;
 
+        // Remove CF tunnel route first — most likely to fail, acts as safety net
+        if (DB::setting('cf_enabled', '0') === '1') {
+            $tunnelId  = DB::setting('cf_tunnel_id',  '');
+            $accountId = DB::setting('cf_account_id', '');
+            if ($tunnelId && $accountId) {
+                try {
+                    $cf = new CloudflareAPI();
+                    $cf->removeTunnelHostname($accountId, $tunnelId, $domain);
+                } catch (Throwable $e) {
+                    echo json_encode(['success' => false, 'error' => 'Failed to remove Cloudflare route: ' . $e->getMessage()]);
+                    break;
+                }
+            }
+        }
+
         $args = ['--username' => $username, '--domain' => $domain];
         if ($noBackup) $args[] = '--no-backup';
         $result = Shell::run('remove_domain', $args);
@@ -500,17 +507,6 @@ switch ($action) {
         if ($result['success']) {
             DB::delete('domains', 'domain_name = ?', [$domain]);
             DB::delete('account_ports', 'domain_name = ?', [$domain]);
-
-            if (DB::setting('cf_enabled', '0') === '1') {
-                $tunnelId  = DB::setting('cf_tunnel_id',  '');
-                $accountId = DB::setting('cf_account_id', '');
-                if ($tunnelId && $accountId) {
-                    try {
-                        $cf = new CloudflareAPI();
-                        $cf->removeTunnelHostname($accountId, $tunnelId, $domain);
-                    } catch (Throwable) {}
-                }
-            }
 
             // If no more domains for this user, delete the user too
             $remaining = DB::fetchOne(

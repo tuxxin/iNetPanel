@@ -227,6 +227,11 @@ $router->add('/admin/profile', function () use ($view) {
 // -------------------------------------------------------------------
 // ACCOUNT PORTAL — hosting account holders log in with FTP credentials
 // -------------------------------------------------------------------
+$router->add('/user', function () {
+    header('Location: /user/login');
+    exit;
+});
+
 $router->add('/user/login', function () {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $username = trim($_POST['username'] ?? '');

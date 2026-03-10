@@ -116,8 +116,9 @@ php_admin_value[upload_max_filesize] = 100M
 php_admin_value[post_max_size]       = 100M
 POOL
 
-# FPM reload is handled by the calling PHP code after all API calls complete
-# (shell script no longer reloads FPM to avoid killing the PHP worker mid-request)
+# Reload FPM so the new pool socket is created before Apache tries to use it
+systemctl reload php${PHP_VER}-fpm
+sleep 1
 
 # ----------------------------------------------------------------
 # SSL Certificate

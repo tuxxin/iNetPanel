@@ -60,11 +60,13 @@ fi
 # PHP-FPM Pool
 # ----------------------------------------------------------------
 POOL_NAME="${USERNAME}_$(echo "$DOMAIN" | tr '.-' '_')"
+FPM_RELOADED=0
 for PHP_VER in 8.5 8.4 8.3 8.2 8.1 8.0 7.4 7.3 7.2 7.1 7.0 5.6; do
     POOL_CONF="/etc/php/${PHP_VER}/fpm/pool.d/${POOL_NAME}.conf"
     if [ -f "$POOL_CONF" ]; then
         rm -f "$POOL_CONF"
-        (sleep 2 && systemctl reload "php${PHP_VER}-fpm") > /dev/null 2>&1 &
+        systemctl reload "php${PHP_VER}-fpm" 2>/dev/null
+        FPM_RELOADED=1
         break
     fi
 done
@@ -73,7 +75,7 @@ for PHP_VER in 8.5 8.4 8.3 8.2 8.1 8.0 7.4 7.3 7.2 7.1 7.0 5.6; do
     POOL_CONF="/etc/php/${PHP_VER}/fpm/pool.d/${DOMAIN}.conf"
     if [ -f "$POOL_CONF" ]; then
         rm -f "$POOL_CONF"
-        (sleep 2 && systemctl reload "php${PHP_VER}-fpm") > /dev/null 2>&1 &
+        [ "$FPM_RELOADED" -eq 0 ] && systemctl reload "php${PHP_VER}-fpm" 2>/dev/null
         break
     fi
 done
