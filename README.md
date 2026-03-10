@@ -48,7 +48,7 @@ Then open `http://<YOUR_SERVER_IP>/install.php` to complete setup.
 ### Server Management
 - **Multi-PHP** — Install and switch between PHP 5.6–8.5 per domain using sury.org packages
 - **PHP Package Manager** — Install/remove PHP extensions per version from the panel
-- **Service Manager** — Start, stop, restart Apache, PHP-FPM, MariaDB, vsftpd, lighttpd, WireGuard
+- **Service Manager** — Start, stop, restart Apache, PHP-FPM, MariaDB, vsftpd, lighttpd, WireGuard, etc
 - **System Logs** — View Apache error/access logs, PHP-FPM logs, auth logs from the panel
 - **Image Optimizer** — Bulk optimize JPEG/PNG/GIF images with WebP generation (per-user, per-domain, or per-directory)
 - **Backups** — Per-user automated backups (all domains in one archive) with configurable retention and scheduling
