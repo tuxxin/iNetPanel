@@ -5,9 +5,14 @@
 
 // Available log files
 $systemLogs = [
-    'update'  => ['label' => 'System Updates',   'file' => '/var/log/lamp_update.log'],
-    'backup'  => ['label' => 'Backup Jobs',       'file' => '/var/log/lamp_backup.log'],
-    'lighttpd'=> ['label' => 'lighttpd Error',    'file' => '/var/log/lighttpd/error.log'],
+    'update'     => ['label' => 'System Updates',   'file' => '/var/log/lamp_update.log'],
+    'backup'     => ['label' => 'Backup Jobs',      'file' => '/var/log/lamp_backup.log'],
+    'lighttpd'   => ['label' => 'lighttpd Error',   'file' => '/var/log/lighttpd/error.log'],
+    'ssl'        => ['label' => 'SSL / Certbot',    'file' => '/var/log/letsencrypt/letsencrypt.log'],
+    'ssl_renew'  => ['label' => 'SSL Renewal',      'file' => '/var/log/certbot_renew.log'],
+    'auth'       => ['label' => 'Auth / SSH',       'file' => '/var/log/auth.log'],
+    'fail2ban'   => ['label' => 'Fail2Ban',         'file' => '/var/log/fail2ban.log'],
+    'panel_auth' => ['label' => 'Panel Login',      'file' => '/var/log/inetpanel_auth.log'],
 ];
 
 // Domain log selector

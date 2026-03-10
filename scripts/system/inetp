@@ -19,6 +19,7 @@ case "$COMMAND" in
     optimize_images)  bash "$SCRIPTS_DIR/optimize_images.sh"  "$@" ;;
     backup_accounts)  bash "$SCRIPTS_DIR/backup_accounts.sh"  "$@" ;;
     update)           bash "$SCRIPTS_DIR/inetp-update.sh"     "$@" ;;
+    panel_update)     php /var/www/inetpanel/scripts/panel_update.php "$@" ;;
     wireguard_setup)     bash "$SCRIPTS_DIR/wireguard_setup.sh"     "$@" ;;
     wireguard_uninstall) bash "$SCRIPTS_DIR/wireguard_uninstall.sh" "$@" ;;
     wg_peer)             bash "$SCRIPTS_DIR/wg_peer.sh"             "$@" ;;
@@ -72,6 +73,7 @@ case "$COMMAND" in
         echo -e "    ${GREEN}optimize_images${NC}   Optimize images in a target directory"
         echo -e "    ${GREEN}backup_accounts${NC}   Backup all accounts to /backup"
         echo -e "    ${GREEN}update${NC}            Run system package update"
+        echo -e "    ${GREEN}panel_update${NC}      Update iNetPanel from GitHub"
         echo -e "    ${GREEN}wireguard_setup${NC}   Set up WireGuard VPN (full server lockdown)"
         echo -e "    ${GREEN}wireguard_uninstall${NC} Remove WireGuard and restore public access"
         echo -e "    ${GREEN}wg_peer${NC}           Manage WireGuard peers"

@@ -200,6 +200,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $db->exec($sql);
             }
 
+            // Set schema version to latest migration
+            $db->exec("INSERT OR REPLACE INTO settings (key, value, category) VALUES ('schema_version', '1', 'system')");
+
             // --- STEP D: DATA SEEDING ---
             
             // Admin User

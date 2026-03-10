@@ -157,6 +157,48 @@ if ($rsyncCode !== 0) {
     abort('rsync failed with code ' . $rsyncCode . ': ' . implode("\n", $rsyncOut));
 }
 
+// Run pending DB migrations
+$migrationsDir = PANEL_PATH . '/db/migrations';
+if (is_dir($migrationsDir) && class_exists('DB')) {
+    try {
+        $currentSchema = (int) DB::setting('schema_version', '0');
+    } catch (Throwable) {
+        $currentSchema = 0;
+    }
+
+    $files = glob($migrationsDir . '/*.sql');
+    sort($files);
+    $ran = 0;
+
+    foreach ($files as $file) {
+        $num = (int) basename($file);
+        if ($num <= $currentSchema) continue;
+
+        $sql = file_get_contents($file);
+        $pdo = DB::get();
+        try {
+            $pdo->beginTransaction();
+            foreach (array_filter(array_map('trim', explode(';', $sql))) as $stmt) {
+                if ($stmt) $pdo->exec($stmt);
+            }
+            $pdo->commit();
+            $currentSchema = $num;
+            $ran++;
+            log_msg("Migration {$num} applied: " . basename($file));
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            log_msg("Migration {$num} FAILED: " . $e->getMessage());
+        }
+    }
+
+    if ($ran > 0) {
+        DB::saveSetting('schema_version', (string) $currentSchema);
+        log_msg("Schema version: {$currentSchema} ({$ran} migration(s)).");
+    } else {
+        log_msg('Schema is up to date (version ' . $currentSchema . ').');
+    }
+}
+
 // Write new version into Version.php constant
 $versionFile = PANEL_PATH . '/TiCore/Version.php';
 if (file_exists($versionFile)) {

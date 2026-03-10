@@ -60,7 +60,8 @@ Then open `http://<YOUR_SERVER_IP>/install.php` to complete setup.
 
 ### Panel Administration
 - **Role-Based Access** — Superadmin, full admin, and sub-admin (domain-restricted) roles
-- **Panel Updates** — One-click update from GitHub releases with optional auto-update scheduling
+- **Panel Updates** — One-click update from GitHub releases, CLI emergency update (`inetp panel_update`), auto-update scheduling
+- **Schema Migrations** — Numbered SQL migrations run automatically on update; servers that skip versions get all changes applied
 - **Scheduled Jobs** — Configurable cron for system updates, backups, and panel auto-update
 - **Dark Mode** — Toggle between light and dark themes
 - **CLI Tool** — `inetp` command for all operations from the terminal
@@ -127,6 +128,7 @@ inetp --help
 | `wireguard_setup` | Set up WireGuard VPN with full server lockdown |
 | `wg_peer` | Manage WireGuard VPN peers |
 | `update` | Run system package update |
+| `panel_update` | Update iNetPanel from GitHub |
 | `list` | List all hosting users and their domains |
 
 ---
@@ -168,7 +170,7 @@ Open `http://<YOUR_SERVER_IP>/install.php` — the wizard walks through admin ac
 |---|---|
 | **Web UI** | Settings > Updates > Update Now |
 | **Auto-update** | Settings > Updates > enable Panel Auto-Update |
-| **CLI** | `php /var/www/inetpanel/scripts/panel_update.php --force` |
+| **CLI** | `inetp panel_update` (or `inetp panel_update --force`) |
 
 ---
 

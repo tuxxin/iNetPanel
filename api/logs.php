@@ -9,9 +9,14 @@ header('Content-Type: application/json');
 $action = $_GET['action'] ?? '';
 
 $SYSTEM_LOGS = [
-    'update'   => '/var/log/lamp_update.log',
-    'backup'   => '/var/log/lamp_backup.log',
-    'lighttpd' => '/var/log/lighttpd/error.log',
+    'update'     => '/var/log/lamp_update.log',
+    'backup'     => '/var/log/lamp_backup.log',
+    'lighttpd'   => '/var/log/lighttpd/error.log',
+    'ssl'        => '/var/log/letsencrypt/letsencrypt.log',
+    'ssl_renew'  => '/var/log/certbot_renew.log',
+    'auth'       => '/var/log/auth.log',
+    'fail2ban'   => '/var/log/fail2ban.log',
+    'panel_auth' => '/var/log/inetpanel_auth.log',
 ];
 
 function tailFile(string $path, int $lines = 300): string
@@ -45,10 +50,20 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'Access denied.']); break;
         }
 
+        // Resolve log directory: new multi-domain structure, fallback to legacy
+        $domainRow = DB::fetchOne(
+            'SELECT h.username FROM hosting_users h JOIN domains d ON d.hosting_user_id = h.id WHERE d.domain_name = ?',
+            [$domain]
+        );
+        $username = $domainRow['username'] ?? null;
+        $logBase = ($username && is_dir("/home/{$username}/{$domain}/logs"))
+            ? "/home/{$username}/{$domain}/logs"
+            : "/home/{$domain}/logs";
+
         $logFiles = [
-            'apache_error'  => "/home/{$domain}/logs/apache_error.log",
-            'apache_access' => "/home/{$domain}/logs/apache_access.log",
-            'php_error'     => "/home/{$domain}/logs/php_error.log",
+            'apache_error'  => "{$logBase}/error.log",
+            'apache_access' => "{$logBase}/access.log",
+            'php_error'     => "{$logBase}/php_error.log",
         ];
 
         if (!isset($logFiles[$logtype])) {
