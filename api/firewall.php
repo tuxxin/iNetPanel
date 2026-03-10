@@ -15,11 +15,18 @@ switch ($action) {
 
         // Firewalld status
         $fwState = trim(shell_exec('sudo firewall-cmd --state 2>/dev/null') ?? '');
+        $defaultZone = trim(shell_exec('sudo firewall-cmd --get-default-zone 2>/dev/null') ?? '');
+        // Query permanent config for the default zone to avoid runtime warnings
+        $portsRaw = trim(shell_exec('sudo firewall-cmd --permanent --zone=' . escapeshellarg($defaultZone) . ' --list-ports 2>/dev/null') ?? '');
+        $servicesRaw = trim(shell_exec('sudo firewall-cmd --permanent --zone=' . escapeshellarg($defaultZone) . ' --list-services 2>/dev/null') ?? '');
+        // Filter out any non-port entries (firewalld warnings)
+        $ports = array_values(array_filter(explode(' ', $portsRaw), fn($p) => preg_match('#^\d+/(tcp|udp)$#', $p)));
+        $services = array_values(array_filter(explode(' ', $servicesRaw), fn($s) => $s && !str_contains($s, ' ') && !str_contains($s, "'")));
         $fw['firewalld'] = [
             'running'      => $fwState === 'running',
-            'default_zone' => trim(shell_exec('sudo firewall-cmd --get-default-zone 2>/dev/null') ?? ''),
-            'ports'        => array_filter(explode(' ', trim(shell_exec('sudo firewall-cmd --list-ports 2>/dev/null') ?? ''))),
-            'services'     => array_filter(explode(' ', trim(shell_exec('sudo firewall-cmd --list-services 2>/dev/null') ?? ''))),
+            'default_zone' => $defaultZone,
+            'ports'        => $ports,
+            'services'     => $services,
         ];
 
         // Active zones
