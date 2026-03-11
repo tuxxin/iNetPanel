@@ -126,9 +126,11 @@ POOL
 # SSL Certificate
 # ----------------------------------------------------------------
 if [ "$NO_CF" -eq 1 ]; then
-    bash "$SCRIPTS_DIR/ssl_manage.sh" issue "$DOMAIN" --self-signed
-else
+    # No Cloudflare — need a real LE cert for direct access
     bash "$SCRIPTS_DIR/ssl_manage.sh" issue "$DOMAIN"
+else
+    # CF tunnel handles public TLS; Apache only needs a cert for the local hop
+    bash "$SCRIPTS_DIR/ssl_manage.sh" issue "$DOMAIN" --self-signed
 fi
 SSL_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 SSL_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
