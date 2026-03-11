@@ -173,9 +173,9 @@ class CloudflareAPI
         // Ensure catch-all is last; insert new rule before it
         $catchAll = array_pop($ingress) ?? ['service' => 'http_status:404'];
         $rule = ['hostname' => $hostname, 'service' => $service];
-        // For HTTPS origins, add originRequest so cloudflared verifies the local cert
+        // For HTTPS origins, skip TLS verify — cert is for the domain, not localhost
         if (str_starts_with($service, 'https://')) {
-            $rule['originRequest'] = ['originServerName' => $hostname];
+            $rule['originRequest'] = ['noTLSVerify' => true];
         }
         $ingress[] = $rule;
         $ingress[] = $catchAll;
