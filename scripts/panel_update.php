@@ -227,6 +227,25 @@ if ($systemScripts) {
     log_msg('Deployed ' . count($systemScripts) . ' system script(s) to ' . $scriptDest . '/');
 }
 
+// Deploy inetp command wrapper to /usr/local/bin/
+$inetpSrc = PANEL_PATH . '/scripts/system/inetp';
+if (file_exists($inetpSrc)) {
+    copy($inetpSrc, '/usr/local/bin/inetp');
+    chmod('/usr/local/bin/inetp', 0755);
+    log_msg('Deployed inetp command to /usr/local/bin/inetp');
+}
+
+// Deploy Python scripts to /root/scripts/
+$pyScripts = glob(PANEL_PATH . '/scripts/system/*.py');
+foreach ($pyScripts as $script) {
+    $dest = '/root/scripts/' . basename($script);
+    copy($script, $dest);
+    chmod($dest, 0755);
+}
+if ($pyScripts) {
+    log_msg('Deployed ' . count($pyScripts) . ' Python script(s) to /root/scripts/');
+}
+
 // Ensure sudoers allows www-data to run panel_update.php via sudo
 $sudoersFile = '/etc/sudoers.d/inetpanel';
 if (file_exists($sudoersFile)) {
