@@ -8,7 +8,7 @@
 
 class Version
 {
-    const APP_VERSION = '1.11';
+    const APP_VERSION = '1.12';
 
     /**
      * Return current version string.

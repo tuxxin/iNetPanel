@@ -8,7 +8,11 @@
 # Usage: delete_user.sh --username <name> [--force]
 # ==============================================================================
 
-DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
+if [ -f /root/.mysql_root_pass ]; then
+    DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
+else
+    DB_ROOT_PASS=""
+fi
 BOLD='\033[1m'; RED='\033[1;31m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
 USERNAME=""
@@ -46,7 +50,7 @@ echo -e "${BOLD}--- Deleting Hosting User: ${USERNAME} ---${NC}"
 # ----------------------------------------------------------------
 # MariaDB User
 # ----------------------------------------------------------------
-mysql -u root -p"$DB_ROOT_PASS" << MYSQL 2>/dev/null
+mysql -u root ${DB_ROOT_PASS:+-p"$DB_ROOT_PASS"} << MYSQL 2>/dev/null
 DROP USER IF EXISTS '${USERNAME}'@'localhost';
 FLUSH PRIVILEGES;
 MYSQL
@@ -62,6 +66,8 @@ systemctl reload vsftpd 2>/dev/null || systemctl restart vsftpd
 # Linux User + Home Directory
 # ----------------------------------------------------------------
 if id "$USERNAME" &>/dev/null; then
+    killall -u "$USERNAME" 2>/dev/null
+    sleep 2
     killall -9 -u "$USERNAME" 2>/dev/null
     sleep 1
     userdel -r "$USERNAME" 2>/dev/null

@@ -33,6 +33,13 @@ case "$ACTION" in
             exit 1
         fi
 
+        # Resolve cloudflared path and validate
+        CF_BIN=$(command -v cloudflared 2>/dev/null || echo "/usr/local/bin/cloudflared")
+        if [ ! -x "$CF_BIN" ]; then
+            echo '{"success":false,"error":"cloudflared binary not found"}' >&2
+            exit 1
+        fi
+
         # Write systemd service unit
         cat > "$SERVICE_FILE" << EOF
 [Unit]
@@ -45,7 +52,7 @@ Type=notify
 TimeoutStartSec=0
 Restart=on-failure
 RestartSec=5s
-ExecStart=$(command -v cloudflared) tunnel --no-autoupdate run --token "${TOKEN}"
+ExecStart=${CF_BIN} tunnel --no-autoupdate run --token "${TOKEN}"
 
 [Install]
 WantedBy=multi-user.target

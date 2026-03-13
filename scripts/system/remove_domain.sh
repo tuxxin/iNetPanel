@@ -11,7 +11,11 @@
 # ==============================================================================
 
 CUSTOM_PORTS_CONF="/etc/apache2/ports_domains.conf"
-DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
+if [ -f /root/.mysql_root_pass ]; then
+    DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
+else
+    DB_ROOT_PASS=""
+fi
 SCRIPTS_DIR="/root/scripts"
 
 BOLD='\033[1m'; RED='\033[1;31m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -47,7 +51,7 @@ fi
 # ----------------------------------------------------------------
 VHOST_CONF="/etc/apache2/sites-available/${DOMAIN}.conf"
 if [ -f "$VHOST_CONF" ]; then
-    PORT=$(grep '<VirtualHost' "$VHOST_CONF" | grep -oP '(?<=:)\d+')
+    PORT=$(grep '<VirtualHost' "$VHOST_CONF" | grep -oE ':[0-9]+' | tr -d ':')
     a2dissite "${DOMAIN}.conf" > /dev/null 2>&1
     rm -f "$VHOST_CONF"
     if [ -n "$PORT" ]; then
@@ -87,9 +91,9 @@ timeout 60 bash "$SCRIPTS_DIR/ssl_manage.sh" revoke "$DOMAIN" 2>/dev/null || ech
 # MariaDB — drop domain database (keep the user for other domains)
 # ----------------------------------------------------------------
 DB_NAME="${USERNAME}_$(echo "$DOMAIN" | tr '.-' '_')"
-DBS=$(mysql -u root -p"$DB_ROOT_PASS" -N -e "SHOW DATABASES LIKE '${DB_NAME}%'" 2>/dev/null)
+DBS=$(mysql -u root ${DB_ROOT_PASS:+-p"$DB_ROOT_PASS"} -N -e "SHOW DATABASES LIKE '${DB_NAME}%'" 2>/dev/null)
 for DB in $DBS; do
-    mysql -u root -p"$DB_ROOT_PASS" -e "DROP DATABASE \`$DB\`;" 2>/dev/null
+    mysql -u root ${DB_ROOT_PASS:+-p"$DB_ROOT_PASS"} -e "DROP DATABASE \`$DB\`;" 2>/dev/null
     echo -e "  Dropped DB: ${YELLOW}$DB${NC}"
 done
 

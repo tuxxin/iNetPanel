@@ -66,8 +66,14 @@ if [ -f "$JAIL_LOCAL" ]; then
     echo -e "  ${GREEN}Fail2Ban updated${NC}"
 fi
 
-# 4. Restart SSH
-systemctl restart sshd 2>/dev/null
-echo -e "  ${GREEN}SSH restarted on port ${NEW_PORT}${NC}"
+# 4. Validate config and restart SSH
+if sshd -t 2>/dev/null; then
+    systemctl restart sshd 2>/dev/null
+    echo -e "  ${GREEN}SSH restarted on port ${NEW_PORT}${NC}"
+else
+    echo -e "  ${RED}sshd config test failed! Reverting to port ${OLD_PORT}...${NC}"
+    sed -i "s/^Port .*/Port ${OLD_PORT}/" "$SSHD_CONF"
+    exit 1
+fi
 
 echo -e "${GREEN}Done. SSH port changed to ${NEW_PORT}.${NC}"

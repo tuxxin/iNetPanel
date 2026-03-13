@@ -72,8 +72,7 @@ FAILED=0
 
 for svc in $SERVICES; do
     # Skip if service unit doesn't exist
-    systemctl list-unit-files "${svc}.service" &>/dev/null || \
-    systemctl list-unit-files "${svc}" &>/dev/null || continue
+    systemctl list-unit-files "${svc}.service" 2>/dev/null | grep -q "${svc}" || continue
 
     STATUS=$(systemctl is-active "$svc" 2>/dev/null)
     if [ "$STATUS" != "active" ]; then

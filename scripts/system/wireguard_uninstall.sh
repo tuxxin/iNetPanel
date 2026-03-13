@@ -18,6 +18,13 @@ PANEL_DB="/var/www/inetpanel/db/inetpanel.db"
 
 BOLD='\033[1m'; GREEN='\033[1;32m'; RED='\033[1;31m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
+# Read WG port from config before we delete it
+WG_PORT=""
+if [ -f "$WG_CONF" ]; then
+    WG_PORT=$(grep '^ListenPort' "$WG_CONF" | awk '{print $3}')
+fi
+[ -z "$WG_PORT" ] && WG_PORT=1443
+
 echo -e "${BOLD}--- WireGuard Uninstall ---${NC}"
 echo ""
 

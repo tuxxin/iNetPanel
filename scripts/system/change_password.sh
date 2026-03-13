@@ -6,7 +6,11 @@
 # Usage: change_password.sh --username <user> --password <pass>
 # ==============================================================================
 
-DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
+if [ -f /root/.mysql_root_pass ]; then
+    DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
+else
+    DB_ROOT_PASS=""
+fi
 BOLD='\033[1m'; RED='\033[1;31m'; GREEN='\033[1;32m'; NC='\033[0m'
 
 USERNAME=""
@@ -35,7 +39,9 @@ echo "$USERNAME:$PASSWORD" | chpasswd
 echo -e "  Linux password updated."
 
 # MariaDB user password (covers phpMyAdmin)
-mysql -u root -p"$DB_ROOT_PASS" -e "ALTER USER '${USERNAME}'@'localhost' IDENTIFIED BY '${PASSWORD}'; FLUSH PRIVILEGES;" 2>/dev/null
+SAFE_PASS="${PASSWORD//\\/\\\\}"
+SAFE_PASS="${SAFE_PASS//\'/\'\'}"
+mysql -u root ${DB_ROOT_PASS:+-p"$DB_ROOT_PASS"} -e "ALTER USER '${USERNAME}'@'localhost' IDENTIFIED BY '${SAFE_PASS}'; FLUSH PRIVILEGES;" 2>/dev/null
 echo -e "  MariaDB password updated."
 
 echo ""

@@ -10,7 +10,11 @@
 # ==============================================================================
 BACKUP_DIR="/backup"
 RETENTION_DAYS=3        # Change to adjust how many days of backups to keep
-DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
+if [ -f /root/.mysql_root_pass ]; then
+    DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
+else
+    DB_ROOT_PASS=""
+fi
 PANEL_DB="/var/www/inetpanel/db/inetpanel.db"
 DATE=$(date +%Y-%m-%d)
 
@@ -42,12 +46,16 @@ backup_user() {
     local DB_PREFIX
     DB_PREFIX=$(echo "$USERNAME" | tr '.-' '_')
     local DBS
-    DBS=$(mysql -u root -p"$DB_ROOT_PASS" -N \
+    DBS=$(mysql -u root ${DB_ROOT_PASS:+-p"$DB_ROOT_PASS"} -N \
         -e "SHOW DATABASES LIKE '${DB_PREFIX}%'" 2>/dev/null)
     for DB in $DBS; do
-        mysqldump -u root -p"$DB_ROOT_PASS" --single-transaction "$DB" \
-            > "${TMP_SQL}/${DB}.sql" 2>/dev/null
-        echo -e "    Exported DB: $DB"
+        if mysqldump -u root ${DB_ROOT_PASS:+-p"$DB_ROOT_PASS"} --single-transaction "$DB" \
+            > "${TMP_SQL}/${DB}.sql" 2>/dev/null; then
+            echo -e "    Exported DB: $DB"
+        else
+            echo -e "    ${RED}Failed to export DB: $DB${NC}"
+            rm -f "${TMP_SQL}/${DB}.sql"
+        fi
     done
 
     # Archive: user's entire home directory + SQL dumps in a single tgz

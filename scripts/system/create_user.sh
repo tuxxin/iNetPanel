@@ -5,7 +5,11 @@
 # Usage: create_user.sh --username <name> --password <pass> [--shell /bin/bash]
 # ==============================================================================
 
-DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
+if [ -f /root/.mysql_root_pass ]; then
+    DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
+else
+    DB_ROOT_PASS=""
+fi
 BOLD='\033[1m'; GREEN='\033[1;32m'; RED='\033[1;31m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
 # --- Parse flags ---
@@ -26,7 +30,7 @@ done
 [ -z "$PASSWORD" ] && { echo -e "${RED}Password is required (--password).${NC}"; exit 1; }
 
 # Validate username (alphanumeric + hyphens, max 32 chars, must start with letter)
-if ! echo "$USERNAME" | grep -qP '^[a-z][a-z0-9\-]{0,31}$'; then
+if ! [[ "$USERNAME" =~ ^[a-z][a-z0-9-]{0,31}$ ]]; then
     echo -e "${RED}Invalid username. Must start with a letter, contain only lowercase letters, numbers, and hyphens, max 32 chars.${NC}"
     exit 1
 fi
@@ -53,7 +57,7 @@ fi
 # ----------------------------------------------------------------
 SAFE_PASS="${PASSWORD//\\/\\\\}"
 SAFE_PASS="${SAFE_PASS//\'/\'\'}"
-mysql -u root -p"$DB_ROOT_PASS" << MYSQL
+mysql -u root ${DB_ROOT_PASS:+-p"$DB_ROOT_PASS"} << MYSQL
 CREATE USER IF NOT EXISTS '${USERNAME}'@'localhost' IDENTIFIED BY '${SAFE_PASS}';
 FLUSH PRIVILEGES;
 MYSQL

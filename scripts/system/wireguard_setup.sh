@@ -57,6 +57,10 @@ fi
 # Install WireGuard
 export DEBIAN_FRONTEND=noninteractive
 apt-get install -y -qq wireguard wireguard-tools 2>/dev/null
+if ! command -v wg &>/dev/null; then
+    echo -e "${RED}Failed to install WireGuard. Check network and try again.${NC}"
+    exit 1
+fi
 
 # Generate server keypair
 mkdir -p /etc/wireguard
@@ -70,14 +74,19 @@ SERVER_PUBKEY=$(echo "$SERVER_PRIVKEY" | wg pubkey)
 echo "$SERVER_PUBKEY" > /etc/wireguard/server_pubkey.txt
 
 # Enable IP forwarding
-if ! grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf; then
+if grep -q '^net.ipv4.ip_forward' /etc/sysctl.conf; then
+    sed -i 's/^net.ipv4.ip_forward.*/net.ipv4.ip_forward=1/' /etc/sysctl.conf
+else
     echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
 fi
 sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1
 
 # Detect main network interface
 MAIN_IFACE=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $5; exit}')
-[ -z "$MAIN_IFACE" ] && MAIN_IFACE="eth0"
+if [ -z "$MAIN_IFACE" ]; then
+    MAIN_IFACE=$(ip -o link show up | awk -F': ' '!/lo/{print $2; exit}')
+    [ -z "$MAIN_IFACE" ] && MAIN_IFACE="eth0"
+fi
 
 # Write server config
 cat << WGCONF > "$WG_CONF"

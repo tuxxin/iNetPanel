@@ -13,7 +13,11 @@ CUSTOM_PORTS_CONF="/etc/apache2/ports_domains.conf"
 BASE_PORT=1080
 SCRIPTS_DIR="/root/scripts"
 WELCOME_TEMPLATE="$SCRIPTS_DIR/welcome-default.php"
-DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
+if [ -f /root/.mysql_root_pass ]; then
+    DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
+else
+    DB_ROOT_PASS=""
+fi
 SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
 [ -z "$SERVER_IP" ] && SERVER_IP=$(hostname -I | awk '{print $1}')
 
@@ -176,7 +180,7 @@ systemctl reload apache2
 # ----------------------------------------------------------------
 # MariaDB — grant user privileges on username_* databases
 # ----------------------------------------------------------------
-mysql -u root -p"$DB_ROOT_PASS" << MYSQL
+mysql -u root ${DB_ROOT_PASS:+-p"$DB_ROOT_PASS"} << MYSQL
 GRANT ALL PRIVILEGES ON \`${USERNAME}_%\`.* TO '${USERNAME}'@'localhost' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 MYSQL

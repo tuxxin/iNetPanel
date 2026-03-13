@@ -45,6 +45,10 @@ ensure_credentials() {
 
 # Generate a self-signed fallback certificate
 generate_self_signed() {
+    if ! command -v openssl &>/dev/null; then
+        echo -e "${RED}openssl not installed.${NC}"
+        return 1
+    fi
     local DOMAIN="$1"
     local CERT_DIR="/etc/letsencrypt/live/${DOMAIN}"
     mkdir -p "$CERT_DIR"
@@ -59,6 +63,10 @@ generate_self_signed() {
 case "$COMMAND" in
     issue)
         DOMAIN="$1"; shift
+        if ! command -v certbot &>/dev/null; then
+            echo -e "${RED}certbot not installed. Install with: apt-get install certbot python3-certbot-dns-cloudflare${NC}"
+            exit 1
+        fi
         FORCE_SELF_SIGNED=0
         while [[ $# -gt 0 ]]; do
             case "$1" in
@@ -115,6 +123,10 @@ case "$COMMAND" in
     revoke)
         DOMAIN="$1"
         [ -z "$DOMAIN" ] && { echo -e "${RED}Usage: ssl_manage.sh revoke <domain>${NC}"; exit 1; }
+        if ! command -v certbot &>/dev/null; then
+            echo -e "${RED}certbot not installed. Install with: apt-get install certbot python3-certbot-dns-cloudflare${NC}"
+            exit 1
+        fi
 
         if [ -d "/etc/letsencrypt/live/${DOMAIN}" ]; then
             # Check if it's a real LE cert or self-signed
@@ -134,6 +146,10 @@ case "$COMMAND" in
         ;;
 
     renew)
+        if ! command -v certbot &>/dev/null; then
+            echo -e "${RED}certbot not installed. Install with: apt-get install certbot python3-certbot-dns-cloudflare${NC}"
+            exit 1
+        fi
         echo -e "${BOLD}Renewing all certificates...${NC}"
         certbot renew --quiet --deploy-hook "systemctl reload apache2" 2>&1
         echo -e "${GREEN}Certificate renewal complete.${NC}"

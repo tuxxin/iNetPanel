@@ -19,7 +19,6 @@ PANEL_DB="/var/www/inetpanel/db/inetpanel.db"
 SUSPENDED_PAGE="/var/www/inetpanel/suspended/index.html"
 WG_CONF="/etc/wireguard/wg0.conf"
 WG_PEERS_DIR="/etc/wireguard/peers"
-PHP_VER="8.4"
 
 BOLD='\033[1m'; RED='\033[1;31m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
@@ -64,7 +63,7 @@ if [ -n "$USERNAME" ] && [ -z "$DOMAIN" ]; then
     for conf in /etc/apache2/sites-available/*.conf; do
         NAME=$(basename "$conf" .conf)
         [[ "$NAME" == "000-default" || "$NAME" == "phpmyadmin" ]] && continue
-        DOC=$(grep -oP 'DocumentRoot\s+\K\S+' "$conf" 2>/dev/null)
+        DOC=$(grep 'DocumentRoot' "$conf" 2>/dev/null | awk '{print $2}')
         if echo "$DOC" | grep -q "/home/$USERNAME/"; then
             bash "$0" --domain "$NAME" --$ACTION
         fi
@@ -79,9 +78,9 @@ if [ -z "$USERNAME" ]; then
     VHOST_CHECK="/etc/apache2/sites-available/${DOMAIN}.conf"
     [ -f "${VHOST_CHECK}.orig" ] && VHOST_CHECK="${VHOST_CHECK}.orig"
     if [ -f "$VHOST_CHECK" ]; then
-        DOC_ROOT_LINE=$(grep -oP 'DocumentRoot\s+\K\S+' "$VHOST_CHECK" 2>/dev/null)
+        DOC_ROOT_LINE=$(grep 'DocumentRoot' "$VHOST_CHECK" 2>/dev/null | awk '{print $2}')
         # New format: /home/username/domain/www → extract username
-        if echo "$DOC_ROOT_LINE" | grep -qP '^/home/[^/]+/[^/]+/www'; then
+        if echo "$DOC_ROOT_LINE" | grep -qE '^/home/[^/]+/[^/]+/www'; then
             USERNAME=$(echo "$DOC_ROOT_LINE" | cut -d/ -f3)
         else
             # Legacy format: /home/domain/www → username=domain
@@ -112,7 +111,7 @@ if [ "$ACTION" = "suspend" ]; then
     echo -e "${YELLOW}Suspending account: $DOMAIN${NC}"
 
     # 1. Apache — swap vhost to serve suspended page (HTTP 503)
-    PORT=$(grep '<VirtualHost' "$VHOST_CONF" | grep -oP '(?<=:)\d+')
+    PORT=$(grep '<VirtualHost' "$VHOST_CONF" | grep -oE ':[0-9]+' | tr -d ':')
     cp "$VHOST_CONF" "$VHOST_BACKUP"
 
     cat << VHOST > "$VHOST_CONF"

@@ -54,8 +54,13 @@ if grep -q 'ssl.engine' "$LIGHTTPD_CONF" 2>/dev/null; then
     fi
 else
     echo -e "${BOLD}Configuring lighttpd SSL...${NC}"
-    # Add mod_openssl and mod_redirect to modules
-    sed -i 's/server.modules = (/server.modules = (\n    "mod_openssl",\n    "mod_redirect",/' "$LIGHTTPD_CONF"
+    # Add mod_openssl and mod_redirect to modules (only if not already present)
+    if ! grep -q 'mod_openssl' "$LIGHTTPD_CONF" 2>/dev/null; then
+        sed -i 's/server.modules = (/server.modules = (\n    "mod_openssl",/' "$LIGHTTPD_CONF"
+    fi
+    if ! grep -q 'mod_redirect' "$LIGHTTPD_CONF" 2>/dev/null; then
+        sed -i 's/server.modules = (/server.modules = (\n    "mod_redirect",/' "$LIGHTTPD_CONF"
+    fi
 
     # Add SSL config block
     cat >> "$LIGHTTPD_CONF" <<SSLEOF
@@ -108,6 +113,9 @@ else
         echo "Listen 8443" >> /etc/apache2/ports.conf
     fi
 
+    # Detect PHP-FPM version for socket path
+    PHP_FPM_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.4")
+
     # Add SSL vhost block to existing config
     cat >> "$PMA_CONF" <<PMAEOF
 
@@ -121,7 +129,7 @@ else
     SSLProtocol -all +TLSv1.2 +TLSv1.3
 
     <FilesMatch "\.php$">
-        SetHandler "proxy:unix:/run/php/php8.5-fpm.sock|fcgi://localhost"
+        SetHandler "proxy:unix:/run/php/php${PHP_FPM_VER}-fpm.sock|fcgi://localhost"
     </FilesMatch>
 
     <Directory /usr/share/phpmyadmin>

@@ -120,10 +120,10 @@ SERVERBLOCK
 
     # Save to panel DB (escape single quotes for SQL safety)
     if [ -f "$PANEL_DB" ] && command -v sqlite3 &>/dev/null; then
-        local safe_name="${PEER_NAME//\'/\'\'}"
-        local safe_pubkey="${PEER_PUBKEY//\'/\'\'}"
-        local safe_ip="${PEER_IP//\'/\'\'}"
-        local safe_conf="${PEER_CONF//\'/\'\'}"
+        safe_name="${PEER_NAME//\'/\'\'}"
+        safe_pubkey="${PEER_PUBKEY//\'/\'\'}"
+        safe_ip="${PEER_IP//\'/\'\'}"
+        safe_conf="${PEER_CONF//\'/\'\'}"
         sqlite3 "$PANEL_DB" << SQL 2>/dev/null
 INSERT OR REPLACE INTO wg_peers (hosting_user, public_key, peer_ip, config_path, created_at, suspended)
 VALUES ('${safe_name}', '${safe_pubkey}', '${safe_ip}', '${safe_conf}', datetime('now'), 0);
@@ -173,7 +173,7 @@ PYEOF
 
     # Remove from panel DB
     if [ -f "$PANEL_DB" ] && command -v sqlite3 &>/dev/null; then
-        local safe_name="${PEER_NAME//\'/\'\'}"
+        safe_name="${PEER_NAME//\'/\'\'}"
         sqlite3 "$PANEL_DB" "DELETE FROM wg_peers WHERE hosting_user='${safe_name}';" 2>/dev/null
     fi
 
