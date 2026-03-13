@@ -75,7 +75,7 @@ if (class_exists('DB')) {
     try {
         DB::saveSetting('panel_latest_ver', $latestTag);
         DB::saveSetting('panel_check_ts',   (string) time());
-    } catch (Throwable) {}
+    } catch (Throwable $e) { log_msg('WARNING: Failed to cache version in DB - ' . $e->getMessage()); }
 }
 
 // Check if update is needed
@@ -209,7 +209,9 @@ if (file_exists($versionFile)) {
         "const APP_VERSION = '{$latestTag}';",
         $src
     );
-    file_put_contents($versionFile, $src);
+    if (file_put_contents($versionFile, $src) === false) {
+        log_msg("ERROR: Failed to write {$versionFile}");
+    }
 }
 
 // Deploy system shell scripts to /root/scripts/
@@ -221,7 +223,9 @@ if ($systemScripts) {
     }
     foreach ($systemScripts as $script) {
         $dest = $scriptDest . '/' . basename($script);
-        copy($script, $dest);
+        if (!copy($script, $dest)) {
+            log_msg("ERROR: Failed to copy {$script} → {$dest}");
+        }
         chmod($dest, 0755);
     }
     log_msg('Deployed ' . count($systemScripts) . ' system script(s) to ' . $scriptDest . '/');
@@ -230,7 +234,9 @@ if ($systemScripts) {
 // Deploy inetp command wrapper to /usr/local/bin/
 $inetpSrc = PANEL_PATH . '/scripts/system/inetp';
 if (file_exists($inetpSrc)) {
-    copy($inetpSrc, '/usr/local/bin/inetp');
+    if (!copy($inetpSrc, '/usr/local/bin/inetp')) {
+        log_msg('ERROR: Failed to copy inetp command to /usr/local/bin/inetp');
+    }
     chmod('/usr/local/bin/inetp', 0755);
     log_msg('Deployed inetp command to /usr/local/bin/inetp');
 }
@@ -239,46 +245,60 @@ if (file_exists($inetpSrc)) {
 $pyScripts = glob(PANEL_PATH . '/scripts/system/*.py');
 foreach ($pyScripts as $script) {
     $dest = '/root/scripts/' . basename($script);
-    copy($script, $dest);
+    if (!copy($script, $dest)) {
+        log_msg("ERROR: Failed to copy {$script} → {$dest}");
+    }
     chmod($dest, 0755);
 }
 if ($pyScripts) {
     log_msg('Deployed ' . count($pyScripts) . ' Python script(s) to /root/scripts/');
 }
 
-// Ensure sudoers allows www-data to run panel_update.php via sudo
+// Rebuild sudoers file to match current requirements
 $sudoersFile = '/etc/sudoers.d/inetpanel';
-if (file_exists($sudoersFile)) {
-    $sudoers = file_get_contents($sudoersFile);
-    $needLine = 'www-data ALL=(root) NOPASSWD: /usr/bin/php* /var/www/inetpanel/scripts/panel_update.php *';
-    if (strpos($sudoers, 'panel_update.php') === false) {
-        file_put_contents($sudoersFile, $sudoers . "\n" . $needLine . "\n");
-        $sudoers = file_get_contents($sudoersFile);
-        log_msg('Added panel_update.php sudo rule.');
-    }
+$sudoersContent = <<<'SUDOERS'
+# iNetPanel web panel privilege escalation — auto-managed by panel_update.php
+# Do not edit manually; changes will be overwritten on next panel update.
+www-data ALL=(root) NOPASSWD: /usr/local/bin/inetp *
+www-data ALL=(root) NOPASSWD: /root/scripts/manage_cron.sh
+www-data ALL=(root) NOPASSWD: /root/scripts/cloudflared_setup.sh
+www-data ALL=(root) NOPASSWD: /root/scripts/update_ssh_port.sh
+www-data ALL=(root) NOPASSWD: /root/scripts/manage_ssh_keys.sh
+www-data ALL=(root) NOPASSWD: /usr/bin/apt-get
+www-data ALL=(root) NOPASSWD: /bin/systemctl
+www-data ALL=(root) NOPASSWD: /usr/sbin/a2ensite
+www-data ALL=(root) NOPASSWD: /usr/sbin/a2dissite
+www-data ALL=(root) NOPASSWD: /usr/bin/wg
+www-data ALL=(root) NOPASSWD: /usr/bin/wg-quick
+www-data ALL=(root) NOPASSWD: /usr/sbin/usermod
+www-data ALL=(root) NOPASSWD: /usr/bin/timedatectl
+www-data ALL=(root) NOPASSWD: /usr/bin/hostnamectl
+www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetpanel_hosts /etc/hosts
+www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetpanel_jail.local /etc/fail2ban/jail.local
+www-data ALL=(root) NOPASSWD: /sbin/reboot
+www-data ALL=(root) NOPASSWD: /usr/sbin/phpenmod
+www-data ALL=(root) NOPASSWD: /usr/sbin/phpdismod
+www-data ALL=(root) NOPASSWD: /usr/bin/firewall-cmd
+www-data ALL=(root) NOPASSWD: /usr/bin/fail2ban-client
+www-data ALL=(root) NOPASSWD: /usr/bin/tail
+www-data ALL=(root) NOPASSWD: /usr/bin/journalctl
+www-data ALL=(root) NOPASSWD: /usr/bin/dpkg
+www-data ALL=(root) NOPASSWD: /bin/sed
+www-data ALL=(root) NOPASSWD: /usr/bin/php* /var/www/inetpanel/scripts/panel_update.php *
+SUDOERS;
 
-    // Ensure journalctl rule exists (needed for auth logs on Debian 12+ without rsyslog)
-    if (strpos($sudoers, 'journalctl') === false) {
-        file_put_contents($sudoersFile, $sudoers . "\nwww-data ALL=(root) NOPASSWD: /usr/bin/journalctl\n");
-        $sudoers = file_get_contents($sudoersFile);
-        log_msg('Added journalctl sudo rule.');
-    }
-
-    // Ensure fix_permissions.sh rule exists
-    if (strpos($sudoers, 'fix_permissions.sh') === false) {
-        file_put_contents($sudoersFile, $sudoers . "\nwww-data ALL=(root) NOPASSWD: /root/scripts/fix_permissions.sh\n");
-        $sudoers = file_get_contents($sudoersFile);
-        log_msg('Added fix_permissions.sh sudo rule.');
-    }
-
+if (file_put_contents($sudoersFile, $sudoersContent . "\n") === false) {
+    log_msg('CRITICAL: Failed to write sudoers file — panel may lose sudo access on next boot');
+} else {
     chmod($sudoersFile, 0440);
+    log_msg('Sudoers file rebuilt with current rules.');
 }
 
 // Update SQLite record
 if (class_exists('DB')) {
     try {
         DB::saveSetting('panel_latest_ver', $latestTag);
-    } catch (Throwable) {}
+    } catch (Throwable $e) { log_msg('WARNING: Failed to save version in DB - ' . $e->getMessage()); }
 }
 
 // Clean up temp files

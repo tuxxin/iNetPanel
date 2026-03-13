@@ -55,7 +55,7 @@ echo -e "  MariaDB user dropped."
 # ----------------------------------------------------------------
 # vsftpd Whitelist
 # ----------------------------------------------------------------
-sed -i "/^${USERNAME}$/d" /etc/vsftpd.userlist 2>/dev/null
+grep -vxF "$USERNAME" /etc/vsftpd.userlist > /tmp/vsftpd_userlist.tmp 2>/dev/null && mv /tmp/vsftpd_userlist.tmp /etc/vsftpd.userlist
 systemctl reload vsftpd 2>/dev/null || systemctl restart vsftpd
 
 # ----------------------------------------------------------------

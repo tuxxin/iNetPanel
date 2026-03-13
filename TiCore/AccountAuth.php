@@ -15,7 +15,7 @@ class AccountAuth
             session_set_cookie_params([
                 'lifetime' => 86400,
                 'path'     => '/',
-                'secure'   => false,
+                'secure'   => !empty($_SERVER['HTTPS']) || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https'),
                 'httponly' => true,
                 'samesite' => 'Strict',
             ]);

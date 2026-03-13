@@ -51,12 +51,15 @@ switch ($action) {
         }
         // Ensure dpkg is in a clean state before running apt (a previous interrupted
         // operation would cause apt to fail immediately with a dpkg error otherwise).
-        shell_exec("sudo /usr/bin/dpkg --configure -a 2>&1");
+        Shell::exec("sudo /usr/bin/dpkg --configure -a", 'multiphp-dpkg');
         exec($cmd, $outArr, $exitCode);
         $out = implode("\n", $outArr);
+        if ($exitCode !== 0) {
+            error_log("[multiphp-apt-error] exit={$exitCode} output=" . implode(' ', $outArr));
+        }
         if ($action === 'install') {
-            shell_exec("sudo /bin/systemctl enable php{$ver}-fpm 2>&1");
-            shell_exec("sudo /bin/systemctl start  php{$ver}-fpm 2>&1");
+            Shell::exec("sudo /bin/systemctl enable php{$ver}-fpm", 'multiphp-fpm-enable');
+            Shell::exec("sudo /bin/systemctl start  php{$ver}-fpm", 'multiphp-fpm-start');
         }
         // Verify the operation actually took effect before doing anything disruptive
         $nowInstalled = phpIsInstalled($ver);
@@ -78,19 +81,19 @@ switch ($action) {
         // Configure upload limits for the newly installed PHP version
         if ($action === 'install') {
             $ini = "/etc/php/{$ver}/fpm/php.ini";
-            shell_exec("sudo /bin/sed -i 's/^upload_max_filesize[[:space:]]*=.*/upload_max_filesize = 100M/' " . escapeshellarg($ini) . " 2>&1");
-            shell_exec("sudo /bin/sed -i 's/^post_max_size[[:space:]]*=.*/post_max_size = 100M/' "             . escapeshellarg($ini) . " 2>&1");
-            shell_exec("sudo /bin/systemctl reload php{$ver}-fpm 2>&1");
+            Shell::exec("sudo /bin/sed -i 's/^upload_max_filesize[[:space:]]*=.*/upload_max_filesize = 100M/' " . escapeshellarg($ini), 'multiphp-sed');
+            Shell::exec("sudo /bin/sed -i 's/^post_max_size[[:space:]]*=.*/post_max_size = 100M/' " . escapeshellarg($ini), 'multiphp-sed');
+            Shell::exec("sudo /bin/systemctl reload php{$ver}-fpm", 'multiphp-fpm-reload');
         }
 
         // After any purge, apt prerm hooks may disable modules for other PHP versions
         // and can corrupt shared library symbols. Reinstall core packages and
         // re-enable all FPM modules for the panel default to restore a clean state.
         if ($action === 'remove') {
-            shell_exec("sudo /usr/bin/apt-get install --reinstall -y php{$panelDefault}-mysql php{$panelDefault}-sqlite3 php{$panelDefault}-common phpmyadmin 2>&1");
-            shell_exec("sudo /usr/sbin/phpenmod -v {$panelDefault} -s fpm calendar ctype curl dom exif fileinfo ftp gd gettext gmp iconv intl mbstring mysqli pdo_mysql pdo_sqlite phar posix readline shmop simplexml sockets sqlite3 sysvmsg sysvsem sysvshm tokenizer xmlreader xmlwriter xsl zip 2>&1");
+            Shell::exec("sudo /usr/bin/apt-get install --reinstall -y php{$panelDefault}-mysql php{$panelDefault}-sqlite3 php{$panelDefault}-common phpmyadmin", 'multiphp-reinstall');
+            Shell::exec("sudo /usr/sbin/phpenmod -v {$panelDefault} -s fpm calendar ctype curl dom exif fileinfo ftp gd gettext gmp iconv intl mbstring mysqli pdo_mysql pdo_sqlite phar posix readline shmop simplexml sockets sqlite3 sysvmsg sysvsem sysvshm tokenizer xmlreader xmlwriter xsl zip", 'multiphp-phpenmod');
         }
-        shell_exec("sudo /bin/systemctl restart php{$panelDefault}-fpm 2>&1");
+        Shell::exec("sudo /bin/systemctl restart php{$panelDefault}-fpm", 'multiphp-fpm-reload');
         break;
 
     case 'set_default':
@@ -119,21 +122,22 @@ switch ($action) {
             $currentDefault = DB::setting('php_default_version', '8.4');
             $poolConf = "/etc/php/{$currentDefault}/fpm/pool.d/{$domain}.conf";
             $newSock  = "/run/php/php{$ver}-fpm-{$domain}.sock";
+            $escapedSock = str_replace(['|', '&', '\\'], ['\\|', '\\&', '\\\\'], $newSock);
             // Move pool config to correct PHP version dir
             $newPool  = "/etc/php/{$ver}/fpm/pool.d/{$domain}.conf";
             if (file_exists($poolConf) && !file_exists($newPool)) {
-                shell_exec("sudo cp " . escapeshellarg($poolConf) . " " . escapeshellarg($newPool) . " 2>&1");
+                Shell::exec("sudo /bin/cp " . escapeshellarg($poolConf) . " " . escapeshellarg($newPool), 'multiphp-copy-pool');
                 // Update socket path inside new pool config
-                shell_exec("sudo sed -i 's|listen = .*|listen = {$newSock}|' " . escapeshellarg($newPool) . " 2>&1");
+                Shell::exec("sudo /bin/sed -i 's|listen = .*|listen = " . $escapedSock . "|' " . escapeshellarg($newPool), 'multiphp-sed');
             }
             // Update Apache vhost to use new socket
             $vhost = "/etc/apache2/sites-available/{$domain}.conf";
             if (file_exists($vhost)) {
-                shell_exec("sudo sed -i 's|proxy:unix:.*fpm-{$domain}.*fcgi|proxy:unix:{$newSock}|fcgi|' " . escapeshellarg($vhost) . " 2>&1");
-                shell_exec("sudo /usr/sbin/a2ensite " . escapeshellarg("{$domain}.conf") . " 2>&1");
-                shell_exec("sudo /bin/systemctl reload apache2 2>&1");
+                Shell::exec("sudo /bin/sed -i 's|proxy:unix:.*fpm-{$domain}.*fcgi|proxy:unix:" . $escapedSock . "|fcgi|' " . escapeshellarg($vhost), 'multiphp-sed');
+                Shell::exec("sudo /usr/sbin/a2ensite " . escapeshellarg("{$domain}.conf"), 'multiphp-a2ensite');
+                Shell::exec("sudo /bin/systemctl reload apache2", 'multiphp-apache-reload');
             }
-            shell_exec("sudo /bin/systemctl reload php{$ver}-fpm 2>&1");
+            Shell::exec("sudo /bin/systemctl reload php{$ver}-fpm", 'multiphp-fpm-reload');
         }
         echo json_encode(['success' => true]);
         break;

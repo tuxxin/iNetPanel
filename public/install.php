@@ -296,7 +296,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             // Apply system hostname (prefer DDNS hostname if set)
             $sysHostname = ($ddnsHostname !== '') ? $ddnsHostname : ($_POST['hostname'] ?? '');
             if ($sysHostname && preg_match('/^[a-zA-Z0-9][a-zA-Z0-9.\-]*$/', $sysHostname)) {
+                $oldHostname = gethostname();
                 exec('sudo /usr/bin/hostnamectl set-hostname ' . escapeshellarg($sysHostname) . ' 2>&1');
+                // Update /etc/hosts to match new hostname
+                if ($oldHostname && $oldHostname !== $sysHostname) {
+                    $hosts = file_get_contents('/etc/hosts');
+                    if ($hosts !== false) {
+                        $hosts = str_replace($oldHostname, $sysHostname, $hosts);
+                        file_put_contents('/tmp/inetpanel_hosts', $hosts);
+                        exec('sudo /bin/cp /tmp/inetpanel_hosts /etc/hosts 2>&1');
+                        @unlink('/tmp/inetpanel_hosts');
+                    }
+                }
             }
 
             // Create Cloudflare Zero Trust Tunnel if CF is enabled + account ID provided

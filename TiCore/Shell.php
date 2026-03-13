@@ -88,6 +88,34 @@ class Shell
     }
 
     /**
+     * Execute a direct system command with logging on failure.
+     * Use this instead of raw shell_exec/exec for audit trail.
+     *
+     * @param  string $cmd      Full shell command to execute
+     * @param  string $context  Short label for log entries (e.g. 'firewall-open-port')
+     * @return array{success: bool, output: string, code: int}
+     */
+    public static function exec(string $cmd, string $context = ''): array
+    {
+        $output   = [];
+        $exitCode = 0;
+        exec($cmd . ' 2>&1', $output, $exitCode);
+
+        $outputStr = preg_replace('/\x1B\[[0-9;]*[mGKHF]/', '', implode("\n", $output));
+        $success   = ($exitCode === 0);
+
+        if (!$success) {
+            self::log('ERROR', $context ?: $cmd, [], $outputStr, $exitCode);
+        }
+
+        return [
+            'success' => $success,
+            'output'  => $outputStr,
+            'code'    => $exitCode,
+        ];
+    }
+
+    /**
      * Run a systemctl action on a whitelisted service.
      *
      * @param  string $action   start | stop | restart | reload | status

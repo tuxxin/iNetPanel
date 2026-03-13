@@ -14,11 +14,11 @@ switch ($action) {
         $fw = [];
 
         // Firewalld status
-        $fwState = trim(shell_exec('sudo firewall-cmd --state 2>/dev/null') ?? '');
-        $defaultZone = trim(shell_exec('sudo firewall-cmd --get-default-zone 2>/dev/null') ?? '');
+        $fwState = trim(Shell::exec('sudo firewall-cmd --state 2>/dev/null', 'firewall-state') ?? '');
+        $defaultZone = trim(Shell::exec('sudo firewall-cmd --get-default-zone 2>/dev/null', 'firewall-default-zone') ?? '');
         // Query permanent config for the default zone to avoid runtime warnings
-        $portsRaw = trim(shell_exec('sudo firewall-cmd --permanent --zone=' . escapeshellarg($defaultZone) . ' --list-ports 2>/dev/null') ?? '');
-        $servicesRaw = trim(shell_exec('sudo firewall-cmd --permanent --zone=' . escapeshellarg($defaultZone) . ' --list-services 2>/dev/null') ?? '');
+        $portsRaw = trim(Shell::exec('sudo firewall-cmd --permanent --zone=' . escapeshellarg($defaultZone) . ' --list-ports 2>/dev/null', 'firewall-list-ports') ?? '');
+        $servicesRaw = trim(Shell::exec('sudo firewall-cmd --permanent --zone=' . escapeshellarg($defaultZone) . ' --list-services 2>/dev/null', 'firewall-list-services') ?? '');
         // Filter out any non-port entries (firewalld warnings)
         $ports = array_values(array_filter(explode(' ', $portsRaw), fn($p) => preg_match('#^\d+/(tcp|udp)$#', $p)));
         $services = array_values(array_filter(explode(' ', $servicesRaw), fn($s) => $s && !str_contains($s, ' ') && !str_contains($s, "'")));
@@ -30,7 +30,7 @@ switch ($action) {
         ];
 
         // Active zones
-        $zonesRaw = trim(shell_exec('sudo firewall-cmd --get-active-zones 2>/dev/null') ?? '');
+        $zonesRaw = trim(Shell::exec('sudo firewall-cmd --get-active-zones 2>/dev/null', 'firewall-active-zones') ?? '');
         $zones = [];
         $currentZone = null;
         foreach (explode("\n", $zonesRaw) as $line) {
@@ -50,24 +50,24 @@ switch ($action) {
         $fw['zones'] = $zones;
 
         // VPN zone ports (if exists)
-        $vpnExists = str_contains(shell_exec('sudo firewall-cmd --permanent --get-zones 2>/dev/null') ?? '', 'vpn');
+        $vpnExists = str_contains(Shell::exec('sudo firewall-cmd --permanent --get-zones 2>/dev/null', 'firewall-get-zones') ?? '', 'vpn');
         $fw['vpn_lockdown'] = $vpnExists;
         if ($vpnExists) {
-            $fw['vpn_ports'] = array_filter(explode(' ', trim(shell_exec('sudo firewall-cmd --zone=vpn --list-ports 2>/dev/null') ?? '')));
-            $fw['vpn_sources'] = array_filter(explode(' ', trim(shell_exec('sudo firewall-cmd --zone=vpn --list-sources 2>/dev/null') ?? '')));
+            $fw['vpn_ports'] = array_filter(explode(' ', trim(Shell::exec('sudo firewall-cmd --zone=vpn --list-ports 2>/dev/null', 'firewall-vpn-ports') ?? '')));
+            $fw['vpn_sources'] = array_filter(explode(' ', trim(Shell::exec('sudo firewall-cmd --zone=vpn --list-sources 2>/dev/null', 'firewall-vpn-sources') ?? '')));
         }
 
         // Fail2Ban status
-        $f2bRunning = trim(shell_exec('systemctl is-active fail2ban 2>/dev/null') ?? '') === 'active';
+        $f2bRunning = trim(Shell::exec('systemctl is-active fail2ban 2>/dev/null', 'fail2ban-status') ?? '') === 'active';
         $fw['fail2ban'] = ['running' => $f2bRunning, 'jails' => []];
 
         if ($f2bRunning) {
-            $jailsRaw = trim(shell_exec('sudo fail2ban-client status 2>/dev/null') ?? '');
+            $jailsRaw = trim(Shell::exec('sudo fail2ban-client status 2>/dev/null', 'fail2ban-jail-list') ?? '');
             if (preg_match('/Jail list:\s*(.+)$/m', $jailsRaw, $m)) {
                 $jailNames = array_map('trim', explode(',', $m[1]));
                 foreach ($jailNames as $jail) {
                     if (!$jail) continue;
-                    $jStatus = shell_exec('sudo fail2ban-client status ' . escapeshellarg($jail) . ' 2>/dev/null') ?? '';
+                    $jStatus = Shell::exec('sudo fail2ban-client status ' . escapeshellarg($jail) . ' 2>/dev/null', 'fail2ban-jail-status') ?? '';
                     $banned = 0;
                     $total = 0;
                     $bannedIps = [];
@@ -102,14 +102,14 @@ switch ($action) {
             $wgPort = DB::setting('wg_port', '1443');
             $ports[] = "{$wgPort}/udp";
         }
-        shell_exec('sudo systemctl enable --now firewalld 2>&1');
-        shell_exec('sudo firewall-cmd --set-default-zone=drop 2>&1');
+        Shell::exec('sudo /bin/systemctl enable --now firewalld', 'firewall-enable');
+        Shell::exec('sudo firewall-cmd --set-default-zone=drop', 'firewall-set-default-zone');
         foreach ($ports as $p) {
-            shell_exec('sudo firewall-cmd --permanent --add-port=' . escapeshellarg($p) . ' 2>&1');
+            Shell::exec('sudo firewall-cmd --permanent --add-port=' . escapeshellarg($p) . '', 'firewall-open-port');
         }
-        shell_exec('sudo firewall-cmd --permanent --zone=trusted --add-interface=lo 2>&1');
-        shell_exec('sudo firewall-cmd --reload 2>&1');
-        shell_exec('sudo systemctl enable --now fail2ban 2>&1');
+        Shell::exec('sudo firewall-cmd --permanent --zone=trusted --add-interface=lo', 'firewall-trust-loopback');
+        Shell::exec('sudo firewall-cmd --reload', 'firewall-reload');
+        Shell::exec('sudo /bin/systemctl enable --now fail2ban', 'fail2ban-enable');
         echo json_encode(['success' => true, 'ports' => $ports]);
         break;
 
@@ -121,8 +121,8 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'Invalid port or protocol.']);
             break;
         }
-        $out = shell_exec('sudo firewall-cmd --permanent --add-port=' . escapeshellarg("{$port}/{$proto}") . ' 2>&1');
-        shell_exec('sudo firewall-cmd --reload 2>&1');
+        $out = Shell::exec('sudo firewall-cmd --permanent --add-port=' . escapeshellarg("{$port}/{$proto}") . '', 'firewall-open-port');
+        Shell::exec('sudo firewall-cmd --reload', 'firewall-reload');
         echo json_encode(['success' => true, 'output' => trim($out ?? '')]);
         break;
 
@@ -134,14 +134,14 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'Invalid port or protocol.']);
             break;
         }
-        $out = shell_exec('sudo firewall-cmd --permanent --remove-port=' . escapeshellarg("{$port}/{$proto}") . ' 2>&1');
-        shell_exec('sudo firewall-cmd --reload 2>&1');
+        $out = Shell::exec('sudo firewall-cmd --permanent --remove-port=' . escapeshellarg("{$port}/{$proto}") . '', 'firewall-close-port');
+        Shell::exec('sudo firewall-cmd --reload', 'firewall-reload');
         echo json_encode(['success' => true, 'output' => trim($out ?? '')]);
         break;
 
     // -------------------------------------------------------------------------
     case 'reload':
-        $out = shell_exec('sudo firewall-cmd --reload 2>&1');
+        $out = Shell::exec('sudo firewall-cmd --reload', 'firewall-reload');
         echo json_encode(['success' => true, 'output' => trim($out ?? '')]);
         break;
 
@@ -153,7 +153,7 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'Invalid IP address.']);
             break;
         }
-        $out = shell_exec('sudo fail2ban-client set ' . escapeshellarg($jail) . ' banip ' . escapeshellarg($ip) . ' 2>&1');
+        $out = Shell::exec('sudo fail2ban-client set ' . escapeshellarg($jail) . ' banip ' . escapeshellarg($ip) . '', 'fail2ban-ban');
         echo json_encode(['success' => true, 'output' => trim($out ?? '')]);
         break;
 
@@ -166,17 +166,17 @@ switch ($action) {
             break;
         }
         if ($jail) {
-            $out = shell_exec('sudo fail2ban-client set ' . escapeshellarg($jail) . ' unbanip ' . escapeshellarg($ip) . ' 2>&1');
+            $out = Shell::exec('sudo fail2ban-client set ' . escapeshellarg($jail) . ' unbanip ' . escapeshellarg($ip) . '', 'fail2ban-unban');
         } else {
             // Unban from all jails
-            $out = shell_exec('sudo fail2ban-client unban ' . escapeshellarg($ip) . ' 2>&1');
+            $out = Shell::exec('sudo fail2ban-client unban ' . escapeshellarg($ip) . '', 'fail2ban-unban-all');
         }
         echo json_encode(['success' => true, 'output' => trim($out ?? '')]);
         break;
 
     // -------------------------------------------------------------------------
     case 'f2b_flush':
-        $out = shell_exec('sudo fail2ban-client unban --all 2>&1');
+        $out = Shell::exec('sudo fail2ban-client unban --all', 'fail2ban-flush');
         echo json_encode(['success' => true, 'output' => trim($out ?? '')]);
         break;
 
@@ -205,21 +205,26 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'jail.local not found.']);
             break;
         }
-        $content = file_get_contents($jailLocal);
-        if (preg_match('/^(ignoreip\s*=\s*)(.+)$/m', $content, $m)) {
-            $existing = trim($m[2]);
-            if (!str_contains($existing, $ip)) {
-                $newLine = $m[1] . $existing . ' ' . $ip;
-                $content = str_replace($m[0], $newLine, $content);
+        $lock = fopen('/tmp/inetpanel_jail.lock', 'w');
+        if (flock($lock, LOCK_EX)) {
+            $content = file_get_contents($jailLocal);
+            if (preg_match('/^(ignoreip\s*=\s*)(.+)$/m', $content, $m)) {
+                $existing = trim($m[2]);
+                if (!str_contains($existing, $ip)) {
+                    $newLine = $m[1] . $existing . ' ' . $ip;
+                    $content = str_replace($m[0], $newLine, $content);
+                }
+            } else {
+                // Add ignoreip after [DEFAULT]
+                $content = preg_replace('/^(\[DEFAULT\].*)$/m', "$1\nignoreip = 127.0.0.1/8 ::1 {$ip}", $content, 1);
             }
-        } else {
-            // Add ignoreip after [DEFAULT]
-            $content = preg_replace('/^(\[DEFAULT\].*)$/m', "$1\nignoreip = 127.0.0.1/8 ::1 {$ip}", $content, 1);
+            file_put_contents('/tmp/inetpanel_jail.local', $content);
+            Shell::exec('sudo /bin/cp /tmp/inetpanel_jail.local /etc/fail2ban/jail.local', 'fail2ban-whitelist-add');
+            unlink('/tmp/inetpanel_jail.local');
+            flock($lock, LOCK_UN);
         }
-        file_put_contents('/tmp/inetpanel_jail.local', $content);
-        shell_exec('sudo cp /tmp/inetpanel_jail.local /etc/fail2ban/jail.local 2>&1');
-        unlink('/tmp/inetpanel_jail.local');
-        shell_exec('sudo systemctl reload fail2ban 2>&1');
+        fclose($lock);
+        Shell::exec('sudo /bin/systemctl reload fail2ban', 'fail2ban-reload');
         echo json_encode(['success' => true]);
         break;
 
@@ -235,15 +240,20 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'jail.local not found.']);
             break;
         }
-        $content = file_get_contents($jailLocal);
-        $content = preg_replace_callback('/^(ignoreip\s*=\s*)(.+)$/m', function($matches) use ($ip) {
-            $ips = array_filter(array_map('trim', preg_split('/[\s,]+/', $matches[2])), fn($v) => $v !== $ip);
-            return $matches[1] . implode(' ', $ips);
-        }, $content);
-        file_put_contents('/tmp/inetpanel_jail.local', $content);
-        shell_exec('sudo cp /tmp/inetpanel_jail.local /etc/fail2ban/jail.local 2>&1');
-        unlink('/tmp/inetpanel_jail.local');
-        shell_exec('sudo systemctl reload fail2ban 2>&1');
+        $lock = fopen('/tmp/inetpanel_jail.lock', 'w');
+        if (flock($lock, LOCK_EX)) {
+            $content = file_get_contents($jailLocal);
+            $content = preg_replace_callback('/^(ignoreip\s*=\s*)(.+)$/m', function($matches) use ($ip) {
+                $ips = array_filter(array_map('trim', preg_split('/[\s,]+/', $matches[2])), fn($v) => $v !== $ip);
+                return $matches[1] . implode(' ', $ips);
+            }, $content);
+            file_put_contents('/tmp/inetpanel_jail.local', $content);
+            Shell::exec('sudo /bin/cp /tmp/inetpanel_jail.local /etc/fail2ban/jail.local', 'fail2ban-whitelist-remove');
+            unlink('/tmp/inetpanel_jail.local');
+            flock($lock, LOCK_UN);
+        }
+        fclose($lock);
+        Shell::exec('sudo /bin/systemctl reload fail2ban', 'fail2ban-reload');
         echo json_encode(['success' => true]);
         break;
 
@@ -275,14 +285,19 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'jail.local not found.']);
             break;
         }
-        $content = file_get_contents($jailLocal);
-        $content = preg_replace('/^bantime\s*=\s*\d+/m',  "bantime  = {$bantime}",  $content);
-        $content = preg_replace('/^findtime\s*=\s*\d+/m', "findtime = {$findtime}", $content);
-        $content = preg_replace('/^maxretry\s*=\s*\d+/m', "maxretry = {$maxretry}", $content);
-        file_put_contents('/tmp/inetpanel_jail.local', $content);
-        shell_exec('sudo cp /tmp/inetpanel_jail.local /etc/fail2ban/jail.local 2>&1');
-        unlink('/tmp/inetpanel_jail.local');
-        shell_exec('sudo systemctl reload fail2ban 2>&1');
+        $lock = fopen('/tmp/inetpanel_jail.lock', 'w');
+        if (flock($lock, LOCK_EX)) {
+            $content = file_get_contents($jailLocal);
+            $content = preg_replace('/^bantime\s*=\s*\d+/m',  "bantime  = {$bantime}",  $content);
+            $content = preg_replace('/^findtime\s*=\s*\d+/m', "findtime = {$findtime}", $content);
+            $content = preg_replace('/^maxretry\s*=\s*\d+/m', "maxretry = {$maxretry}", $content);
+            file_put_contents('/tmp/inetpanel_jail.local', $content);
+            Shell::exec('sudo /bin/cp /tmp/inetpanel_jail.local /etc/fail2ban/jail.local', 'fail2ban-settings-save');
+            unlink('/tmp/inetpanel_jail.local');
+            flock($lock, LOCK_UN);
+        }
+        fclose($lock);
+        Shell::exec('sudo /bin/systemctl reload fail2ban', 'fail2ban-reload');
         echo json_encode(['success' => true]);
         break;
 
@@ -293,7 +308,7 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'Invalid port (1-65535).']);
             break;
         }
-        $out = shell_exec('sudo /root/scripts/update_ssh_port.sh --port ' . escapeshellarg($port) . ' 2>&1');
+        $out = Shell::exec('sudo /root/scripts/update_ssh_port.sh --port ' . escapeshellarg($port) . '', 'update-ssh-port');
         if ($out !== null) {
             DB::saveSetting('ssh_port', (string)$port);
             echo json_encode(['success' => true, 'output' => trim($out)]);

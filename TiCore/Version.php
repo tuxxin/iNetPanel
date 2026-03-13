@@ -8,7 +8,7 @@
 
 class Version
 {
-    const APP_VERSION = '1.10';
+    const APP_VERSION = '1.11';
 
     /**
      * Return current version string.
@@ -52,7 +52,7 @@ class Version
      */
     public static function checkUpdate(): array
     {
-        $cache = sys_get_temp_dir() . '/inetp_update_check.json';
+        $cache = (defined('ROOT_PATH') ? ROOT_PATH : '/var/www/inetpanel') . '/db/update_check_cache.json';
         if (file_exists($cache) && (time() - filemtime($cache)) < 21600) {
             $data = json_decode(file_get_contents($cache), true);
             if (is_array($data)) return $data;

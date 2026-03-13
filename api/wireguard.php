@@ -28,7 +28,6 @@ switch ($action) {
             }
         }
 
-        $peerCount = DB::fetchOne('SELECT COUNT(*) as cnt FROM wg_peers')[' cnt'] ?? 0;
         $peerCount = DB::fetchOne('SELECT COUNT(*) as cnt FROM wg_peers')['cnt'] ?? 0;
 
         echo json_encode([

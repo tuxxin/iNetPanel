@@ -40,7 +40,14 @@ for f in "$HOME_DIR"/.bashrc "$HOME_DIR"/.profile "$HOME_DIR"/.bash_logout; do
     [ -f "$f" ] && chown "$USERNAME:www-data" "$f"
 done
 
-# 4. Per-domain directories
+# 4. SSH directory — must be user:user per SSH StrictModes (NOT www-data)
+if [ -d "$HOME_DIR/.ssh" ]; then
+    chown -R "$USERNAME:$USERNAME" "$HOME_DIR/.ssh"
+    chmod 700 "$HOME_DIR/.ssh"
+    [ -f "$HOME_DIR/.ssh/authorized_keys" ] && chmod 600 "$HOME_DIR/.ssh/authorized_keys"
+fi
+
+# 5. Per-domain directories
 FIXED=0
 for DOMAIN_DIR in "$HOME_DIR"/*/; do
     [ -d "$DOMAIN_DIR" ] || continue

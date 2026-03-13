@@ -51,8 +51,10 @@ fi
 # ----------------------------------------------------------------
 # MariaDB User (shared across all domains for this hosting user)
 # ----------------------------------------------------------------
+SAFE_PASS="${PASSWORD//\\/\\\\}"
+SAFE_PASS="${SAFE_PASS//\'/\'\'}"
 mysql -u root -p"$DB_ROOT_PASS" << MYSQL
-CREATE USER IF NOT EXISTS '${USERNAME}'@'localhost' IDENTIFIED BY '${PASSWORD}';
+CREATE USER IF NOT EXISTS '${USERNAME}'@'localhost' IDENTIFIED BY '${SAFE_PASS}';
 FLUSH PRIVILEGES;
 MYSQL
 

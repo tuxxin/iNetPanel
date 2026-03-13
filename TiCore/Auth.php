@@ -14,7 +14,7 @@ class Auth
             session_set_cookie_params([
                 'lifetime' => 86400,
                 'path'     => '/',
-                'secure'   => false,
+                'secure'   => !empty($_SERVER['HTTPS']) || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https'),
                 'httponly' => true,
                 'samesite' => 'Strict',
             ]);
@@ -71,7 +71,7 @@ class Auth
                     'message' => "Admin login: {$username}",
                     'user' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
                 ]);
-            } catch (\Throwable $e) {}
+            } catch (\Throwable $e) { error_log('iNetPanel: auth log failed - ' . $e->getMessage()); }
             return true;
         }
 
@@ -93,7 +93,7 @@ class Auth
                     'message' => "Panel user login: {$username} (role: " . ($panelUser['role'] ?? 'subadmin') . ")",
                     'user' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
                 ]);
-            } catch (\Throwable $e) {}
+            } catch (\Throwable $e) { error_log('iNetPanel: auth log failed - ' . $e->getMessage()); }
             return true;
         }
 
@@ -112,7 +112,7 @@ class Auth
                 'message' => "Failed login attempt: {$username}",
                 'user' => $username, 'ip_address' => $clientIp,
             ]);
-        } catch (\Throwable $e) {}
+        } catch (\Throwable $e) { error_log('iNetPanel: auth log failed - ' . $e->getMessage()); }
 
         return false;
     }
@@ -127,7 +127,7 @@ class Auth
                 'message' => "Logout: {$username}",
                 'user' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
             ]);
-        } catch (\Throwable $e) {}
+        } catch (\Throwable $e) { error_log('iNetPanel: auth log failed - ' . $e->getMessage()); }
         $_SESSION = [];
         if (ini_get('session.use_cookies')) {
             $p = session_get_cookie_params();

@@ -118,11 +118,15 @@ SERVERBLOCK
         wg addconf wg0 <(echo -e "[Peer]\nPublicKey = ${PEER_PUBKEY}\nPresharedKey = ${PEER_PSK}\nAllowedIPs = ${PEER_IP}/32") 2>/dev/null
     fi
 
-    # Save to panel DB
+    # Save to panel DB (escape single quotes for SQL safety)
     if [ -f "$PANEL_DB" ] && command -v sqlite3 &>/dev/null; then
+        local safe_name="${PEER_NAME//\'/\'\'}"
+        local safe_pubkey="${PEER_PUBKEY//\'/\'\'}"
+        local safe_ip="${PEER_IP//\'/\'\'}"
+        local safe_conf="${PEER_CONF//\'/\'\'}"
         sqlite3 "$PANEL_DB" << SQL 2>/dev/null
 INSERT OR REPLACE INTO wg_peers (hosting_user, public_key, peer_ip, config_path, created_at, suspended)
-VALUES ('${PEER_NAME}', '${PEER_PUBKEY}', '${PEER_IP}', '${PEER_CONF}', datetime('now'), 0);
+VALUES ('${safe_name}', '${safe_pubkey}', '${safe_ip}', '${safe_conf}', datetime('now'), 0);
 SQL
     fi
 
@@ -169,7 +173,8 @@ PYEOF
 
     # Remove from panel DB
     if [ -f "$PANEL_DB" ] && command -v sqlite3 &>/dev/null; then
-        sqlite3 "$PANEL_DB" "DELETE FROM wg_peers WHERE hosting_user='${PEER_NAME}';" 2>/dev/null
+        local safe_name="${PEER_NAME//\'/\'\'}"
+        sqlite3 "$PANEL_DB" "DELETE FROM wg_peers WHERE hosting_user='${safe_name}';" 2>/dev/null
     fi
 
     echo -e "${GREEN}Peer '${PEER_NAME}' removed.${NC}"

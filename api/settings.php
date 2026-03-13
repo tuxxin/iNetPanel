@@ -51,7 +51,7 @@ switch ($action) {
             $tz = DB::setting('timezone', 'UTC');
             if (in_array($tz, DateTimeZone::listIdentifiers())) {
                 date_default_timezone_set($tz);
-                shell_exec('sudo /usr/bin/timedatectl set-timezone ' . escapeshellarg($tz) . ' 2>&1');
+                Shell::exec('sudo /usr/bin/timedatectl set-timezone ' . escapeshellarg($tz), 'timezone');
             }
         }
         // If CF credentials were saved, validate them
@@ -72,7 +72,7 @@ switch ($action) {
                 $proc = popen('sudo /root/scripts/manage_cron.sh write inetpanel_ddns', 'w');
                 fwrite($proc, $cron); pclose($proc);
             } else {
-                shell_exec('sudo /root/scripts/manage_cron.sh remove inetpanel_ddns 2>&1');
+                Shell::exec('sudo /root/scripts/manage_cron.sh remove inetpanel_ddns', 'cron-ddns-remove');
             }
         }
         // Rebuild system update cron (/etc/cron.d/lamp_update) if schedule changed
@@ -110,7 +110,7 @@ switch ($action) {
                 $proc = popen('sudo /root/scripts/manage_cron.sh write inetpanel_autoupdate', 'w');
                 fwrite($proc, $autoCron); pclose($proc);
             } else {
-                shell_exec('sudo /root/scripts/manage_cron.sh remove inetpanel_autoupdate 2>&1');
+                Shell::exec('sudo /root/scripts/manage_cron.sh remove inetpanel_autoupdate', 'cron-autoupdate-remove');
             }
         }
         echo json_encode(['success' => true, 'saved' => $saved]);
@@ -119,7 +119,8 @@ switch ($action) {
     case 'update_now':
         Auth::requireAdmin();
         $phpBin = 'php' . DB::setting('php_default_version', '8.4');
-        $output = shell_exec("sudo {$phpBin} /var/www/inetpanel/scripts/panel_update.php --force 2>&1");
+        $updateResult = Shell::exec('sudo ' . escapeshellarg($phpBin) . ' /var/www/inetpanel/scripts/panel_update.php --force', 'panel-update');
+        $output = $updateResult['output'];
         echo json_encode(['success' => true, 'output' => trim($output ?: 'No output.')]);
         break;
 
@@ -179,7 +180,7 @@ switch ($action) {
             DB::saveSetting('cf_tunnel_id',    $tunnelId);
             DB::saveSetting('cf_tunnel_token', $tunnelToken);
             if ($tunnelToken) {
-                shell_exec('sudo /root/scripts/cloudflared_setup.sh --action install --token ' . escapeshellarg($tunnelToken) . ' 2>&1');
+                Shell::exec('sudo /root/scripts/cloudflared_setup.sh --action install --token ' . escapeshellarg($tunnelToken), 'cloudflared-install');
             }
             echo json_encode(['success' => true, 'tunnel_id' => $tunnelId]);
         } catch (Throwable $e) {
@@ -195,16 +196,16 @@ switch ($action) {
             break;
         }
         // Update system hostname
-        shell_exec('sudo /usr/bin/hostnamectl set-hostname ' . escapeshellarg($hostname) . ' 2>&1');
-        // Update /etc/hosts — replace old hostname with new one
         $oldHostname = gethostname();
+        Shell::exec('sudo /usr/bin/hostnamectl set-hostname ' . escapeshellarg($hostname), 'hostname');
+        // Update /etc/hosts — replace old hostname with new one
         if ($oldHostname && $oldHostname !== $hostname) {
             $hosts = file_get_contents('/etc/hosts');
             if ($hosts !== false) {
                 $hosts = str_replace($oldHostname, $hostname, $hosts);
                 file_put_contents('/tmp/inetpanel_hosts', $hosts);
-                shell_exec('sudo cp /tmp/inetpanel_hosts /etc/hosts 2>&1');
-                unlink('/tmp/inetpanel_hosts');
+                Shell::exec('sudo /bin/cp /tmp/inetpanel_hosts /etc/hosts', 'hostname-hosts');
+                @unlink('/tmp/inetpanel_hosts');
             }
         }
         DB::saveSetting('server_hostname', $hostname);

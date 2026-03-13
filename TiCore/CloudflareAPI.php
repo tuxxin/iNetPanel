@@ -167,10 +167,20 @@ class CloudflareAPI
         $config  = $this->getTunnelConfig($accountId, $tunnelId);
         $ingress = $config['result']['config']['ingress'] ?? [['service' => 'http_status:404']];
 
+        // Detect zone-apex domains to auto-add www variant
+        $wwwHostname = 'www.' . $hostname;
+        $zoneInfo = $this->getZoneInfoForHostname($hostname);
+        $isApex = $zoneInfo['is_apex'] && $zoneInfo['zone_id'];
+        $wwwHasExistingDns = $isApex && $this->hasExistingDnsRecord($zoneInfo['zone_id'], $wwwHostname);
+        $addWww = $isApex && !$wwwHasExistingDns;
+
         // Remove any existing entry for this hostname (prevent duplicates)
         $ingress = array_values(array_filter($ingress, fn($r) => ($r['hostname'] ?? '') !== $hostname));
+        if ($addWww) {
+            $ingress = array_values(array_filter($ingress, fn($r) => ($r['hostname'] ?? '') !== $wwwHostname));
+        }
 
-        // Ensure catch-all is last; insert new rule before it
+        // Ensure catch-all is last; insert new rule(s) before it
         $catchAll = array_pop($ingress) ?? ['service' => 'http_status:404'];
         $rule = ['hostname' => $hostname, 'service' => $service];
         // For HTTPS origins, skip TLS verify — cert is for the domain, not localhost
@@ -178,14 +188,34 @@ class CloudflareAPI
             $rule['originRequest'] = ['noTLSVerify' => true];
         }
         $ingress[] = $rule;
+
+        // Add www ingress rule for zone-apex domains (single config update)
+        if ($addWww) {
+            $wwwRule = ['hostname' => $wwwHostname, 'service' => $service];
+            if (str_starts_with($service, 'https://')) {
+                $wwwRule['originRequest'] = ['noTLSVerify' => true];
+            }
+            $ingress[] = $wwwRule;
+        }
+
         $ingress[] = $catchAll;
 
         $result = $this->updateTunnelConfig($accountId, $tunnelId, $ingress);
 
         // Auto-create CNAME DNS record if the zone is in this CF account
-        $dnsCreated = $this->upsertTunnelCname($tunnelId, $hostname);
-
+        $dnsCreated = $this->upsertTunnelCname($tunnelId, $hostname, $zoneInfo['zone_id']);
         $result['dns_skipped'] = !$dnsCreated;
+
+        // Auto-create www CNAME for zone-apex domains
+        $result['www_added']   = false;
+        $result['www_skipped'] = false;
+        if ($addWww) {
+            $this->upsertTunnelCname($tunnelId, $wwwHostname, $zoneInfo['zone_id']);
+            $result['www_added'] = true;
+        } elseif ($isApex && $wwwHasExistingDns) {
+            $result['www_skipped'] = true;
+        }
+
         return $result;
     }
 
@@ -197,15 +227,31 @@ class CloudflareAPI
         $config  = $this->getTunnelConfig($accountId, $tunnelId);
         $ingress = $config['result']['config']['ingress'] ?? [['service' => 'http_status:404']];
 
-        $ingress = array_values(array_filter($ingress, fn($r) => ($r['hostname'] ?? '') !== $hostname));
+        // Check if www variant exists in tunnel ingress (means we created it)
+        $wwwHostname = 'www.' . $hostname;
+        $hasWwwRoute = false;
+        foreach ($ingress as $r) {
+            if (($r['hostname'] ?? '') === $wwwHostname) {
+                $hasWwwRoute = true;
+                break;
+            }
+        }
+
+        // Remove main hostname and www variant (if present) in one update
+        $ingress = array_values(array_filter($ingress, fn($r) =>
+            ($r['hostname'] ?? '') !== $hostname && ($r['hostname'] ?? '') !== $wwwHostname
+        ));
         if (empty($ingress)) {
             $ingress = [['service' => 'http_status:404']];
         }
 
         $result = $this->updateTunnelConfig($accountId, $tunnelId, $ingress);
 
-        // Remove CNAME DNS record if found
+        // Remove CNAME DNS records
         $this->deleteTunnelCname($hostname);
+        if ($hasWwwRoute) {
+            $this->deleteTunnelCname($wwwHostname);
+        }
 
         return $result;
     }
@@ -213,11 +259,12 @@ class CloudflareAPI
     /**
      * Create or update a CNAME DNS record pointing to the tunnel.
      * Looks up the CF zone by matching the hostname's root domain.
+     * Pass $knownZoneId to skip the zone lookup when already resolved.
      */
-    private function upsertTunnelCname(string $tunnelId, string $hostname): bool
+    private function upsertTunnelCname(string $tunnelId, string $hostname, ?string $knownZoneId = null): bool
     {
         $cname = "{$tunnelId}.cfargotunnel.com";
-        $zoneId = $this->findZoneForHostname($hostname);
+        $zoneId = $knownZoneId ?? $this->findZoneForHostname($hostname);
         if (!$zoneId) return false;
 
         $records = $this->listDNSRecords($zoneId, ['type' => 'CNAME', 'name' => $hostname]);
@@ -229,6 +276,15 @@ class CloudflareAPI
             $this->createDNSRecord($zoneId, $data);
         }
         return true;
+    }
+
+    /**
+     * Check if ANY DNS record (A, AAAA, CNAME, etc.) exists for a hostname in a zone.
+     */
+    private function hasExistingDnsRecord(string $zoneId, string $hostname): bool
+    {
+        $records = $this->listDNSRecords($zoneId, ['name' => $hostname]);
+        return !empty($records['result']);
     }
 
     /**
@@ -253,16 +309,31 @@ class CloudflareAPI
      */
     public function findZoneForHostname(string $hostname): string|null
     {
+        $info = $this->getZoneInfoForHostname($hostname);
+        return $info['zone_id'];
+    }
+
+    /**
+     * Find the CF zone for a hostname and determine if it is the zone apex.
+     * Returns ['is_apex' => bool, 'zone_id' => string|null].
+     * A domain is apex when the zone name matches the hostname exactly
+     * (e.g. heskapi.com is apex, hesk.tuxxin.net is not).
+     */
+    public function getZoneInfoForHostname(string $hostname): array
+    {
         $parts = explode('.', $hostname);
         while (count($parts) >= 2) {
             $candidate = implode('.', $parts);
             $zones = $this->request('GET', "/zones?name={$candidate}&per_page=1");
             if (!empty($zones['result'][0]['id'])) {
-                return $zones['result'][0]['id'];
+                return [
+                    'is_apex' => ($candidate === $hostname),
+                    'zone_id' => $zones['result'][0]['id'],
+                ];
             }
             array_shift($parts);
         }
-        return null;
+        return ['is_apex' => false, 'zone_id' => null];
     }
 
     // -------------------------------------------------------------------------

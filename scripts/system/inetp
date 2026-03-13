@@ -48,10 +48,6 @@ case "$COMMAND" in
         DB_VER=$(mysql --version 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1 || echo "not installed")
         echo -e "  ${GREEN}MariaDB${NC}       $DB_VER"
 
-        # Node.js
-        NODE_VER=$(node -v 2>/dev/null || echo "not installed")
-        echo -e "  ${GREEN}Node.js${NC}       $NODE_VER"
-
         # Certbot
         CB_VER=$(certbot --version 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' || echo "not installed")
         echo -e "  ${GREEN}Certbot${NC}       $CB_VER"

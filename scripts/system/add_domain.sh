@@ -186,8 +186,8 @@ MYSQL
 # ----------------------------------------------------------------
 if [ -f "$WELCOME_TEMPLATE" ]; then
     cp "$WELCOME_TEMPLATE" "$DOC_ROOT/index.php"
-    sed -i "s/{{DOMAIN}}/$DOMAIN/g"     "$DOC_ROOT/index.php"
-    sed -i "s/{{PORT}}/$PORT/g"         "$DOC_ROOT/index.php"
+    sed -i "s|{{DOMAIN}}|$DOMAIN|g"     "$DOC_ROOT/index.php"
+    sed -i "s|{{PORT}}|$PORT|g"         "$DOC_ROOT/index.php"
     sed -i "s|{{DOC_ROOT}}|$DOC_ROOT|g" "$DOC_ROOT/index.php"
     chown "$USERNAME:www-data" "$DOC_ROOT/index.php"
     chmod 644 "$DOC_ROOT/index.php"

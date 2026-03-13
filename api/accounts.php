@@ -149,7 +149,9 @@ switch ($action) {
                         echo json_encode(['success' => false, 'error' => "Domain '{$domain}' is already routed on this Cloudflare tunnel."]);
                         break;
                     }
-                } catch (Throwable) {}
+                } catch (Throwable $e) {
+                        error_log('iNetPanel: CF API error in accounts.php - ' . $e->getMessage());
+                    }
             }
         }
 
@@ -194,14 +196,17 @@ switch ($action) {
                         if (!empty($cfResult['dns_skipped'])) {
                             $warnings[] = "Domain added to tunnel but DNS CNAME was not created — the zone for '{$domain}' is not in your Cloudflare account. Add the domain to Cloudflare and create a CNAME record pointing to {$tunnelId}.cfargotunnel.com";
                         }
+                        if (!empty($cfResult['www_skipped'])) {
+                            $warnings[] = "www.{$domain} DNS record already exists — skipped automatic www routing.";
+                        }
                     } catch (Throwable $e) {
                         $warnings[] = "Cloudflare tunnel setup failed: " . $e->getMessage() . ". The domain was created locally but is not routed through Cloudflare.";
                     }
                 }
             } elseif ($port && !$cfActive) {
                 // Not using CF — open firewall port for direct access
-                shell_exec("sudo /usr/bin/firewall-cmd --permanent --add-port={$port}/tcp 2>&1");
-                shell_exec("sudo /usr/bin/firewall-cmd --reload 2>&1");
+                Shell::exec('sudo /usr/bin/firewall-cmd --permanent --add-port=' . escapeshellarg("{$port}/tcp"), 'firewall');
+                Shell::exec('sudo /usr/bin/firewall-cmd --reload', 'firewall');
             }
             if ($warnings) $result['warnings'] = $warnings;
         }
@@ -212,7 +217,8 @@ switch ($action) {
         }
         if ($result['success']) {
             $pv = $phpVer ?: '8.4';
-            shell_exec("sudo /bin/systemctl reload php{$pv}-fpm 2>&1");
+            $fpmService = "php{$pv}-fpm";
+            Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
         }
         break;
 
@@ -241,7 +247,9 @@ switch ($action) {
                     try {
                         $cf = new CloudflareAPI();
                         $cf->removeTunnelHostname($accountId, $tunnelId, $domain);
-                    } catch (Throwable) {}
+                    } catch (Throwable $e) {
+                        error_log('iNetPanel: CF API error in accounts.php - ' . $e->getMessage());
+                    }
                 }
             }
         }
@@ -310,7 +318,9 @@ switch ($action) {
                         echo json_encode(['success' => false, 'error' => "Domain '{$domain}' is already routed on this Cloudflare tunnel."]);
                         break;
                     }
-                } catch (Throwable) {}
+                } catch (Throwable $e) {
+                        error_log('iNetPanel: CF API error in accounts.php - ' . $e->getMessage());
+                    }
             }
         }
 
@@ -369,14 +379,17 @@ switch ($action) {
                         if (!empty($cfResult['dns_skipped'])) {
                             $warnings[] = "Domain added to tunnel but DNS CNAME was not created — the zone for '{$domain}' is not in your Cloudflare account. Add the domain to Cloudflare and create a CNAME record pointing to {$tunnelId}.cfargotunnel.com";
                         }
+                        if (!empty($cfResult['www_skipped'])) {
+                            $warnings[] = "www.{$domain} DNS record already exists — skipped automatic www routing.";
+                        }
                     } catch (Throwable $e) {
                         $warnings[] = "Cloudflare tunnel setup failed: " . $e->getMessage() . ". The domain was created locally but is not routed through Cloudflare.";
                     }
                 }
             } elseif ($port && !$cfActive) {
                 // Not using CF — open firewall port for direct access
-                shell_exec("sudo /usr/bin/firewall-cmd --permanent --add-port={$port}/tcp 2>&1");
-                shell_exec("sudo /usr/bin/firewall-cmd --reload 2>&1");
+                Shell::exec('sudo /usr/bin/firewall-cmd --permanent --add-port=' . escapeshellarg("{$port}/tcp"), 'firewall');
+                Shell::exec('sudo /usr/bin/firewall-cmd --reload', 'firewall');
             }
             if ($warnings) $result['warnings'] = $warnings;
         }
@@ -386,7 +399,7 @@ switch ($action) {
         // Must happen AFTER response is sent — reloading FPM recycles the panel worker too.
         if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
         $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
-        exec("sudo systemctl reload " . escapeshellarg($fpmService) . " 2>/dev/null");
+        Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
         break;
 
     case 'change_password':
@@ -445,7 +458,9 @@ switch ($action) {
                         echo json_encode(['success' => false, 'error' => "Domain '{$domain}' is already routed on this Cloudflare tunnel."]);
                         break;
                     }
-                } catch (Throwable) {}
+                } catch (Throwable $e) {
+                        error_log('iNetPanel: CF API error in accounts.php - ' . $e->getMessage());
+                    }
             }
         }
 
@@ -481,13 +496,16 @@ switch ($action) {
                         if (!empty($cfResult['dns_skipped'])) {
                             $warnings[] = "Domain added to tunnel but DNS CNAME was not created — the zone for '{$domain}' is not in your Cloudflare account.";
                         }
+                        if (!empty($cfResult['www_skipped'])) {
+                            $warnings[] = "www.{$domain} DNS record already exists — skipped automatic www routing.";
+                        }
                     } catch (Throwable $e) {
                         $warnings[] = "Cloudflare tunnel setup failed: " . $e->getMessage();
                     }
                 }
             } elseif ($port && !$cfActive) {
-                shell_exec("sudo /usr/bin/firewall-cmd --permanent --add-port={$port}/tcp 2>&1");
-                shell_exec("sudo /usr/bin/firewall-cmd --reload 2>&1");
+                Shell::exec('sudo /usr/bin/firewall-cmd --permanent --add-port=' . escapeshellarg("{$port}/tcp"), 'firewall');
+                Shell::exec('sudo /usr/bin/firewall-cmd --reload', 'firewall');
             }
             if ($warnings) $result['warnings'] = $warnings;
         }
@@ -496,7 +514,7 @@ switch ($action) {
         // Flush response to client, then reload FPM to activate the new pool socket.
         if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
         $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
-        exec("sudo systemctl reload " . escapeshellarg($fpmService) . " 2>/dev/null");
+        Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
         break;
 
     case 'delete':
@@ -554,7 +572,7 @@ switch ($action) {
         if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
         $delPhpVer = $domainRow['php_version'] ?? '8.4';
         $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $delPhpVer) . '-fpm';
-        exec("sudo systemctl reload " . escapeshellarg($fpmService) . " 2>/dev/null");
+        Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
         break;
 
     // =========================================================================
