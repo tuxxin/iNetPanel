@@ -174,14 +174,10 @@ a2ensite "${DOMAIN}.conf" > /dev/null 2>&1
 systemctl reload apache2
 
 # ----------------------------------------------------------------
-# MariaDB — database per domain, granted to hosting user
+# MariaDB — grant user privileges on username_* databases
 # ----------------------------------------------------------------
-DB_NAME="${USERNAME}_$(echo "$DOMAIN" | tr '.-' '_')"
-
 mysql -u root -p"$DB_ROOT_PASS" << MYSQL
-CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`;
-GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.*   TO '${USERNAME}'@'localhost' WITH GRANT OPTION;
-GRANT ALL PRIVILEGES ON \`${DB_NAME}_%\`.* TO '${USERNAME}'@'localhost' WITH GRANT OPTION;
+GRANT ALL PRIVILEGES ON \`${USERNAME}_%\`.* TO '${USERNAME}'@'localhost' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 MYSQL
 
@@ -205,6 +201,6 @@ echo -e "  Domain:   ${BOLD}$DOMAIN${NC}"
 echo -e "  User:     ${BOLD}$USERNAME${NC}"
 echo -e "  URL:      ${BOLD}https://$SERVER_IP:$PORT${NC}"
 echo -e "  Web Root: ${BOLD}$DOC_ROOT${NC}"
-echo -e "  DB Name:  ${BOLD}$DB_NAME${NC}"
 echo -e "  DB User:  ${BOLD}$USERNAME${NC}"
+echo -e "  DB Prefix:${BOLD} ${USERNAME}_*${NC}"
 echo -e "  Logs:     ${BOLD}$LOG_DIR${NC}"
