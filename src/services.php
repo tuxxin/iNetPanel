@@ -166,8 +166,6 @@ document.getElementById('svc-confirm-btn').addEventListener('click', function ()
         });
 });
 
-document.getElementById('refresh-btn').addEventListener('click', loadServices);
-
 // Monitor toggle
 const monitorToggle = document.getElementById('monitor-toggle');
 if (monitorToggle) {
@@ -196,5 +194,6 @@ if (monitorToggle) {
 document.addEventListener('DOMContentLoaded', function () {
     loadServices();
     setInterval(loadServices, 30000);
+    document.getElementById('refresh-btn').addEventListener('click', loadServices);
 });
 </script>

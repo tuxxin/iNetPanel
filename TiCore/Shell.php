@@ -27,6 +27,7 @@ class Shell
         'ssl_manage',
         'panel_ssl',
         'service_monitor',
+        'db_size',
         'list',
     ];
 

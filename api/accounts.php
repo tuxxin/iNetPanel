@@ -13,6 +13,20 @@ function shellResult(array $r): array {
     return ['success' => false, 'error' => $r['output'] ?: $r['error'] ?: 'Script execution failed.'];
 }
 
+// Return total disk usage for a hosting user's home directory + MariaDB databases
+function accountDisk(string $username): string {
+    $path = '/home/' . $username;
+    if (!is_dir($path)) return '—';
+    $bytes = (int)trim(shell_exec('du -sb ' . escapeshellarg($path) . ' 2>/dev/null | cut -f1') ?: '0');
+    $dbResult = Shell::run('db_size', ['--username' => $username]);
+    $bytes += (int)trim($dbResult['output'] ?: '0');
+    if ($bytes <= 0) return '0 B';
+    $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    $i = 0;
+    while ($bytes >= 1024 && $i < 4) { $bytes /= 1024; $i++; }
+    return round($bytes, 1) . ' ' . $units[$i];
+}
+
 switch ($action) {
 
     // =========================================================================
@@ -27,8 +41,7 @@ switch ($action) {
                 [$u['id']]
             );
             $u['domain_count'] = count($u['domains']);
-            $path = '/home/' . $u['username'];
-            $u['disk'] = is_dir($path) ? trim(shell_exec("du -sh " . escapeshellarg($path) . " 2>/dev/null | cut -f1") ?: '—') : '—';
+            $u['disk'] = accountDisk($u['username']);
             $wg = DB::fetchOne('SELECT peer_ip FROM wg_peers WHERE hosting_user = ?', [$u['username']]);
             $u['wg_ip'] = $wg['peer_ip'] ?? null;
         }
@@ -68,7 +81,7 @@ switch ($action) {
 
         $wg = DB::fetchOne('SELECT peer_ip FROM wg_peers WHERE hosting_user = ?', [$username]);
         $user['wg_ip'] = $wg['peer_ip'] ?? null;
-        $user['disk'] = is_dir("/home/$username") ? trim(shell_exec("du -sh " . escapeshellarg("/home/$username") . " 2>/dev/null | cut -f1") ?: '—') : '—';
+        $user['disk'] = accountDisk($username);
 
         echo json_encode(['success' => true, 'data' => $user]);
         break;

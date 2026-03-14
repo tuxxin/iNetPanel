@@ -73,17 +73,14 @@ function s(string $key, string $default = ''): string {
                         </div>
                     </div>
                     <div class="col-md-4 d-flex align-items-center">
-                        <?php if ($updateAvail): ?>
-                        <button class="btn btn-warning w-100" id="update-now-btn">
+                        <button class="btn btn-warning w-100 <?= $updateAvail ? '' : 'd-none' ?>" id="update-now-btn">
                             <span class="spinner-border spinner-border-sm d-none me-1" id="update-spinner"></span>
                             <i class="fas fa-download me-1"></i>Update Now
                         </button>
-                        <?php else: ?>
-                        <div class="text-success w-100 text-center">
+                        <div class="text-success w-100 text-center <?= $updateAvail ? 'd-none' : '' ?>" id="no-update-msg">
                             <i class="fas fa-check-circle fa-2x mb-1 d-block"></i>
                             <small>Up to date</small>
                         </div>
-                        <?php endif; ?>
                     </div>
                 </div>
 
@@ -792,6 +789,15 @@ if (checkNowBtn) {
                     if (disp) disp.innerHTML = 'v' + data.latest + (data.update_available ? ' <span class="badge bg-warning text-dark ms-2">Update Available</span>' : '');
                     const checkedEl = document.getElementById('update-checked-ago');
                     if (checkedEl) checkedEl.textContent = 'just now';
+                    const updateBtn = document.getElementById('update-now-btn');
+                    const noUpdateMsg = document.getElementById('no-update-msg');
+                    if (data.update_available) {
+                        updateBtn?.classList.remove('d-none');
+                        noUpdateMsg?.classList.add('d-none');
+                    } else {
+                        updateBtn?.classList.add('d-none');
+                        noUpdateMsg?.classList.remove('d-none');
+                    }
                     showAlert(data.update_available ? `Update available: v${data.latest}` : 'Already up to date.', data.update_available ? 'warning' : 'success');
                 } else {
                     showAlert(data.error || 'Check failed.', 'danger');
@@ -816,6 +822,9 @@ if (updateNowBtn) {
                 new bootstrap.Modal(document.getElementById('updateOutputModal')).show();
             })
             .catch(() => { spinner.classList.add('d-none'); this.disabled = false; showAlert('Request failed.', 'danger'); });
+    });
+    document.getElementById('updateOutputModal')?.addEventListener('hidden.bs.modal', () => {
+        location.reload();
     });
 }
 

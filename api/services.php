@@ -58,7 +58,11 @@ switch ($action) {
         DB::saveSetting('service_monitor', $enabled ? '1' : '0');
 
         // Enable/disable the cron job via the bash script (runs as root via inetp)
-        Shell::run('service_monitor', [$enabled ? 'enable' : 'disable']);
+        $result = Shell::run('service_monitor', [$enabled ? 'enable' : 'disable']);
+        if (!$result['success']) {
+            echo json_encode(['success' => false, 'error' => $result['error'] ?: 'Failed to update service monitor cron.']);
+            break;
+        }
 
         echo json_encode(['success' => true, 'monitorEnabled' => $enabled]);
         break;

@@ -103,6 +103,7 @@ const TableKit = (() => {
             wrap.className = 'px-3 py-2 bg-white border-bottom';
             const input = document.createElement('input');
             input.type = 'text';
+            input.setAttribute('autocomplete', 'off');
             input.className = 'form-control form-control-sm';
             input.placeholder = 'Filter\u2026';
             input.style.maxWidth = '260px';

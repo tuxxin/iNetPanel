@@ -292,7 +292,8 @@ document.getElementById('renew-all-btn').addEventListener('click', function() {
         .catch(() => showAlert('danger', 'Request failed.'));
 });
 
-document.getElementById('refresh-btn').addEventListener('click', loadCerts);
-
-loadCerts();
+document.addEventListener('DOMContentLoaded', function () {
+    loadCerts();
+    document.getElementById('refresh-btn').addEventListener('click', loadCerts);
+});
 </script>
