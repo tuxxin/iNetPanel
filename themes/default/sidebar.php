@@ -132,6 +132,16 @@
     </div>
 </div>
 
+<script>
+function sidebarReboot() {
+    const fd = new FormData();
+    fd.append('action', 'reboot');
+    fetch('/api/settings', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .catch(() => {});
+}
+</script>
+
 <div class="modal fade" id="sidebarRestartModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -145,9 +155,9 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <a href="/dashboard/restart" class="btn btn-danger fw-bold">
+                <button type="button" class="btn btn-danger fw-bold" onclick="sidebarReboot()">
                     <i class="fas fa-power-off me-2"></i> Yes, Restart Now
-                </a>
+                </button>
             </div>
         </div>
     </div>
