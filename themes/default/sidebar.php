@@ -111,18 +111,7 @@
     </div>
 
     <div class="sidebar-footer">
-        <?php
-        $panel_version = class_exists('Version') ? Version::display() : 'v0.107';
-        $updateInfo = class_exists('Version') ? Version::checkUpdate() : ['available' => false, 'latest' => ''];
-        ?>
-        <?php if ($updateInfo['available']): ?>
-        <a href="/admin/settings"
-           class="d-flex align-items-center gap-1 mb-2 text-decoration-none"
-           style="font-size:0.68rem; color:#dc3545;" title="v<?= htmlspecialchars($updateInfo['latest']) ?> available">
-            <i class="fas fa-circle-arrow-up" style="font-size:0.75rem;"></i>
-            Update available — v<?= htmlspecialchars($updateInfo['latest']) ?>
-        </a>
-        <?php endif; ?>
+        <?php $panel_version = class_exists('Version') ? Version::display() : 'v0.107'; ?>
         <div class="sidebar-version-block">
             <div class="d-flex align-items-center gap-2">
                 <span class="version-label">iNetPanel</span>

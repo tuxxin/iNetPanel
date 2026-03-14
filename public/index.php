@@ -115,6 +115,12 @@ $router->add('/login', function () use ($view) {
         $user = trim($_POST['username'] ?? '');
         $pass = $_POST['password'] ?? '';
         if (Auth::login($user, $pass)) {
+            // Fire background version check so header notification is current
+            @file_get_contents(
+                'http://127.0.0.1/api/update_check?action=check',
+                false,
+                stream_context_create(['http' => ['timeout' => 2]])
+            );
             header('Location: /admin/dashboard');
         } else {
             $view->render('login.php', ['error' => 'Invalid username or password.']);
