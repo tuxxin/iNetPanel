@@ -27,6 +27,51 @@ function accountDisk(string $username): string {
     return round($bytes, 1) . ' ' . $units[$i];
 }
 
+// Execute a hook script (add_domain or delete_domain) after domain operations
+function executeHook(string $hookType, array $vars): void
+{
+    try {
+        if (DB::setting("hook_{$hookType}_enabled", '0') !== '1') return;
+        $code = DB::setting("hook_{$hookType}_code", '');
+        if (trim($code) === '') return;
+
+        $script = "#!/bin/bash\nset -e\n";
+        foreach ($vars as $k => $v) {
+            $script .= "export {$k}=" . escapeshellarg($v) . "\n";
+        }
+        $script .= $code;
+
+        $tmp = tempnam('/tmp', 'inetp_hook_');
+        file_put_contents($tmp, $script);
+        chmod($tmp, 0700);
+
+        $result = Shell::exec('sudo /bin/bash ' . escapeshellarg($tmp), "hook-{$hookType}");
+
+        DB::insert('logs', [
+            'source'     => 'hook',
+            'level'      => $result['success'] ? 'info' : 'error',
+            'message'    => "Hook {$hookType} " . ($result['success'] ? 'completed' : 'failed'),
+            'details'    => $result['output'] ?? '',
+            'user'       => Auth::user()['username'] ?? 'system',
+            'created_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        @unlink($tmp);
+    } catch (Throwable $e) {
+        // Hook failure must never break the domain operation
+        try {
+            DB::insert('logs', [
+                'source'     => 'hook',
+                'level'      => 'error',
+                'message'    => "Hook {$hookType} exception: " . $e->getMessage(),
+                'details'    => $e->getTraceAsString(),
+                'user'       => Auth::user()['username'] ?? 'system',
+                'created_at' => date('Y-m-d H:i:s'),
+            ]);
+        } catch (Throwable) {}
+    }
+}
+
 switch ($action) {
 
     // =========================================================================
@@ -229,6 +274,19 @@ switch ($action) {
             fastcgi_finish_request();
         }
         if ($result['success']) {
+            executeHook('add_domain', [
+                'DOMAIN'    => $domain,
+                'USERNAME'  => $username,
+                'PORT'      => $port ?? '',
+                'DOC_ROOT'  => "/home/{$username}/{$domain}/www",
+                'WEB_ROOT'  => "/home/{$username}/{$domain}/www",
+                'LOG_DIR'   => "/home/{$username}/{$domain}/logs",
+                'SERVER_IP' => trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: ''),
+                'PHP_VER'   => $phpVer ?: '8.4',
+                'DB_NAME'   => $username . '_' . str_replace(['.', '-'], '_', $domain),
+                'DB_USER'   => $username,
+                'DB_PASS'   => trim(@file_get_contents('/root/.mysql_root_pass') ?: ''),
+            ]);
             $pv = $phpVer ?: '8.4';
             $fpmService = "php{$pv}-fpm";
             Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
@@ -245,6 +303,11 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'Username and domain required.']);
             break;
         }
+
+        // Capture port before deletion (account_ports row is deleted after Shell::run)
+        $hookPort = '';
+        $hookDomainRow = DB::fetchOne('SELECT port FROM domains WHERE domain_name = ?', [$domain]);
+        if ($hookDomainRow) $hookPort = $hookDomainRow['port'] ?? '';
 
         $args = ['--username' => $username, '--domain' => $domain];
         if ($noBackup) $args[] = '--no-backup';
@@ -267,6 +330,16 @@ switch ($action) {
             }
         }
         echo json_encode(shellResult($result));
+        if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+        if ($result['success']) {
+            executeHook('delete_domain', [
+                'DOMAIN'    => $domain,
+                'USERNAME'  => $username,
+                'PORT'      => $hookPort,
+                'DOC_ROOT'  => "/home/{$username}/{$domain}/www",
+                'SERVER_IP' => trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: ''),
+            ]);
+        }
         break;
 
     case 'list_domains':
@@ -411,6 +484,21 @@ switch ($action) {
         // Flush response to client, then reload FPM to activate the new pool socket.
         // Must happen AFTER response is sent — reloading FPM recycles the panel worker too.
         if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+        if ($result['success']) {
+            executeHook('add_domain', [
+                'DOMAIN'    => $domain,
+                'USERNAME'  => $username,
+                'PORT'      => $port ?? '',
+                'DOC_ROOT'  => "/home/{$username}/{$domain}/www",
+                'WEB_ROOT'  => "/home/{$username}/{$domain}/www",
+                'LOG_DIR'   => "/home/{$username}/{$domain}/logs",
+                'SERVER_IP' => trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: ''),
+                'PHP_VER'   => $phpVer ?: '8.4',
+                'DB_NAME'   => $username . '_' . str_replace(['.', '-'], '_', $domain),
+                'DB_USER'   => $username,
+                'DB_PASS'   => trim(@file_get_contents('/root/.mysql_root_pass') ?: ''),
+            ]);
+        }
         $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
         Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
         break;
@@ -526,6 +614,21 @@ switch ($action) {
         echo json_encode(shellResult($result));
         // Flush response to client, then reload FPM to activate the new pool socket.
         if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+        if ($result['success']) {
+            executeHook('add_domain', [
+                'DOMAIN'    => $domain,
+                'USERNAME'  => $username,
+                'PORT'      => $port ?? '',
+                'DOC_ROOT'  => "/home/{$username}/{$domain}/www",
+                'WEB_ROOT'  => "/home/{$username}/{$domain}/www",
+                'LOG_DIR'   => "/home/{$username}/{$domain}/logs",
+                'SERVER_IP' => trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: ''),
+                'PHP_VER'   => $phpVer ?: '8.4',
+                'DB_NAME'   => $username . '_' . str_replace(['.', '-'], '_', $domain),
+                'DB_USER'   => $username,
+                'DB_PASS'   => trim(@file_get_contents('/root/.mysql_root_pass') ?: ''),
+            ]);
+        }
         $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
         Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
         break;
@@ -583,6 +686,15 @@ switch ($action) {
         echo json_encode(shellResult($result));
         // Flush response to client, then reload FPM to unload the removed pool.
         if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+        if ($result['success']) {
+            executeHook('delete_domain', [
+                'DOMAIN'    => $domain,
+                'USERNAME'  => $username,
+                'PORT'      => $domainRow['port'] ?? '',
+                'DOC_ROOT'  => "/home/{$username}/{$domain}/www",
+                'SERVER_IP' => trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: ''),
+            ]);
+        }
         $delPhpVer = $domainRow['php_version'] ?? '8.4';
         $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $delPhpVer) . '-fpm';
         Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');

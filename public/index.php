@@ -206,6 +206,13 @@ $router->add('/admin/logs', function () use ($view) {
     $view->renderAdmin('System Logs', SRC_PATH . '/logs.php');
 });
 
+// Hook Scripts
+$router->add('/admin/hook-scripts', function () use ($view) {
+    Auth::check();
+    Auth::requireAdmin();
+    $view->renderAdmin('Hook Scripts', SRC_PATH . '/hook_scripts.php');
+});
+
 // DNS (Cloudflare)
 $router->add('/admin/dns', function () use ($view) {
     Auth::check();
@@ -306,6 +313,7 @@ foreach ([
     '/api/ssh-keys'       => 'ssh_keys.php',
     '/api/stats'          => 'stats.php',
     '/api/profile'        => 'profile.php',
+    '/api/hook-scripts'   => 'hook_scripts.php',
 ] as $route => $file) {
     $router->add($route, function () use ($file) {
         Auth::check();

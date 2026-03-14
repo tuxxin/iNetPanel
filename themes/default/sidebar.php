@@ -87,6 +87,11 @@
         <a href="/admin/logs" class="<?= sidebarActive('logs') ?>">
             <i class="fas fa-file-lines"></i> <span>Logs</span>
         </a>
+        <?php if ($hasFullAccess): ?>
+        <a href="/admin/hook-scripts" class="<?= sidebarActive('hook-scripts') ?>">
+            <i class="fas fa-code"></i> <span>Hook Scripts</span>
+        </a>
+        <?php endif; ?>
 
         <?php if ($isSuperAdmin): ?>
         <div class="text-uppercase small text-muted fw-bold px-3 mb-2 mt-4" style="font-size: 0.75rem; letter-spacing: 1px;">Admin</div>
