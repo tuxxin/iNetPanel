@@ -94,9 +94,9 @@ Then open `http://<YOUR_SERVER_IP>/install.php` to complete setup.
   └── db/                    SQLite database
 
 /home/<username>/            Hosting user home
-  ├── <domain>/www/          Document root
-  ├── <domain>/logs/         Apache logs
-  └── tmp/                   PHP upload/session temp
+  ├── <domain>/              Domains document root
+  ├── <domain>/www/          Domainc public document root
+  └── <domain>/logs/         Apache and PHP error logs
 
 /root/scripts/               System scripts (deployed from repo)
 /backup/                     Automated backups
