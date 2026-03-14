@@ -682,11 +682,13 @@ switch ($action) {
         $wgPeers = DB::fetchAll('SELECT hosting_user, peer_ip FROM wg_peers');
         $wgMap   = array_column($wgPeers, 'peer_ip', 'hosting_user');
 
+        $diskCache = [];
         foreach ($domains as &$d) {
             $username = $d['hosting_username'] ?? $d['domain_name'];
-            $path = "/home/{$username}/{$d['domain_name']}/www";
-            if (!is_dir($path)) $path = "/home/{$d['domain_name']}/www";
-            $d['disk'] = is_dir($path) ? trim(shell_exec("du -sh " . escapeshellarg($path) . " 2>/dev/null | cut -f1") ?: '—') : '—';
+            if (!isset($diskCache[$username])) {
+                $diskCache[$username] = accountDisk($username);
+            }
+            $d['disk'] = $diskCache[$username];
             $d['wg_ip'] = $wgMap[$username] ?? null;
             $d['username'] = $username;
         }
