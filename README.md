@@ -27,7 +27,7 @@ Then open `http://<YOUR_SERVER_IP>/install.php` to complete setup.
 
 ### Hosting & Account Management
 - **Multi-Domain Users** — One hosting user can own multiple domains, each with its own vhost, database, and SSL certificate
-- **One-Click Account Creation** — Creates Linux user, Apache vhost, PHP-FPM pool, MariaDB database, FTP access, and SSL certificate in one step
+- **One-Click Account Creation** — Creates Linux user, Apache vhost, PHP-FPM pool, MariaDB database, FTP access, Clourflare application route & DNS CNAME and SSL certificate in one step
 - **Account Suspension** — Suspend/resume accounts (blocks HTTP, FTP, SSH, and WireGuard simultaneously)
 - **Client Portal** — Hosting users log in at `/user/` to view their account info, DNS records, email routing, and connection details
 
