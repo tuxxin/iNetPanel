@@ -223,7 +223,10 @@ function validateHook(hookType) {
 }
 
 // ── TiCore Template ──────────────────────────────────────────────────────────
-const TICORE_TEMPLATE = `#!/bin/bash
+<?php
+// Nowdoc prevents PHP from processing <?= ?> tags inside the template
+$tiCoreTemplate = <<<'TICORE_TPL'
+#!/bin/bash
 # TiCore PHP Framework — Auto-Deploy Hook
 # https://github.com/tuxxin/TiCore
 set -e
@@ -280,7 +283,7 @@ HOMEEOF
 
 # Add "by Tuxxin.com" to the footer layout
 if [ -f "$SITE_DIR/TiCore/templates/default/layouts/footer.php" ]; then
-    sed -i 's|</body>|<div style="text-align:center;padding:12px 0;font-size:.75rem;color:#aaa;">Powered by <a href="https://github.com/tuxxin/TiCore" style="color:#888;">TiCore</a> \\&middot; by <a href="https://tuxxin.com" style="color:#888;">Tuxxin.com</a> \\&middot; Hosted with <a href="https://github.com/tuxxin/iNetPanel" style="color:#888;">iNetPanel</a></div>\\n</body>|' "$SITE_DIR/TiCore/templates/default/layouts/footer.php"
+    sed -i 's|</body>|<div style="text-align:center;padding:12px 0;font-size:.75rem;color:#aaa;">Powered by <a href="https://github.com/tuxxin/TiCore" style="color:#888;">TiCore</a> \&middot; by <a href="https://tuxxin.com" style="color:#888;">Tuxxin.com</a> \&middot; Hosted with <a href="https://github.com/tuxxin/iNetPanel" style="color:#888;">iNetPanel</a></div>\n</body>|' "$SITE_DIR/TiCore/templates/default/layouts/footer.php"
 fi
 
 # Install Composer dependencies
@@ -305,8 +308,8 @@ fi
 
 # Set ownership and permissions
 chown -R "$USERNAME:www-data" "$SITE_DIR"
-find "$SITE_DIR" -type d -exec chmod 755 {} \\;
-find "$SITE_DIR" -type f -exec chmod 644 {} \\;
+find "$SITE_DIR" -type d -exec chmod 755 {} \;
+find "$SITE_DIR" -type f -exec chmod 644 {} \;
 chmod 750 "$SITE_DIR/TiCore" 2>/dev/null || true
 chmod 640 "$SITE_DIR/TiCore/.env" 2>/dev/null || true
 
@@ -316,7 +319,10 @@ chmod 775 "$SITE_DIR/TiCore/logs"
 chown "$USERNAME:www-data" "$SITE_DIR/TiCore/logs"
 
 rm -rf "$TEMP_DIR"
-echo "TiCore deployed successfully for $DOMAIN"`;
+echo "TiCore deployed successfully for $DOMAIN"
+TICORE_TPL;
+?>
+const TICORE_TEMPLATE = <?= json_encode($tiCoreTemplate) ?>;
 
 function loadTiCoreTemplate() {
     const textarea = document.getElementById('hook-add-code');
