@@ -85,6 +85,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     // 2. INSTALL ACTION
     if ($_POST['action'] === 'install') {
+        if (file_exists($lockFile)) {
+            echo json_encode(['success' => false, 'message' => 'Panel is already installed.']);
+            exit;
+        }
         try {
             // --- STEP A: STRICT PERMISSION CHECKS ---
             
@@ -104,9 +108,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             try {
                 $db = new PDO("sqlite:" . $dbFile);
                 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                $db->exec('PRAGMA journal_mode=WAL');
             } catch (PDOException $e) {
                 throw new Exception("Database Connection Failed: " . $e->getMessage());
             }
+
+            $db->beginTransaction();
 
             // --- STEP C: SCHEMA CREATION ---
             $queries = [
@@ -205,9 +212,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             // --- STEP D: DATA SEEDING ---
             
-            // Admin User
-            $user = $_POST['username'];
-            $passHash = password_hash($_POST['password'], PASSWORD_DEFAULT);
+            // Admin User — server-side validation
+            $user = trim($_POST['username'] ?? '');
+            $pass = $_POST['password'] ?? '';
+            if (!preg_match('/^[a-zA-Z0-9_]{3,32}$/', $user)) {
+                throw new Exception('Username must be 3-32 alphanumeric characters or underscores.');
+            }
+            if (strlen($pass) < 8) {
+                throw new Exception('Password must be at least 8 characters.');
+            }
+            $passHash = password_hash($pass, PASSWORD_DEFAULT);
             
             $stmt = $db->prepare("SELECT COUNT(*) FROM users WHERE username = :u");
             $stmt->execute([':u' => $user]);
@@ -230,9 +244,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $wgSubnet     = trim($_POST['wg_subnet']   ?? '10.10.0.0/24');
             $wgEndpoint   = trim($_POST['wg_endpoint'] ?? '');
 
-            // Auto-detect installed PHP version (newest first)
+            // Auto-detect installed PHP version (newest first, dynamic)
             $detectedPhpVer = '8.4';
-            foreach (array_reverse(['5.6','7.0','7.1','7.2','7.3','7.4','8.0','8.1','8.2','8.3','8.4','8.5']) as $_v) {
+            $phpFpmBins = glob('/usr/sbin/php-fpm*') ?: [];
+            $phpVersions = [];
+            foreach ($phpFpmBins as $bin) {
+                if (preg_match('/php-fpm(\d+\.\d+)$/', $bin, $m)) {
+                    $phpVersions[] = $m[1];
+                }
+            }
+            if (empty($phpVersions)) {
+                $phpVersions = ['5.6','7.0','7.1','7.2','7.3','7.4','8.0','8.1','8.2','8.3','8.4','8.5'];
+            }
+            foreach (array_reverse($phpVersions) as $_v) {
                 if (file_exists("/usr/sbin/php-fpm{$_v}") || file_exists("/usr/bin/php{$_v}")) {
                     $detectedPhpVer = $_v;
                     break;
@@ -284,20 +308,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $stmt->execute([':k' => $key, ':v' => $val]);
             }
 
-            // Write lock file — prevents install.php from being accessed again
+            // Commit all DB writes atomically — lock file written only on success
+            $db->commit();
             file_put_contents($lockFile, date('Y-m-d H:i:s'));
+
+            // Helper: write a cron file via manage_cron.sh with error logging
+            $writeCron = function(string $name, string $content): void {
+                $proc = popen('sudo /root/scripts/manage_cron.sh write ' . escapeshellarg($name), 'w');
+                if ($proc === false) {
+                    error_log("iNetPanel install: failed to open pipe for cron {$name}");
+                    return;
+                }
+                fwrite($proc, $content);
+                $exit = pclose($proc);
+                if ($exit !== 0) {
+                    error_log("iNetPanel install: cron write for {$name} exited with {$exit}");
+                }
+            };
 
             // Apply timezone to PHP runtime and OS
             $tz = $_POST['timezone'] ?? 'UTC';
             if (!in_array($tz, DateTimeZone::listIdentifiers())) { $tz = 'UTC'; }
             date_default_timezone_set($tz);
-            exec('sudo /usr/bin/timedatectl set-timezone ' . escapeshellarg($tz) . ' 2>&1');
+            exec('sudo /usr/bin/timedatectl set-timezone ' . escapeshellarg($tz) . ' 2>&1', $tzOut, $tzExit);
+            if ($tzExit !== 0) {
+                error_log('iNetPanel install: timedatectl failed: ' . implode("\n", $tzOut));
+            }
 
             // Apply system hostname (prefer DDNS hostname if set)
             $sysHostname = ($ddnsHostname !== '') ? $ddnsHostname : ($_POST['hostname'] ?? '');
             if ($sysHostname && preg_match('/^[a-zA-Z0-9][a-zA-Z0-9.\-]*$/', $sysHostname)) {
                 $oldHostname = gethostname();
-                exec('sudo /usr/bin/hostnamectl set-hostname ' . escapeshellarg($sysHostname) . ' 2>&1');
+                exec('sudo /usr/bin/hostnamectl set-hostname ' . escapeshellarg($sysHostname) . ' 2>&1', $hnOut, $hnExit);
+                if ($hnExit !== 0) {
+                    error_log('iNetPanel install: hostnamectl failed: ' . implode("\n", $hnOut));
+                }
                 // Update /etc/hosts to match new hostname
                 if ($oldHostname && $oldHostname !== $sysHostname) {
                     $hosts = file_get_contents('/etc/hosts');
@@ -352,43 +397,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $tokenResp = $cfRequest('GET', "/accounts/{$cfAccountId}/cfd_tunnel/{$tunnelId}/token");
                     $tunnelToken = $tokenResp['result'] ?? '';
 
-                    // Save to settings
-                    $stmt = $db->prepare("UPDATE settings SET value = :v WHERE key = :k");
-                    $stmt->execute([':v' => $tunnelId,    ':k' => 'cf_tunnel_id']);
-                    $stmt->execute([':v' => $tunnelToken, ':k' => 'cf_tunnel_token']);
+                    // Save tunnel info to settings (separate connection since main transaction is committed)
+                    $db->exec("UPDATE settings SET value = " . $db->quote($tunnelId)    . " WHERE key = 'cf_tunnel_id'");
+                    $db->exec("UPDATE settings SET value = " . $db->quote($tunnelToken) . " WHERE key = 'cf_tunnel_token'");
 
                     // Install cloudflared as a systemd service
                     if ($tunnelToken) {
-                        exec('sudo /root/scripts/cloudflared_setup.sh --action install --token ' . escapeshellarg($tunnelToken) . ' 2>&1');
+                        exec('sudo /root/scripts/cloudflared_setup.sh --action install --token ' . escapeshellarg($tunnelToken) . ' 2>&1', $cfOut, $cfExit);
+                        if ($cfExit !== 0) {
+                            error_log('iNetPanel install: cloudflared_setup failed: ' . implode("\n", $cfOut));
+                        }
                     }
                 }
             }
 
             // Set up panel auto-update cron (daily at 2am by default)
-            {
-                $phpVerRow2 = $db->query("SELECT value FROM settings WHERE key = 'php_default_version'")->fetch(PDO::FETCH_ASSOC);
-                $phpBin2 = 'php' . ($phpVerRow2['value'] ?? '8.4');
-                $autoUpdateCron = "# iNetPanel managed — panel auto-update\n"
-                    . "00 02 * * * root {$phpBin2} /var/www/inetpanel/scripts/panel_update.php >> /var/log/inetpanel_update.log 2>&1\n";
-                $proc = popen('sudo /root/scripts/manage_cron.sh write inetpanel_autoupdate', 'w');
-                fwrite($proc, $autoUpdateCron); pclose($proc);
-            }
+            $phpBin2 = 'php' . $detectedPhpVer;
+            $autoUpdateCron = "# iNetPanel managed — panel auto-update\n"
+                . "00 02 * * * root {$phpBin2} /var/www/inetpanel/scripts/panel_update.php >> /var/log/inetpanel_update.log 2>&1\n";
+            $writeCron('inetpanel_autoupdate', $autoUpdateCron);
 
             // Set up DDNS cron if enabled
             if ($ddnsEnabled === '1' && $ddnsInterval > 0) {
-                $phpVerStmt = $db->prepare("SELECT value FROM settings WHERE key = 'php_default_version'");
-                $phpVerStmt->execute();
-                $phpVerRow = $phpVerStmt->fetch(PDO::FETCH_ASSOC);
-                $phpBin   = 'php' . ($phpVerRow['value'] ?? '8.4');
-                $cronLine = "*/{$ddnsInterval} * * * * www-data {$phpBin} /var/www/inetpanel/scripts/ddns_update.php >> /var/log/inetpanel_ddns.log 2>&1\n";
-                $proc = popen('sudo /root/scripts/manage_cron.sh write inetpanel_ddns', 'w');
-                fwrite($proc, $cronLine); pclose($proc);
+                $cronLine = "*/{$ddnsInterval} * * * * www-data {$phpBin2} /var/www/inetpanel/scripts/ddns_update.php >> /var/log/inetpanel_ddns.log 2>&1\n";
+                $writeCron('inetpanel_ddns', $cronLine);
             }
 
             // Issue SSL for panel services (LE first, self-signed fallback)
             $sslHostname = ($ddnsHostname !== '') ? $ddnsHostname : ($_POST['hostname'] ?? '');
             if ($sslHostname && strpos($sslHostname, '.') !== false) {
                 exec('sudo /usr/local/bin/inetp panel_ssl ' . escapeshellarg($sslHostname) . ' 2>&1', $sslOut, $sslExit);
+                if ($sslExit !== 0) {
+                    error_log('iNetPanel install: panel_ssl failed (exit ' . $sslExit . '): ' . implode("\n", $sslOut));
+                }
             }
 
             $redirectUrl = ($sslHostname && strpos($sslHostname, '.') !== false)
@@ -397,6 +438,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             echo json_encode(['success' => true, 'redirectUrl' => $redirectUrl]);
 
         } catch (Exception $e) {
+            if (isset($db) && $db->inTransaction()) {
+                $db->rollBack();
+                // Remove partial DB file so install can be retried cleanly
+                if (file_exists($dbFile) && !file_exists($lockFile)) {
+                    @unlink($dbFile);
+                }
+            }
             echo json_encode(['success' => false, 'message' => $e->getMessage()]);
         }
         exit;
@@ -532,7 +580,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </div>
             </div>
 
-            <div class="mb-4">
+            <div class="mb-3">
                 <label class="form-label">Password</label>
                 <div class="input-group">
                     <span class="input-group-text bg-light"><i class="fas fa-lock"></i></span>
@@ -542,6 +590,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     <div class="progress-bar" id="passStrengthBar" role="progressbar" style="width: 0%"></div>
                 </div>
                 <div class="form-text">Must be at least 8 characters long.</div>
+            </div>
+
+            <div class="mb-4">
+                <label class="form-label">Confirm Password</label>
+                <div class="input-group">
+                    <span class="input-group-text bg-light"><i class="fas fa-lock"></i></span>
+                    <input type="password" class="form-control" placeholder="Re-enter Password" required id="adminPassConfirm">
+                </div>
             </div>
 
             <button class="btn btn-brand w-100" onclick="nextStep(2)">
@@ -726,11 +782,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             <div id="installSpinner" class="text-center py-4">
                 <div class="spinner-border text-primary mb-3" style="width:3rem;height:3rem" role="status"></div>
                 <h5 class="fw-bold mb-2">Installing iNetPanel...</h5>
-                <p class="small text-muted mb-3" id="installStage">Checking permissions...</p>
-                <div class="progress mx-auto" style="height:6px;max-width:300px">
-                    <div class="progress-bar progress-bar-striped progress-bar-animated" id="installBar" style="width:5%"></div>
-                </div>
-                <div class="small text-muted mt-2" id="installPct">5%</div>
+                <p class="small text-muted mb-3" id="installStage">Setting up your panel — this may take up to a minute...</p>
             </div>
             
             <div id="installError" class="d-none text-center">
@@ -803,8 +855,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if(step === 2) {
             const u = document.getElementById('adminUser').value;
             const p = document.getElementById('adminPass').value;
+            const pc = document.getElementById('adminPassConfirm').value;
             if(!u || !p) { alert('Please enter username and password.'); return; }
+            if(!/^[a-zA-Z0-9_]{3,32}$/.test(u)) { alert('Username must be 3-32 alphanumeric characters or underscores.'); return; }
             if(p.length < 8) { alert('Password must be at least 8 characters.'); return; }
+            if(p !== pc) { alert('Passwords do not match.'); return; }
             installData.username = u;
             installData.password = p;
         }
@@ -907,56 +962,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } else { runInstallation(); }
     }
 
-    // ---- Install progress helpers ----
-    let installTimers = [];
-
-    function showInstallProgress() {
-        const hasCf = installData.dns_mode === 'cloudflare' && installData.cf_account_id;
-        const stages = hasCf ? [
-            { pct: 5,  text: 'Checking permissions...',        delay: 0 },
-            { pct: 15, text: 'Creating database...',           delay: 1500 },
-            { pct: 25, text: 'Building schema...',             delay: 3000 },
-            { pct: 35, text: 'Seeding configuration...',       delay: 5000 },
-            { pct: 45, text: 'Setting timezone & hostname...', delay: 7000 },
-            { pct: 55, text: 'Creating Cloudflare tunnel...',  delay: 9000 },
-            { pct: 70, text: 'Installing cloudflared...',      delay: 14000 },
-            { pct: 80, text: 'Issuing SSL certificate...',     delay: 20000 },
-            { pct: 92, text: 'Configuring web servers...',     delay: 35000 },
-            { pct: 95, text: 'Finalizing...',                  delay: 50000 },
-        ] : [
-            { pct: 5,  text: 'Checking permissions...',        delay: 0 },
-            { pct: 20, text: 'Creating database...',           delay: 1500 },
-            { pct: 35, text: 'Building schema...',             delay: 3000 },
-            { pct: 50, text: 'Seeding configuration...',       delay: 5000 },
-            { pct: 60, text: 'Setting timezone & hostname...', delay: 7000 },
-            { pct: 75, text: 'Issuing SSL certificate...',     delay: 10000 },
-            { pct: 90, text: 'Configuring web servers...',     delay: 30000 },
-            { pct: 95, text: 'Finalizing...',                  delay: 45000 },
-        ];
-
-        document.getElementById('installBar').style.width = '5%';
-        document.getElementById('installStage').textContent = 'Checking permissions...';
-        document.getElementById('installPct').textContent = '5%';
-
-        stages.forEach(s => {
-            installTimers.push(setTimeout(() => {
-                document.getElementById('installBar').style.width = s.pct + '%';
-                document.getElementById('installStage').textContent = s.text;
-                document.getElementById('installPct').textContent = s.pct + '%';
-            }, s.delay));
-        });
-    }
-
-    function hideInstallProgress(success) {
-        installTimers.forEach(t => clearTimeout(t));
-        installTimers = [];
-        if (success) {
-            document.getElementById('installBar').style.width = '100%';
-            document.getElementById('installStage').textContent = 'Complete! Redirecting...';
-            document.getElementById('installPct').textContent = '100%';
-        }
-    }
-
     async function runInstallation() {
         // Collect DDNS + WG values before going to step 4
         if (document.getElementById('ddnsEnabled').checked) {
@@ -977,7 +982,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         showStep(4);
         document.getElementById('installSpinner').classList.remove('d-none');
         document.getElementById('installError').classList.add('d-none');
-        showInstallProgress();
 
         const fd = new FormData();
         fd.append('action', 'install');
@@ -988,16 +992,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             const res = await req.json();
 
             if(res.success) {
-                hideInstallProgress(true);
+                document.getElementById('installStage').textContent = 'Complete! Redirecting...';
                 setTimeout(() => window.location.href = res.redirectUrl || '/login', 1500);
             } else {
-                hideInstallProgress(false);
                 document.getElementById('installSpinner').classList.add('d-none');
                 document.getElementById('installError').classList.remove('d-none');
                 document.getElementById('installErrorMessage').innerHTML = res.message || 'Unknown Error';
             }
         } catch(e) {
-            hideInstallProgress(false);
             document.getElementById('installSpinner').classList.add('d-none');
             document.getElementById('installError').classList.remove('d-none');
             document.getElementById('installErrorMessage').innerHTML = "Critical Error: " + e.message;

@@ -7,6 +7,7 @@
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
 $backupDir = DB::setting('backup_destination', '/backup');
+if (str_contains($backupDir, '..')) $backupDir = '/backup';
 
 switch ($action) {
 
@@ -26,6 +27,7 @@ switch ($action) {
         exit;
 
     case 'list':
+        Auth::requireAdmin();
         $files = glob($backupDir . '/*.tgz') ?: [];
         rsort($files);
         $data = [];
@@ -58,6 +60,7 @@ switch ($action) {
         break;
 
     case 'settings_get':
+        Auth::requireAdmin();
         echo json_encode([
             'success' => true,
             'data'    => [
@@ -70,9 +73,19 @@ switch ($action) {
 
     case 'settings_save':
         Auth::requireAdmin();
-        DB::saveSetting('backup_enabled',     $_POST['backup_enabled']     ?? '0');
-        DB::saveSetting('backup_destination', $_POST['backup_destination'] ?? '/backup');
-        DB::saveSetting('backup_retention',   $_POST['backup_retention']   ?? '3');
+        $dest = trim($_POST['backup_destination'] ?? '/backup');
+        if (!str_starts_with($dest, '/') || str_contains($dest, '..')) {
+            echo json_encode(['success' => false, 'error' => 'Invalid backup destination path.']);
+            break;
+        }
+        if (!is_dir($dest)) {
+            echo json_encode(['success' => false, 'error' => 'Backup destination directory does not exist.']);
+            break;
+        }
+        $retention = max(1, min(365, (int)($_POST['backup_retention'] ?? 3)));
+        DB::saveSetting('backup_enabled',     $_POST['backup_enabled'] ?? '0');
+        DB::saveSetting('backup_destination', $dest);
+        DB::saveSetting('backup_retention',   (string)$retention);
         echo json_encode(['success' => true]);
         break;
 

@@ -10,6 +10,7 @@ $cf     = new CloudflareAPI();
 switch ($action) {
 
     case 'zones':
+        Auth::requireAdmin();
         $result = $cf->listZones();
         echo json_encode([
             'success' => $result['success'] ?? false,
@@ -18,6 +19,7 @@ switch ($action) {
         break;
 
     case 'list':
+        Auth::requireAdmin();
         $zoneId = trim($_GET['zone_id'] ?? '');
         if (!$zoneId) { echo json_encode(['success' => false, 'error' => 'zone_id required.']); break; }
         $result = $cf->listDNSRecords($zoneId);

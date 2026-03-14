@@ -71,14 +71,20 @@ try {
 try {
     $__phpVer = DB::setting('php_default_version', '');
     if (!$__phpVer || !file_exists("/usr/sbin/php-fpm{$__phpVer}")) {
-        foreach (array_reverse(['5.6','7.0','7.1','7.2','7.3','7.4','8.0','8.1','8.2','8.3','8.4','8.5']) as $__v) {
+        $__bins = glob('/usr/sbin/php-fpm*') ?: [];
+        $__vers = [];
+        foreach ($__bins as $__bin) {
+            if (preg_match('/php-fpm(\d+\.\d+)$/', $__bin, $__m)) $__vers[] = $__m[1];
+        }
+        if (empty($__vers)) $__vers = ['5.6','7.0','7.1','7.2','7.3','7.4','8.0','8.1','8.2','8.3','8.4','8.5'];
+        foreach (array_reverse($__vers) as $__v) {
             if (file_exists("/usr/sbin/php-fpm{$__v}") || file_exists("/usr/bin/php{$__v}")) {
                 DB::saveSetting('php_default_version', $__v);
                 break;
             }
         }
     }
-    unset($__phpVer, $__v);
+    unset($__phpVer, $__v, $__bins, $__vers, $__bin, $__m);
 } catch (\Throwable) {}
 
 // Enable debug mode from .env

@@ -10,6 +10,7 @@ $cf     = new CloudflareAPI();
 switch ($action) {
 
     case 'list_rules':
+        Auth::requireAdmin();
         $zoneId = trim($_GET['zone_id'] ?? '');
         if (!$zoneId) { echo json_encode(['success' => false, 'error' => 'zone_id required.']); break; }
         $resp = $cf->listEmailRouting($zoneId);
@@ -43,6 +44,7 @@ switch ($action) {
         break;
 
     case 'list_addresses':
+        Auth::requireAdmin();
         $accountId = DB::setting('cf_account_id', '');
         if (!$accountId) { echo json_encode(['success' => false, 'error' => 'Cloudflare account ID not configured.']); break; }
         $resp = $cf->listEmailAddresses($accountId);

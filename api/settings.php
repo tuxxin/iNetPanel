@@ -6,6 +6,22 @@
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
+// Helper: write a cron file via manage_cron.sh with error logging
+$writeCron = function(string $name, string $content): bool {
+    $proc = popen('sudo /root/scripts/manage_cron.sh write ' . escapeshellarg($name), 'w');
+    if ($proc === false) {
+        error_log("iNetPanel: failed to open pipe for cron {$name}");
+        return false;
+    }
+    fwrite($proc, $content);
+    $exit = pclose($proc);
+    if ($exit !== 0) {
+        error_log("iNetPanel: cron write for {$name} exited with {$exit}");
+        return false;
+    }
+    return true;
+};
+
 switch ($action) {
 
     case 'get':
@@ -69,8 +85,7 @@ switch ($action) {
             if ($enabled === '1' && $interval > 0) {
                 $phpBin = 'php' . DB::setting('php_default_version', '8.4');
                 $cron = "*/{$interval} * * * * www-data {$phpBin} /var/www/inetpanel/scripts/ddns_update.php >> /var/log/inetpanel_ddns.log 2>&1\n";
-                $proc = popen('sudo /root/scripts/manage_cron.sh write inetpanel_ddns', 'w');
-                fwrite($proc, $cron); pclose($proc);
+                $writeCron('inetpanel_ddns', $cron);
             } else {
                 Shell::exec('sudo /root/scripts/manage_cron.sh remove inetpanel_ddns', 'cron-ddns-remove');
             }
@@ -88,16 +103,14 @@ switch ($action) {
             } else {
                 $cronContent = "# iNetPanel managed — system package updates (disabled)\n";
             }
-            $proc = popen('sudo /root/scripts/manage_cron.sh write lamp_update', 'w');
-            fwrite($proc, $cronContent); pclose($proc);
+            $writeCron('lamp_update', $cronContent);
 
             // Backup cron
             $backupTime = DB::setting('backup_cron_time', '03:00');
             [$bHour, $bMin] = array_pad(explode(':', $backupTime), 2, '00');
             $backupCron = "# iNetPanel managed — account backups\n"
                 . "{$bMin} {$bHour} * * * root /root/scripts/backup_accounts.sh >> /var/log/lamp_backup.log 2>&1\n";
-            $proc = popen('sudo /root/scripts/manage_cron.sh write lamp_backup', 'w');
-            fwrite($proc, $backupCron); pclose($proc);
+            $writeCron('lamp_backup', $backupCron);
 
             // Panel auto-update cron
             $autoEnabled = DB::setting('auto_update_enabled', '0');
@@ -107,8 +120,7 @@ switch ($action) {
                 $phpBin2  = 'php' . DB::setting('php_default_version', '8.4');
                 $autoCron = "# iNetPanel managed — panel auto-update\n"
                     . "{$aMin} {$aHour} * * * root {$phpBin2} /var/www/inetpanel/scripts/panel_update.php >> /var/log/inetpanel_update.log 2>&1\n";
-                $proc = popen('sudo /root/scripts/manage_cron.sh write inetpanel_autoupdate', 'w');
-                fwrite($proc, $autoCron); pclose($proc);
+                $writeCron('inetpanel_autoupdate', $autoCron);
             } else {
                 Shell::exec('sudo /root/scripts/manage_cron.sh remove inetpanel_autoupdate', 'cron-autoupdate-remove');
             }
@@ -231,8 +243,12 @@ switch ($action) {
         Auth::requireAdmin();
         // Force an immediate DDNS update attempt
         $phpBin = 'php' . DB::setting('php_default_version', '8.4');
-        $output = shell_exec("{$phpBin} /var/www/inetpanel/scripts/ddns_update.php 2>&1");
-        echo json_encode(['success' => true, 'output' => trim($output ?: 'No output')]);
+        if (!preg_match('/^php\d+\.\d+$/', $phpBin)) {
+            echo json_encode(['success' => false, 'error' => 'Invalid PHP version in settings.']);
+            break;
+        }
+        $result = Shell::exec(escapeshellarg($phpBin) . ' /var/www/inetpanel/scripts/ddns_update.php', 'ddns-test');
+        echo json_encode(['success' => true, 'output' => trim($result['output'] ?: 'No output')]);
         break;
 
     case 'wg_toggle':
