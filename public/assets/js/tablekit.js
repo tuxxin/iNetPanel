@@ -102,11 +102,17 @@ const TableKit = (() => {
             const wrap = document.createElement('div');
             wrap.className = 'px-3 py-2 bg-white border-bottom';
             const input = document.createElement('input');
-            input.type = 'text';
-            input.setAttribute('autocomplete', 'off');
+            input.type = 'search';
+            input.setAttribute('autocomplete', 'one-time-code');
+            input.setAttribute('readonly', '');
+            input.setAttribute('data-1p-ignore', '');
+            input.setAttribute('data-lpignore', 'true');
+            input.setAttribute('data-form-type', 'other');
+            input.name = 'tablekit-filter-' + table.id;
             input.className = 'form-control form-control-sm';
             input.placeholder = 'Filter\u2026';
             input.style.maxWidth = '260px';
+            input.addEventListener('focus', function() { this.removeAttribute('readonly'); });
             wrap.appendChild(input);
             // Insert before table's card-body or before the table
             const cardBody = table.closest('.card-body');

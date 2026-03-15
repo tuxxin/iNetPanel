@@ -68,8 +68,8 @@ Auth::requireAdmin();
             <button class="btn btn-outline-info btn-sm" onclick="loadTiCoreTemplate()">
                 <i class="fab fa-php me-1"></i>TiCore Template
             </button>
-            <a href="https://github.com/tuxxin/TiCore" target="_blank" class="text-muted small ms-1" style="font-size:.75rem;">
-                <i class="fab fa-github me-1"></i>Learn more
+            <a href="https://ticore.tuxxin.com" target="_blank" class="text-muted small ms-1" style="font-size:.75rem;">
+                <i class="fas fa-external-link-alt me-1"></i>Learn more
             </a>
         </div>
     </div>
@@ -228,7 +228,7 @@ function validateHook(hookType) {
 $tiCoreTemplate = <<<'TICORE_TPL'
 #!/bin/bash
 # TiCore PHP Framework — Auto-Deploy Hook
-# https://github.com/tuxxin/TiCore
+# https://ticore.tuxxin.com
 set -e
 TICORE_REPO="https://github.com/tuxxin/TiCore"
 SITE_DIR="/home/$USERNAME/$DOMAIN"
@@ -267,23 +267,23 @@ cat > "$SITE_DIR/TiCore/templates/default/home.php" << 'HOMEEOF'
     <div style="background:#f8f9fa;border-radius:8px;padding:20px;text-align:left;font-family:monospace;font-size:.9rem;line-height:1.8;">
       <strong>Domain:</strong> <?= htmlspecialchars(SITE_TITLE) ?><br>
       <strong>PHP:</strong> <?= PHP_VERSION ?><br>
-      <strong>Framework:</strong> <a href="https://github.com/tuxxin/TiCore" target="_blank" style="color:#0d6efd;">TiCore PHP Framework</a>
+      <strong>Framework:</strong> <a href="https://ticore.tuxxin.com" target="_blank" style="color:#0d6efd;">TiCore PHP Framework</a>
     </div>
     <p style="margin-top:24px;font-size:.85rem;color:#999;">
       Replace this page by editing <code>TiCore/templates/default/home.php</code>
     </p>
   </div>
   <p style="text-align:center;margin-top:16px;font-size:.75rem;color:#aaa;">
-    Powered by <a href="https://github.com/tuxxin/TiCore" style="color:#888;">TiCore</a>
+    Powered by <a href="https://ticore.tuxxin.com" style="color:#888;">TiCore</a>
     &middot; by <a href="https://tuxxin.com" style="color:#888;">Tuxxin.com</a>
-    &middot; Hosted with <a href="https://github.com/tuxxin/iNetPanel" style="color:#888;">iNetPanel</a>
+    &middot; Hosted with <a href="https://inetpanel.tuxxin.com" style="color:#888;">iNetPanel</a>
   </p>
 </div>
 HOMEEOF
 
 # Add "by Tuxxin.com" to the footer layout
 if [ -f "$SITE_DIR/TiCore/templates/default/layouts/footer.php" ]; then
-    sed -i 's|</body>|<div style="text-align:center;padding:12px 0;font-size:.75rem;color:#aaa;">Powered by <a href="https://github.com/tuxxin/TiCore" style="color:#888;">TiCore</a> \&middot; by <a href="https://tuxxin.com" style="color:#888;">Tuxxin.com</a> \&middot; Hosted with <a href="https://github.com/tuxxin/iNetPanel" style="color:#888;">iNetPanel</a></div>\n</body>|' "$SITE_DIR/TiCore/templates/default/layouts/footer.php"
+    sed -i 's|</body>|<div style="text-align:center;padding:12px 0;font-size:.75rem;color:#aaa;">Powered by <a href="https://ticore.tuxxin.com" style="color:#888;">TiCore</a> \&middot; by <a href="https://tuxxin.com" style="color:#888;">Tuxxin.com</a> \&middot; Hosted with <a href="https://inetpanel.tuxxin.com" style="color:#888;">iNetPanel</a></div>\n</body>|' "$SITE_DIR/TiCore/templates/default/layouts/footer.php"
 fi
 
 # Install Composer dependencies
