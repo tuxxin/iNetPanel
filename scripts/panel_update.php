@@ -284,6 +284,7 @@ www-data ALL=(root) NOPASSWD: /usr/bin/tail
 www-data ALL=(root) NOPASSWD: /usr/bin/journalctl
 www-data ALL=(root) NOPASSWD: /usr/bin/dpkg
 www-data ALL=(root) NOPASSWD: /bin/sed
+www-data ALL=(root) NOPASSWD: /bin/bash /tmp/inetp_hook_*
 www-data ALL=(root) NOPASSWD: /usr/bin/php* /var/www/inetpanel/scripts/panel_update.php *
 SUDOERS;
 

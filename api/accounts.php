@@ -32,7 +32,7 @@ function executeHook(string $hookType, array $vars): void
 {
     try {
         if (DB::setting("hook_{$hookType}_enabled", '0') !== '1') return;
-        $code = DB::setting("hook_{$hookType}_code", '');
+        $code = str_replace("\r", '', DB::setting("hook_{$hookType}_code", ''));
         if (trim($code) === '') return;
 
         $script = "#!/bin/bash\nset -e\n";

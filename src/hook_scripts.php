@@ -224,7 +224,7 @@ function validateHook(hookType) {
 
 // ── TiCore Template ──────────────────────────────────────────────────────────
 <?php
-// Nowdoc prevents PHP from processing <?= ?> tags inside the template
+// Nowdoc prevents PHP from processing short open tags inside the template
 $tiCoreTemplate = <<<'TICORE_TPL'
 #!/bin/bash
 # TiCore PHP Framework — Auto-Deploy Hook

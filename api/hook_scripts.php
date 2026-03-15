@@ -44,7 +44,7 @@ switch ($action) {
 
     case 'save':
         $hookType = trim($_POST['hook_type'] ?? '');
-        $code     = $_POST['code'] ?? '';
+        $code     = str_replace("\r", '', $_POST['code'] ?? '');
 
         if (!in_array($hookType, ['add_domain', 'delete_domain'], true)) {
             echo json_encode(['success' => false, 'error' => 'Invalid hook type.']);
@@ -70,7 +70,7 @@ switch ($action) {
         break;
 
     case 'validate':
-        $code = $_POST['code'] ?? '';
+        $code = str_replace("\r", '', $_POST['code'] ?? '');
 
         if (trim($code) === '') {
             echo json_encode(['success' => true, 'valid' => false, 'errors' => 'No code to validate.']);
