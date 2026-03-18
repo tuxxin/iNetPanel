@@ -568,7 +568,7 @@ function loadSshKeys() {
                 <td><span class="badge bg-secondary small">${k.type}</span></td>
                 <td class="text-end pe-3">
                     <button class="btn btn-sm btn-outline-danger py-0 px-1"
-                            onclick="deleteSshKey(${JSON.stringify(k.fingerprint)})" title="Delete">
+                            onclick='deleteSshKey(${JSON.stringify(k.fingerprint)})' title="Delete">
                         <i class="fas fa-trash"></i>
                     </button>
                 </td>

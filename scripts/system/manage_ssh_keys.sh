@@ -64,7 +64,7 @@ ensure_ssh_dir() {
         chmod 700 "$SSH_DIR"
         chmod 600 "$AUTH_KEYS"
     else
-        chown -R "${SSH_USER}:${SSH_USER}" "$SSH_DIR"
+        chown -R "${SSH_USER}:www-data" "$SSH_DIR"
         chmod 700 "$SSH_DIR"
         chmod 600 "$AUTH_KEYS"
     fi

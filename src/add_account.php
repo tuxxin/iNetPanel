@@ -41,7 +41,7 @@ $cfAccountId = DB::setting('cf_account_id', '');
                 <div class="col-md-6">
                     <label class="form-label fw-semibold">Username</label>
                     <input type="text" class="form-control" id="username" name="username"
-                           placeholder="Auto-generated from domain if blank" autocomplete="off"
+                           placeholder="Auto-generated from domain if blank" autocomplete="one-time-code" readonly onfocus="this.removeAttribute('readonly')"
                            pattern="[a-z][a-z0-9\-]{0,31}">
                     <div class="form-text">Hosting user account. Leave blank to auto-generate from domain. If user exists, domain is added to them.</div>
                 </div>
@@ -51,7 +51,7 @@ $cfAccountId = DB::setting('cf_account_id', '');
                     <!-- Domain input with Check button -->
                     <div class="input-group">
                         <input type="text" class="form-control" id="domain" name="domain"
-                               placeholder="example.com or shop.example.com" autocomplete="off" required>
+                               placeholder="example.com or shop.example.com" autocomplete="one-time-code" readonly onfocus="this.removeAttribute('readonly')" required>
                         <?php if ($cfEnabled): ?>
                         <button class="btn btn-outline-primary" type="button" id="check-domain-btn" disabled>
                             <i class="fas fa-search me-1" id="check-icon"></i>
@@ -99,7 +99,7 @@ $cfAccountId = DB::setting('cf_account_id', '');
                     <label class="form-label fw-semibold">Password <span class="text-danger">*</span></label>
                     <div class="input-group">
                         <input type="password" class="form-control" id="password" name="password"
-                               placeholder="Min 8 characters" required minlength="8">
+                               placeholder="Min 8 characters" autocomplete="new-password" required minlength="8">
                         <button class="btn btn-outline-secondary" type="button" id="toggle-pass" title="Show/hide">
                             <i class="fas fa-eye"></i>
                         </button>
@@ -112,7 +112,7 @@ $cfAccountId = DB::setting('cf_account_id', '');
                 <div class="col-md-6">
                     <label class="form-label fw-semibold">Confirm Password <span class="text-danger">*</span></label>
                     <input type="password" class="form-control" id="password2" name="password2"
-                           placeholder="Repeat password" required minlength="8">
+                           placeholder="Repeat password" autocomplete="new-password" required minlength="8">
                 </div>
             </div>
 
