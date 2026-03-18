@@ -249,7 +249,6 @@ rm -f "$SITE_DIR/TiCore/src/Controllers/FeaturesController.php"
 rm -f "$SITE_DIR/TiCore/templates/default/home.php"
 rm -f "$SITE_DIR/TiCore/templates/default/features.php"
 rm -f "$SITE_DIR/TiCore/templates/default/compare.php"
-rm -f "$SITE_DIR/TiCore/feeds/sitemap.php"
 rm -f "$SITE_DIR/www/ads.txt"
 rm -f "$SITE_DIR/www/assets/images/"*
 rm -f "$SITE_DIR/README.md"
