@@ -56,6 +56,21 @@ class CloudflareAPI
         return $this->request('DELETE', "/zones/{$zoneId}/dns_records/{$recordId}");
     }
 
+    public function getZoneSetting(string $zoneId, string $setting): array
+    {
+        return $this->request('GET', "/zones/{$zoneId}/settings/{$setting}");
+    }
+
+    public function setSecurityLevel(string $zoneId, string $level): array
+    {
+        return $this->request('PATCH', "/zones/{$zoneId}/settings/security_level", ['value' => $level]);
+    }
+
+    public function setDevelopmentMode(string $zoneId, string $onOff): array
+    {
+        return $this->request('PATCH', "/zones/{$zoneId}/settings/development_mode", ['value' => $onOff]);
+    }
+
     /**
      * Update or create a DDNS A record.
      * Finds the record by name; updates if found, creates if not.

@@ -285,6 +285,16 @@ www-data ALL=(root) NOPASSWD: /usr/bin/journalctl
 www-data ALL=(root) NOPASSWD: /usr/bin/dpkg
 www-data ALL=(root) NOPASSWD: /bin/sed
 www-data ALL=(root) NOPASSWD: /bin/bash /tmp/inetp_hook_*
+www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf
+www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetp_ht_* /home/*
+www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetp_pw_* /home/*
+www-data ALL=(root) NOPASSWD: /bin/cat /home/*/.htaccess
+www-data ALL=(root) NOPASSWD: /bin/cat /home/*/.htpasswd
+www-data ALL=(root) NOPASSWD: /bin/chown *\:www-data /home/*
+www-data ALL=(root) NOPASSWD: /bin/chmod 644 /home/*
+www-data ALL=(root) NOPASSWD: /bin/chmod 640 /home/*
+www-data ALL=(root) NOPASSWD: /bin/rm -f /home/*/.htpasswd
+www-data ALL=(root) NOPASSWD: /bin/cat /root/.mysql_root_pass
 www-data ALL=(root) NOPASSWD: /usr/bin/php* /var/www/inetpanel/scripts/panel_update.php *
 SUDOERS;
 
@@ -293,6 +303,102 @@ if (file_put_contents($sudoersFile, $sudoersContent . "\n") === false) {
 } else {
     chmod($sudoersFile, 0440);
     log_msg('Sudoers file rebuilt with current rules.');
+}
+
+// Deploy phpMyAdmin signon.php for auto-login from client portal
+$pmaDir = '/usr/share/phpmyadmin';
+if (is_dir($pmaDir)) {
+    $signonPhp = <<<'SIGNON'
+<?php
+// phpMyAdmin signon authentication bridge — deployed by iNetPanel
+// Accepts: (1) one-time token via GET, or (2) manual POST login
+
+$token = $_GET['token'] ?? '';
+
+// Token-based auto-login from iNetPanel
+if ($token && preg_match('/^[a-f0-9]{64}$/', $token)) {
+    $tokenFile = '/tmp/pma_signon_' . $token;
+    if (file_exists($tokenFile)) {
+        $data = json_decode(file_get_contents($tokenFile), true);
+        @unlink($tokenFile);
+        if ($data && isset($data['user']) && (time() - ($data['created'] ?? 0)) < 30) {
+            session_name('SignonSession');
+            session_start();
+            $_SESSION['PMA_single_signon_user'] = $data['user'];
+            $_SESSION['PMA_single_signon_password'] = $data['password'];
+            $_SESSION['PMA_single_signon_host'] = 'localhost';
+            session_write_close();
+            header('Location: index.php');
+            exit;
+        }
+    }
+}
+
+// Manual POST login (fallback form submission)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['pma_user'])) {
+    session_name('SignonSession');
+    session_start();
+    $_SESSION['PMA_single_signon_user'] = $_POST['pma_user'];
+    $_SESSION['PMA_single_signon_password'] = $_POST['pma_pass'] ?? '';
+    $_SESSION['PMA_single_signon_host'] = 'localhost';
+    session_write_close();
+    header('Location: index.php');
+    exit;
+}
+
+// Fallback: show login form (prevents redirect loop with PMA signon auth)
+?>
+<!DOCTYPE html>
+<html><head><title>phpMyAdmin Login</title>
+<style>body{font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#f4f4f4;}
+.card{background:#fff;padding:40px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.1);width:100%;max-width:360px;}
+h2{margin:0 0 20px;text-align:center;color:#333;}
+label{display:block;margin-bottom:4px;font-weight:600;font-size:.9rem;color:#555;}
+input{width:100%;padding:10px;margin-bottom:16px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:.95rem;}
+button{width:100%;padding:10px;background:#ff7e00;color:#fff;border:none;border-radius:4px;font-size:1rem;font-weight:600;cursor:pointer;}
+button:hover{background:#e06f00;}</style></head>
+<body><div class="card"><h2>phpMyAdmin</h2>
+<form method="post">
+<label>Username</label><input type="text" name="pma_user" required autofocus>
+<label>Password</label><input type="password" name="pma_pass">
+<button type="submit">Log In</button>
+</form></div></body></html>
+SIGNON;
+    file_put_contents("{$pmaDir}/signon.php", $signonPhp);
+    chmod("{$pmaDir}/signon.php", 0644);
+    log_msg('Deployed phpMyAdmin signon.php');
+
+    // Patch config for signon auth if still using cookie
+    $pmaConfig = '/etc/phpmyadmin/config.inc.php';
+    if (file_exists($pmaConfig)) {
+        $cfg = file_get_contents($pmaConfig);
+        if (strpos($cfg, "'signon'") === false && strpos($cfg, "'cookie'") !== false) {
+            $cfg = preg_replace(
+                "/\\$cfg\\['Servers'\\]\\[\\$i\\]\\['auth_type'\\]\\s*=\\s*'cookie'/",
+                "\$cfg['Servers'][\$i]['auth_type'] = 'signon';\n\$cfg['Servers'][\$i]['SignonSession'] = 'SignonSession';\n\$cfg['Servers'][\$i]['SignonURL'] = '/signon.php';\n// Original: \$cfg['Servers'][\$i]['auth_type'] = 'cookie'",
+                $cfg,
+                1
+            );
+            file_put_contents($pmaConfig, $cfg);
+            log_msg('Patched phpMyAdmin config for signon auth');
+        }
+    }
+
+    // Also patch conf.d/pma_secure.php if it overrides auth_type back to cookie
+    $pmaSecure = '/etc/phpmyadmin/conf.d/pma_secure.php';
+    if (file_exists($pmaSecure)) {
+        $sec = file_get_contents($pmaSecure);
+        if (preg_match("/\\['auth_type'\\].*=.*'cookie'/", $sec)) {
+            $sec = preg_replace(
+                "/\\$cfg\\['Servers'\\]\\[1\\]\\['auth_type'\\]\\s*=\\s*'cookie';/",
+                "\$cfg['Servers'][1]['auth_type']         = 'signon';\n\$cfg['Servers'][1]['SignonSession']     = 'SignonSession';\n\$cfg['Servers'][1]['SignonURL']         = '/signon.php';",
+                $sec,
+                1
+            );
+            file_put_contents($pmaSecure, $sec);
+            log_msg('Patched conf.d/pma_secure.php for signon auth');
+        }
+    }
 }
 
 // Update SQLite record

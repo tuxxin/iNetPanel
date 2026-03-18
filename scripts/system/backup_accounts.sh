@@ -78,6 +78,26 @@ else
     echo -e "  Date: $DATE  |  Retention: ${RETENTION_DAYS} days  |  Destination: $BACKUP_DIR"
     echo ""
 
+    # System configuration backup
+    SYS_BACKUP="$BACKUP_DIR/system_config_${DATE}.tgz"
+    echo -e "  ${YELLOW}Backing up system configuration files...${NC}"
+    tar -czf "$SYS_BACKUP" \
+        /etc/apache2/ \
+        /etc/php/ \
+        /etc/mysql/ \
+        /etc/lighttpd/ \
+        /etc/fail2ban/ \
+        /etc/wireguard/ \
+        /etc/ssh/sshd_config \
+        /etc/vsftpd.conf \
+        /etc/vsftpd.userlist \
+        /etc/cron.d/ \
+        /var/www/inetpanel/db/inetpanel.db \
+        2>/dev/null || true
+    SYS_SIZE=$(du -sh "$SYS_BACKUP" 2>/dev/null | cut -f1)
+    echo -e "    ${GREEN}Saved: $SYS_BACKUP ($SYS_SIZE)${NC}"
+    echo ""
+
     COUNT=0
     # Collect usernames: from hosting_users table if available, else fall back to vhost scan
     USERS=""

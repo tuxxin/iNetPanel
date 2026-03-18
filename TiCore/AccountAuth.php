@@ -154,12 +154,8 @@ class AccountAuth
      * Bridge to phpMyAdmin signon auth.
      * Renders an auto-submitting form that POSTs credentials to signon.php.
      */
-    public static function phpMyAdminSignOn(): void
+    public static function phpMyAdminSignOn(bool $asRoot = false): void
     {
-        self::startSession();
-        $username = $_SESSION['account_domain'] ?? null;
-        $dbPass   = isset($_SESSION['db_pass']) ? base64_decode($_SESSION['db_pass']) : null;
-
         // Determine PMA URL: use HTTPS+hostname if SSL cert exists, else HTTP+IP
         $hostname = DB::setting('server_hostname', '');
         $certFile = $hostname ? "/etc/letsencrypt/live/{$hostname}/fullchain.pem" : '';
@@ -170,22 +166,44 @@ class AccountAuth
             $pmaBase = "http://{$serverIp}:8888";
         }
 
+        if ($asRoot) {
+            // Admin route: always login as root
+            $rootPass = trim((string) shell_exec('sudo /bin/cat /root/.mysql_root_pass 2>/dev/null'));
+            $username = 'root';
+            $dbPass   = $rootPass;
+        } else {
+            // Portal route: login as hosting user with their password
+            self::startSession();
+            $username = $_SESSION['account_domain'] ?? null;
+            $dbPass   = isset($_SESSION['db_pass']) ? base64_decode($_SESSION['db_pass']) : null;
+
+            // Admin auto-login sessions don't have db_pass — fall back to root
+            // (only admins can generate auto-login tokens, so root access is safe here)
+            if ($username && !$dbPass) {
+                $rootPass = trim((string) shell_exec('sudo /bin/cat /root/.mysql_root_pass 2>/dev/null'));
+                if ($rootPass) {
+                    $username = 'root';
+                    $dbPass   = $rootPass;
+                }
+            }
+        }
+
         if (!$username || !$dbPass) {
             header("Location: {$pmaBase}/");
             exit;
         }
 
-        // Auto-submit credentials to signon.php via POST (avoids cross-port session issues)
-        $url  = htmlspecialchars("{$pmaBase}/signon.php");
-        $user = htmlspecialchars($username, ENT_QUOTES);
-        $pass = htmlspecialchars($dbPass, ENT_QUOTES);
-        echo <<<HTML
-        <!DOCTYPE html><html><head><title>Connecting...</title></head>
-        <body><form id="f" method="post" action="{$url}">
-        <input type="hidden" name="user" value="{$user}">
-        <input type="hidden" name="password" value="{$pass}">
-        </form><script>document.getElementById('f').submit();</script></body></html>
-        HTML;
+        // Token-based signon: write credentials to temp file, redirect to signon.php with token
+        $token = bin2hex(random_bytes(32));
+        $tokenFile = '/tmp/pma_signon_' . $token;
+        file_put_contents($tokenFile, json_encode([
+            'user'     => $username,
+            'password' => $dbPass,
+            'created'  => time(),
+        ]));
+        chmod($tokenFile, 0644);
+
+        header("Location: {$pmaBase}/signon.php?token=" . urlencode($token));
         exit;
     }
 

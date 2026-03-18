@@ -66,6 +66,35 @@ switch ($action) {
         echo json_encode($cf->deleteDNSRecord($zoneId, $recordId));
         break;
 
+    case 'zone_settings':
+        Auth::requireAdmin();
+        $zoneId = trim($_GET['zone_id'] ?? '');
+        if (!$zoneId) { echo json_encode(['success' => false, 'error' => 'zone_id required.']); break; }
+        $sec = $cf->getZoneSetting($zoneId, 'security_level');
+        $dev = $cf->getZoneSetting($zoneId, 'development_mode');
+        echo json_encode([
+            'success'          => ($sec['success'] ?? false) && ($dev['success'] ?? false),
+            'security_level'   => $sec['result']['value'] ?? 'medium',
+            'development_mode' => $dev['result']['value'] ?? 'off',
+        ]);
+        break;
+
+    case 'set_ddos_mode':
+        Auth::requireAdmin();
+        $zoneId  = trim($_POST['zone_id'] ?? '');
+        $enabled = ($_POST['enabled'] ?? '0') === '1';
+        $result  = $cf->setSecurityLevel($zoneId, $enabled ? 'under_attack' : 'medium');
+        echo json_encode(['success' => $result['success'] ?? false, 'error' => $result['errors'][0]['message'] ?? null]);
+        break;
+
+    case 'set_dev_mode':
+        Auth::requireAdmin();
+        $zoneId  = trim($_POST['zone_id'] ?? '');
+        $enabled = ($_POST['enabled'] ?? '0') === '1';
+        $result  = $cf->setDevelopmentMode($zoneId, $enabled ? 'on' : 'off');
+        echo json_encode(['success' => $result['success'] ?? false, 'error' => $result['errors'][0]['message'] ?? null]);
+        break;
+
     default:
         echo json_encode(['success' => false, 'error' => 'Unknown action.']);
 }

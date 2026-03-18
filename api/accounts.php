@@ -7,6 +7,22 @@
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
+// Reserved usernames that cannot be used for hosting accounts
+const BANNED_USERNAMES = [
+    'root', 'admin', 'administrator', 'www', 'www-data', 'system', 'daemon',
+    'bin', 'sys', 'sync', 'games', 'man', 'lp', 'mail', 'news', 'uucp',
+    'proxy', 'backup', 'list', 'irc', 'gnats', 'nobody', 'systemd-network',
+    'systemd-resolve', 'messagebus', 'sshd', 'mysql', 'mariadb', 'postgres',
+    'apache', 'apache2', 'nginx', 'lighttpd', 'ftp', 'ftpuser', 'vsftpd',
+    'postfix', 'dovecot', 'cron', 'ntp', 'ssh', 'git', 'svn',
+    'test', 'guest', 'user', 'ubuntu', 'debian', 'centos',
+    'webmaster', 'hostmaster', 'postmaster', 'abuse', 'noc', 'security',
+    'info', 'support', 'sales', 'contact',
+    'inetpanel', 'panel', 'cpanel', 'plesk', 'whm',
+    'cloudflare', 'wireguard', 'fail2ban', 'certbot', 'letsencrypt',
+    'phpmyadmin', 'adminer', 'supervisor',
+];
+
 // Normalize Shell::run result for JSON API response
 function shellResult(array $r): array {
     if ($r['success']) return $r;
@@ -142,6 +158,10 @@ switch ($action) {
         }
         if (!preg_match('/^[a-z][a-z0-9\-]{0,31}$/', $username)) {
             echo json_encode(['success' => false, 'error' => 'Invalid username. Must start with a letter, lowercase alphanumeric + hyphens, max 32 chars.']);
+            break;
+        }
+        if (in_array($username, BANNED_USERNAMES, true)) {
+            echo json_encode(['success' => false, 'error' => "The username '{$username}' is reserved and cannot be used."]);
             break;
         }
 
@@ -375,6 +395,10 @@ switch ($action) {
             if (!$username || !preg_match('/^[a-z]/', $username)) {
                 $username = 'u' . $username;
             }
+            // Avoid reserved usernames
+            if (in_array($username, BANNED_USERNAMES, true)) {
+                $username = 'u' . $username;
+            }
             $username = substr($username, 0, 32);
             $base = $username;
             $i = 1;
@@ -382,6 +406,11 @@ switch ($action) {
                 $username = substr($base, 0, 29) . $i;
                 $i++;
             }
+        }
+
+        if (in_array($username, BANNED_USERNAMES, true)) {
+            echo json_encode(['success' => false, 'error' => "The username '{$username}' is reserved and cannot be used."]);
+            break;
         }
 
         if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9\-\.]{1,61}[a-zA-Z0-9]$/', $domain)) {

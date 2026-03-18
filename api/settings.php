@@ -62,12 +62,17 @@ switch ($action) {
                 $saved[] = $key;
             }
         }
-        // Apply timezone to PHP runtime and OS if changed
+        // Apply timezone to PHP runtime, OS, and MariaDB if changed
         if (in_array('timezone', $saved)) {
             $tz = DB::setting('timezone', 'UTC');
             if (in_array($tz, DateTimeZone::listIdentifiers())) {
                 date_default_timezone_set($tz);
                 Shell::exec('sudo /usr/bin/timedatectl set-timezone ' . escapeshellarg($tz), 'timezone');
+                // Update MariaDB timezone (runtime + persistent config)
+                $mysqlPass = trim(@file_get_contents('/root/.mysql_root_pass') ?: '');
+                Shell::exec('mysql -u root -p' . escapeshellarg($mysqlPass) . ' -e ' . escapeshellarg("SET GLOBAL time_zone = '{$tz}'") . ' 2>&1', 'mysql-timezone');
+                @file_put_contents('/tmp/inetp_tz.cnf', "[mysqld]\ndefault_time_zone = {$tz}\n");
+                Shell::exec('sudo /bin/cp /tmp/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf', 'mysql-tz-conf');
             }
         }
         // If CF credentials were saved, validate them

@@ -32,6 +32,34 @@ if (DB::setting('cf_enabled', '0') !== '1') {
     </div>
 </div>
 
+<!-- Zone mode toggles (shown after loading a zone) -->
+<div class="card border-0 shadow-sm mb-4 d-none" id="zone-modes-card">
+    <div class="card-body py-3">
+        <div class="row g-3">
+            <div class="col-md-6 d-flex align-items-center gap-3">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch" id="ddos-toggle"
+                           style="width:2.5em;height:1.3em;cursor:pointer" disabled>
+                </div>
+                <div>
+                    <span class="fw-semibold small"><i class="fas fa-shield-alt text-danger me-1"></i>DDoS Mode</span>
+                    <div class="text-muted" style="font-size:.75rem">Enables Cloudflare's "I'm Under Attack" mode. Visitors see a JS challenge for ~5 seconds before accessing your site.</div>
+                </div>
+            </div>
+            <div class="col-md-6 d-flex align-items-center gap-3">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch" id="devmode-toggle"
+                           style="width:2.5em;height:1.3em;cursor:pointer" disabled>
+                </div>
+                <div>
+                    <span class="fw-semibold small"><i class="fas fa-code text-info me-1"></i>Development Mode</span>
+                    <div class="text-muted" style="font-size:.75rem">Bypasses Cloudflare's cache for 3 hours. Use when making changes to cached content so updates appear immediately.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- DNS records table -->
 <div class="card border-0 shadow-sm d-none" id="dns-table-card">
     <div class="card-body p-0">
@@ -138,10 +166,73 @@ fetch('/api/dns?action=zones')
         document.getElementById('zone-sel').innerHTML = '<option value="">Failed to load zones</option>';
     });
 
+function loadZoneSettings(zoneId) {
+    const ddos = document.getElementById('ddos-toggle');
+    const dev  = document.getElementById('devmode-toggle');
+    ddos.disabled = true;
+    dev.disabled  = true;
+    document.getElementById('zone-modes-card').classList.remove('d-none');
+    fetch(`/api/dns?action=zone_settings&zone_id=${encodeURIComponent(zoneId)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                ddos.checked = data.security_level === 'under_attack';
+                dev.checked  = data.development_mode === 'on';
+                ddos.disabled = false;
+                dev.disabled  = false;
+            }
+        });
+}
+
+document.getElementById('ddos-toggle').addEventListener('change', function () {
+    const enabled = this.checked ? '1' : '0';
+    const toggle  = this;
+    toggle.disabled = true;
+    const fd = new FormData();
+    fd.append('action', 'set_ddos_mode');
+    fd.append('zone_id', currentZoneId);
+    fd.append('enabled', enabled);
+    fetch('/api/dns', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            toggle.disabled = false;
+            if (data.success) {
+                showAlert(toggle.checked ? 'DDoS mode enabled — Under Attack mode is active.' : 'DDoS mode disabled.', toggle.checked ? 'warning' : 'success');
+            } else {
+                toggle.checked = !toggle.checked;
+                showAlert(data.error || 'Failed to update DDoS mode.', 'danger');
+            }
+        })
+        .catch(() => { toggle.disabled = false; toggle.checked = !toggle.checked; });
+});
+
+document.getElementById('devmode-toggle').addEventListener('change', function () {
+    const enabled = this.checked ? '1' : '0';
+    const toggle  = this;
+    toggle.disabled = true;
+    const fd = new FormData();
+    fd.append('action', 'set_dev_mode');
+    fd.append('zone_id', currentZoneId);
+    fd.append('enabled', enabled);
+    fetch('/api/dns', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            toggle.disabled = false;
+            if (data.success) {
+                showAlert(toggle.checked ? 'Development mode enabled — cache bypassed for 3 hours.' : 'Development mode disabled.', toggle.checked ? 'info' : 'success');
+            } else {
+                toggle.checked = !toggle.checked;
+                showAlert(data.error || 'Failed to update development mode.', 'danger');
+            }
+        })
+        .catch(() => { toggle.disabled = false; toggle.checked = !toggle.checked; });
+});
+
 document.getElementById('load-dns-btn').addEventListener('click', function () {
     const zoneId = document.getElementById('zone-sel').value;
     if (!zoneId) return;
     currentZoneId = zoneId;
+    loadZoneSettings(zoneId);
     document.getElementById('dns-table-card').classList.remove('d-none');
     document.getElementById('add-record-btn').disabled = false;
     document.getElementById('dns-tbody').innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Loading…</td></tr>';

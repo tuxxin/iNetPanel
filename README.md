@@ -27,9 +27,11 @@ Then open `http://<YOUR_SERVER_IP>/install.php` to complete setup.
 
 ### Hosting & Account Management
 - **Multi-Domain Users** — One hosting user can own multiple domains, each with its own vhost, database, and SSL certificate
-- **One-Click Account Creation** — Creates Linux user, Apache vhost, PHP-FPM pool, MariaDB database, FTP access, Clourflare application route & DNS CNAME and SSL certificate in one step
+- **One-Click Account Creation** — Creates Linux user, Apache vhost, PHP-FPM pool, FTP access, Cloudflare tunnel route, DNS CNAME, and SSL certificate in one step
 - **Account Suspension** — Suspend/resume accounts (blocks HTTP, FTP, SSH, and WireGuard simultaneously)
-- **Client Portal** — Hosting users log in at `/user/` to view their account info, DNS records, email routing, and connection details
+- **Client Portal** — Hosting users log in at `/user/` with tabbed dashboard: account overview, database management, FTP/SSH + SSH key management, .htaccess file manager with directory password protection, backups, DNS records, and email routing
+- **phpMyAdmin Auto-Login** — One-click phpMyAdmin access from both admin panel (root) and client portal (user-scoped)
+- **Hook Scripts** — Custom post-execution bash hooks for domain add/delete with syntax validation, toggle on/off, and one-click TiCore PHP Framework auto-deploy template
 
 ### SSL & Security
 - **Automatic SSL** — Let's Encrypt certificates issued via DNS-01 challenge (Cloudflare API) for every domain
@@ -42,16 +44,19 @@ Then open `http://<YOUR_SERVER_IP>/install.php` to complete setup.
 ### Cloudflare Integration
 - **Zero Trust Tunnel** — Created automatically during install; every domain is published through the tunnel
 - **DNS Management** — Full Cloudflare DNS record management (A, AAAA, CNAME, MX, TXT, SRV, etc.)
+- **DDoS & Dev Mode** — Toggle Cloudflare Under Attack Mode and Development Mode per zone from admin DNS and client portal
 - **Email Routing** — Manage Cloudflare Email Routing rules per domain from the panel
 - **DDNS** — Automatically updates your DNS A record when your server IP changes
 
 ### Server Management
 - **Multi-PHP** — Install and switch between PHP 5.6–8.5 per domain using sury.org packages
 - **PHP Package Manager** — Install/remove PHP extensions per version from the panel
-- **Service Manager** — Start, stop, restart Apache, PHP-FPM, MariaDB, vsftpd, lighttpd, WireGuard, etc
+- **Service Manager** — Start, stop, restart Apache, PHP-FPM, MariaDB, vsftpd, lighttpd, WireGuard, etc.
+- **Service Monitor** — Automatic service health checks with auto-restart and panel logging (configurable cron)
 - **System Logs** — View Apache error/access logs, PHP-FPM logs, auth logs from the panel
 - **Image Optimizer** — Bulk optimize JPEG/PNG/GIF images with WebP generation (per-user, per-domain, or per-directory)
-- **Backups** — Per-user automated backups (all domains in one archive) with configurable retention and scheduling
+- **Backups** — Per-user automated backups (all domains in one archive) plus system config backups (Apache, PHP, MariaDB, lighttpd, fail2ban, SSH, cron, and panel database) with configurable retention and scheduling
+- **MySQL Timezone Sync** — Timezone changes in Settings or installer automatically update MariaDB global timezone and persist to config
 
 ### VPN & Remote Access
 - **WireGuard VPN** — Optional full server lockdown; only the WireGuard port (1443/UDP) is publicly open
@@ -60,9 +65,11 @@ Then open `http://<YOUR_SERVER_IP>/install.php` to complete setup.
 
 ### Panel Administration
 - **Role-Based Access** — Superadmin, full admin, and sub-admin (domain-restricted) roles
-- **Panel Updates** — One-click update from GitHub releases, CLI emergency update (`inetp panel_update`), auto-update scheduling
+- **Panel Updates** — One-click update from GitHub releases, CLI emergency update (`inetp panel_update`), auto-update scheduling with header notification
 - **Schema Migrations** — Numbered SQL migrations run automatically on update; servers that skip versions get all changes applied
 - **Scheduled Jobs** — Configurable cron for system updates, backups, and panel auto-update
+- **Settings Deep Links** — Direct URL access to settings tabs (e.g., `/admin/settings#general`)
+- **Reserved Usernames** — Prevents creation of accounts with system-reserved names (root, admin, www-data, etc.)
 - **Dark Mode** — Toggle between light and dark themes
 - **CLI Tool** — `inetp` command for all operations from the terminal
 
@@ -76,7 +83,7 @@ Then open `http://<YOUR_SERVER_IP>/install.php` to complete setup.
 |---|---|---|
 | Admin panel | lighttpd + PHP-FPM | 80 |
 | Client portal | lighttpd (same) | 80 |
-| phpMyAdmin | Apache2 vhost | 8888 |
+| phpMyAdmin | Apache2 vhost | 8888 / 8443 (SSL) |
 | Hosting sites | Apache2 SSL vhosts | 1080+ |
 | Panel database | SQLite | — |
 | Site databases | MariaDB (localhost) | 3306 |
@@ -94,8 +101,8 @@ Then open `http://<YOUR_SERVER_IP>/install.php` to complete setup.
   └── db/                    SQLite database
 
 /home/<username>/            Hosting user home
-  ├── <domain>/              Domains document root
-  ├── <domain>/www/          Domainc public document root
+  ├── <domain>/              Domain directory
+  ├── <domain>/www/          Public document root
   └── <domain>/logs/         Apache and PHP error logs
 
 /root/scripts/               System scripts (deployed from repo)
@@ -129,6 +136,7 @@ inetp --help
 | `wg_peer` | Manage WireGuard VPN peers |
 | `update` | Run system package update |
 | `panel_update` | Update iNetPanel from GitHub |
+| `service_monitor` | Enable/disable/run automatic service health checks |
 | `list` | List all hosting users and their domains |
 
 ---
@@ -149,7 +157,7 @@ inetp --help
 bash <(curl -s https://inetpanel.tuxxin.com/latest)
 ```
 
-This installs and configures: lighttpd, Apache2, PHP 8.5-FPM, MariaDB, phpMyAdmin, vsftpd, Node.js 22, certbot, WireGuard (optional), all system scripts, sudoers rules, and cron jobs. **SSH is moved to port 1022** — reconnect with `ssh -p 1022` after install.
+This installs and configures: lighttpd, Apache2, PHP 8.4-FPM, MariaDB, phpMyAdmin, vsftpd, Node.js 22, certbot, WireGuard (optional), all system scripts, sudoers rules, and cron jobs. **SSH is moved to port 1022** — reconnect with `ssh -p 1022` after install.
 
 ### 2. Complete setup in the browser
 

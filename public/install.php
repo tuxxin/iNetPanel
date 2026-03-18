@@ -334,6 +334,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($tzExit !== 0) {
                 error_log('iNetPanel install: timedatectl failed: ' . implode("\n", $tzOut));
             }
+            // Apply timezone to MariaDB (runtime + persistent config)
+            $mysqlPass = trim(@file_get_contents('/root/.mysql_root_pass') ?: '');
+            exec('mysql -u root -p' . escapeshellarg($mysqlPass) . ' -e ' . escapeshellarg("SET GLOBAL time_zone = '{$tz}'") . ' 2>&1', $mtzOut, $mtzExit);
+            @file_put_contents('/tmp/inetp_tz.cnf', "[mysqld]\ndefault_time_zone = {$tz}\n");
+            exec('sudo /bin/cp /tmp/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf 2>&1');
 
             // Apply system hostname (prefer DDNS hostname if set)
             $sysHostname = ($ddnsHostname !== '') ? $ddnsHostname : ($_POST['hostname'] ?? '');

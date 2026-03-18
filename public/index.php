@@ -219,6 +219,13 @@ $router->add('/admin/hook-scripts', function () use ($view) {
     $view->renderAdmin('Hook Scripts', SRC_PATH . '/hook_scripts.php');
 });
 
+// phpMyAdmin (admin — root access)
+$router->add('/admin/phpmyadmin', function () {
+    Auth::check();
+    Auth::requireAdmin();
+    AccountAuth::phpMyAdminSignOn(true);
+});
+
 // DNS (Cloudflare)
 $router->add('/admin/dns', function () use ($view) {
     Auth::check();

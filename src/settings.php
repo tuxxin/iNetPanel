@@ -914,12 +914,19 @@ document.getElementById('save-ssh-port-btn').addEventListener('click', function 
         .catch(() => { spinner.classList.add('d-none'); this.disabled = false; showAlert('Request failed.', 'danger'); });
 });
 
-// Activate tab from URL hash (e.g. /admin/settings#tab-updates)
+// Activate tab from URL hash (e.g. /admin/settings#general or #tab-general)
 (function () {
-    const hash = window.location.hash;
+    let hash = window.location.hash;
+    if (hash && !hash.startsWith('#tab-')) hash = '#tab-' + hash.substring(1);
     if (hash) {
         const btn = document.querySelector(`[data-bs-target="${hash}"]`);
         if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
     }
 })();
+// Update hash on tab change for browser back/forward
+document.querySelectorAll('#settings-tabs button[data-bs-toggle="tab"]').forEach(btn => {
+    btn.addEventListener('shown.bs.tab', () => {
+        history.replaceState(null, '', btn.dataset.bsTarget.replace('#tab-', '#'));
+    });
+});
 </script>

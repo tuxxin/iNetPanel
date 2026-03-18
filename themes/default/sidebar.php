@@ -41,13 +41,7 @@
             <i class="fas fa-users"></i> <span>List Accounts</span>
         </a>
 
-        <?php
-        $pmaHostname = DB::setting('server_hostname', '');
-        $pmaCertFile = $pmaHostname ? "/etc/letsencrypt/live/{$pmaHostname}/fullchain.pem" : '';
-        $pmaHasSSL = $pmaCertFile && (file_exists($pmaCertFile) || glob("/etc/letsencrypt/live/{$pmaHostname}-*/fullchain.pem"));
-        $pmaUrl = $pmaHasSSL ? "https://{$pmaHostname}:8443" : "http://" . htmlspecialchars($_SERVER['SERVER_NAME']) . ":8888";
-        ?>
-        <a href="<?= $pmaUrl ?>" target="_blank">
+        <a href="/admin/phpmyadmin" target="_blank">
             <i class="fas fa-database"></i> <span>phpMyAdmin</span>
         </a>
 
