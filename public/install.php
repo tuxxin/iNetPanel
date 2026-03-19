@@ -567,6 +567,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 . "00 02 * * * root {$phpBin2} /var/www/inetpanel/scripts/panel_update.php >> /var/log/inetpanel_update.log 2>&1\n";
             $writeCron('inetpanel_autoupdate', $autoUpdateCron);
 
+            // Stats collector — populates dashboard graph (every minute)
+            $statsCron = "# iNetPanel stats collector — auto-managed\n"
+                . "* * * * * root /root/scripts/stats_collector.sh > /dev/null 2>&1\n";
+            $writeCron('inetpanel_stats', $statsCron);
+
+            // Backup cron (daily at configured time, default 03:00)
+            $backupTime = $_POST['backup_cron_time'] ?? '03:00';
+            $bParts = explode(':', $backupTime);
+            $bHour = intval($bParts[0] ?? 3);
+            $bMin  = intval($bParts[1] ?? 0);
+            $backupCron = "# iNetPanel backup — auto-managed\n"
+                . "{$bMin} {$bHour} * * * root /root/scripts/backup_accounts.sh >> /var/log/lamp_backup.log 2>&1\n";
+            $writeCron('lamp_backup', $backupCron);
+
             // Set up DDNS cron if enabled
             if ($ddnsEnabled === '1' && $ddnsInterval > 0) {
                 $cronLine = "*/{$ddnsInterval} * * * * www-data {$phpBin2} /var/www/inetpanel/scripts/ddns_update.php >> /var/log/inetpanel_ddns.log 2>&1\n";
