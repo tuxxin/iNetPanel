@@ -18,7 +18,7 @@ bash <(curl -s https://inetpanel.tuxxin.com/latest)
 
 Requires a **clean Debian 12** server with root access. The guided installer handles everything.
 
-> **[Full installation guide →](https://inetpanel.tuxxin.com/docs)**
+> **[Full installation guide →](https://inetpanel.tuxxin.com/install)**
 
 ---
 
@@ -26,7 +26,7 @@ Requires a **clean Debian 12** server with root access. The guided installer han
 
 Most hosting panels assume you have a VPS with a public IP and open ports. **iNetPanel is built for the opposite scenario** — a machine behind a NAT, a dynamic IP, an ISP that blocks port 80/443. With Cloudflare Tunnels, your domains route through Cloudflare's network directly to your server. No firewall rules, no DDNS hacks, no exposed attack surface.
 
-Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, database, SSL certificate, DNS record, and Cloudflare tunnel route — all in one click.
+Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, MariaDB user, SSL certificate, DNS record, and Cloudflare tunnel route — all in one click.
 
 ---
 
@@ -34,7 +34,7 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 
 ### Hosting Management
 - One-click account creation with Apache, PHP-FPM, FTP, SSL, and tunnel routing
-- Multi-domain users — each domain gets its own vhost, database, and SSL certificate
+- Multi-domain users — each domain gets its own vhost, document root and SSL certificate
 - [Client portal](https://inetpanel.tuxxin.com/features) for hosting users with database management, SSH keys, file manager, and backups
 - Multi-PHP version switching (5.6–8.5) per domain
 - Hook scripts for custom post-deploy automation
