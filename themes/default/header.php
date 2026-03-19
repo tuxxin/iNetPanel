@@ -42,7 +42,7 @@ try {
 <header class="top-header">
     <div class="system-info d-flex align-items-center">
         <span class="me-4"><i class="fas fa-server"></i> <?php echo gethostname(); ?></span>
-        <span class="d-none d-md-inline me-4"><i class="fas fa-clock"></i> <?php echo date('g:i A T'); ?></span>
+        <span class="d-none d-md-inline me-4" id="admin-live-clock"><i class="fas fa-clock"></i> <?php echo date('g:i A T'); ?></span>
         <?php
         $_fwState = trim(@shell_exec('sudo firewall-cmd --state 2>/dev/null') ?? '');
         $_fwActive = $_fwState === 'running';

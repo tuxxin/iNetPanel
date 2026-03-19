@@ -13,6 +13,18 @@
         });
     });
 })();
+(function () {
+    var el = document.getElementById('admin-live-clock');
+    if (!el) return;
+    setInterval(function () {
+        var d = new Date();
+        var h = d.getHours(), m = d.getMinutes(), s = d.getSeconds();
+        var ampm = h >= 12 ? 'PM' : 'AM';
+        h = h % 12 || 12;
+        var tz = d.toLocaleTimeString('en-US', { timeZoneName: 'short' }).split(' ').pop();
+        el.innerHTML = '<i class="fas fa-clock"></i> ' + h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + ' ' + ampm + ' ' + tz;
+    }, 1000);
+})();
 </script>
 </body>
 </html>
