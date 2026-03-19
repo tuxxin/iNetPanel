@@ -34,6 +34,15 @@ if [ "$1" = "--single" ] && [ -n "$2" ]; then
     SINGLE_ACCOUNT="$2"
 fi
 
+# Check if backups are enabled (skip in --single mode which is used by domain removal)
+if [ "$SINGLE_MODE" -eq 0 ]; then
+    ENABLED=$(sqlite3 "$PANEL_DB" "SELECT value FROM settings WHERE key='backup_enabled'" 2>/dev/null)
+    if [ "$ENABLED" = "0" ]; then
+        echo "Backups are disabled. Exiting."
+        exit 0
+    fi
+fi
+
 mkdir -p "$BACKUP_DIR"
 
 backup_user() {
@@ -133,11 +142,11 @@ else
     echo ""
     echo -e "${YELLOW}Applying ${RETENTION_DAYS}-day retention policy...${NC}"
     REMOVED=0
+    MTIME_DAYS=$((RETENTION_DAYS - 1))
     while IFS= read -r -d '' old; do
         rm -f "$old"
         echo -e "  Removed: $(basename "$old")"
         REMOVED=$((REMOVED + 1))
-    MTIME_DAYS=$((RETENTION_DAYS - 1))
     done < <(find "$BACKUP_DIR" -name "*.tgz" -mtime +"$MTIME_DAYS" -print0)
     echo -e "  Removed $REMOVED old backup(s)."
 fi

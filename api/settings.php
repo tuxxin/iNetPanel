@@ -95,7 +95,7 @@ switch ($action) {
             }
         }
         // Rebuild system update cron (/etc/cron.d/lamp_update) if schedule changed
-        $cronKeys = ['update_cron_enabled', 'update_cron_time', 'backup_cron_time', 'auto_update_enabled', 'auto_update_time'];
+        $cronKeys = ['update_cron_enabled', 'update_cron_time', 'backup_enabled', 'backup_cron_time', 'auto_update_enabled', 'auto_update_time'];
         if (array_intersect($cronKeys, $saved)) {
             // System update cron
             $updateEnabled = DB::setting('update_cron_enabled', '1');
@@ -110,10 +110,15 @@ switch ($action) {
             $writeCron('lamp_update', $cronContent);
 
             // Backup cron
+            $backupEnabled = DB::setting('backup_enabled', '1');
             $backupTime = DB::setting('backup_cron_time', '03:00');
             [$bHour, $bMin] = array_pad(explode(':', $backupTime), 2, '00');
-            $backupCron = "# iNetPanel managed — account backups\n"
-                . "{$bMin} {$bHour} * * * root /root/scripts/backup_accounts.sh >> /var/log/lamp_backup.log 2>&1\n";
+            if ($backupEnabled === '1') {
+                $backupCron = "# iNetPanel managed — account backups\n"
+                    . "{$bMin} {$bHour} * * * root /root/scripts/backup_accounts.sh >> /var/log/lamp_backup.log 2>&1\n";
+            } else {
+                $backupCron = "# iNetPanel managed — account backups (disabled)\n";
+            }
             $writeCron('lamp_backup', $backupCron);
 
             // Panel auto-update cron
