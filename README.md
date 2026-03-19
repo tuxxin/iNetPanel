@@ -79,6 +79,7 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 | **Features** | [Full feature list](https://inetpanel.tuxxin.com/features) |
 | **Compare** | [vs cPanel, Plesk, CloudPanel](https://inetpanel.tuxxin.com/compare) |
 | **Documentation** | [Install guide & docs](https://inetpanel.tuxxin.com/docs) |
+| **Install** | [Install guide](https://inetpanel.tuxxin.com/install) |
 | **Issues** | [Report a bug](https://github.com/tuxxin/iNetPanel/issues) |
 
 ---
