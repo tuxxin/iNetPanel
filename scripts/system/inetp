@@ -115,6 +115,24 @@ case "$COMMAND" in
     db_size)           bash "$SCRIPTS_DIR/db_size.sh"           "$@" ;;
     get_account_hash)  bash "$SCRIPTS_DIR/get_account_hash.sh"  "$@" ;;
     verify_account)    python3 "$SCRIPTS_DIR/verify_account_credentials.py" "$@" ;;
+
+    # Server health & diagnostics
+    status)            bash "$SCRIPTS_DIR/status.sh"           "$@" ;;
+    benchmark)         bash "$SCRIPTS_DIR/benchmark.sh"        "$@" ;;
+    speedtest)         bash "$SCRIPTS_DIR/speedtest.sh"        "$@" ;;
+    dns_check)         bash "$SCRIPTS_DIR/dns_check.sh"        "$@" ;;
+    disk_report)       bash "$SCRIPTS_DIR/disk_report.sh"      "$@" ;;
+
+    # Security
+    audit)             bash "$SCRIPTS_DIR/audit.sh"            "$@" ;;
+    malware_scan)      bash "$SCRIPTS_DIR/malware_scan.sh"     "$@" ;;
+
+    # Maintenance
+    reset_password)    bash "$SCRIPTS_DIR/reset_password.sh"   "$@" ;;
+    cleanup)           bash "$SCRIPTS_DIR/cleanup.sh"          "$@" ;;
+    rotate_logs)       bash "$SCRIPTS_DIR/rotate_logs.sh"      "$@" ;;
+    db_repair)         bash "$SCRIPTS_DIR/db_repair.sh"        "$@" ;;
+
     list)
         echo -e "${BOLD}Hosted Accounts:${NC}"
         FOUND=0
@@ -169,6 +187,24 @@ case "$COMMAND" in
         echo -e "    ${GREEN}fix_permissions${NC}   Reset file/directory permissions for a user"
         echo -e "    ${GREEN}ssl_manage${NC}        SSL certificate management (issue, revoke, renew, status)"
         echo -e "    ${GREEN}list${NC}              List all active accounts and ports"
+        echo ""
+        echo -e "  ${BOLD}Server Health & Diagnostics:${NC}"
+        echo -e "    ${GREEN}status${NC}            Server health summary (CPU, RAM, disk, services)"
+        echo -e "    ${GREEN}benchmark${NC}         Quick server benchmark (disk, network, PHP, MySQL)"
+        echo -e "    ${GREEN}speedtest${NC}         Network bandwidth test"
+        echo -e "    ${GREEN}dns_check${NC}         DNS, SSL, and connectivity diagnostics for a domain"
+        echo -e "    ${GREEN}disk_report${NC}       Disk usage breakdown by user/domain"
+        echo ""
+        echo -e "  ${BOLD}Security:${NC}"
+        echo -e "    ${GREEN}audit${NC}             Security audit (permissions, ports, SSL, SSH, PHP)"
+        echo -e "    ${GREEN}malware_scan${NC}      Scan PHP files for backdoors and webshells"
+        echo ""
+        echo -e "  ${BOLD}Maintenance:${NC}"
+        echo -e "    ${GREEN}reset_password${NC}    Reset FTP/SSH/MySQL password for a user"
+        echo -e "    ${GREEN}cleanup${NC}           Remove temp files, old logs, orphaned FPM pools"
+        echo -e "    ${GREEN}rotate_logs${NC}       Force log rotation for all system and user logs"
+        echo -e "    ${GREEN}db_repair${NC}         Check and repair MariaDB tables + SQLite vacuum"
+        echo ""
         echo -e "    ${GREEN}-v${NC}                Show version and system info"
         echo ""
         ;;

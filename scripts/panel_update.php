@@ -254,6 +254,12 @@ if ($pyScripts) {
     log_msg('Deployed ' . count($pyScripts) . ' Python script(s) to /root/scripts/');
 }
 
+// Install stats collector cron (every minute)
+$statsCron = "/etc/cron.d/inetpanel_stats";
+file_put_contents($statsCron, "# iNetPanel stats collector — auto-managed by panel_update.php\n* * * * * root /root/scripts/stats_collector.sh > /dev/null 2>&1\n");
+chmod($statsCron, 0644);
+log_msg('Installed stats collector cron job');
+
 // Rebuild sudoers file to match current requirements
 $sudoersFile = '/etc/sudoers.d/inetpanel';
 $sudoersContent = <<<'SUDOERS'
@@ -286,6 +292,7 @@ www-data ALL=(root) NOPASSWD: /usr/bin/dpkg
 www-data ALL=(root) NOPASSWD: /bin/sed
 www-data ALL=(root) NOPASSWD: /bin/bash /tmp/inetp_hook_*
 www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf
+www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetp_motd /etc/motd
 www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetp_ht_* /home/*
 www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetp_pw_* /home/*
 www-data ALL=(root) NOPASSWD: /bin/cat /home/*/.htaccess
@@ -347,6 +354,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['pma_user'])) {
 }
 
 // Fallback: show login form (prevents redirect loop with PMA signon auth)
+$prefill = htmlspecialchars($_GET['prefill'] ?? '', ENT_QUOTES);
 ?>
 <!DOCTYPE html>
 <html><head><title>phpMyAdmin Login</title>
@@ -359,7 +367,7 @@ button{width:100%;padding:10px;background:#ff7e00;color:#fff;border:none;border-
 button:hover{background:#e06f00;}</style></head>
 <body><div class="card"><h2>phpMyAdmin</h2>
 <form method="post">
-<label>Username</label><input type="text" name="pma_user" required autofocus>
+<label>Username</label><input type="text" name="pma_user" value="<?= $prefill ?>" required autofocus>
 <label>Password</label><input type="password" name="pma_pass">
 <button type="submit">Log In</button>
 </form></div></body></html>
@@ -398,6 +406,29 @@ SIGNON;
             file_put_contents($pmaSecure, $sec);
             log_msg('Patched conf.d/pma_secure.php for signon auth');
         }
+    }
+}
+
+// Fix FTP passive ports in firewall (GitHub issue #8)
+// Existing installations may be missing the passive port range
+if (shell_exec('command -v firewall-cmd 2>/dev/null')) {
+    $ports = shell_exec('firewall-cmd --list-ports 2>/dev/null') ?: '';
+    if (strpos($ports, '40000-50000') === false) {
+        shell_exec('firewall-cmd --permanent --add-port=40000-50000/tcp 2>/dev/null');
+        shell_exec('firewall-cmd --reload 2>/dev/null');
+        log_msg('Added FTP passive port range 40000-50000/tcp to firewall');
+    }
+}
+
+// Fix vsftpd config: add connection limits and timeouts if missing
+$vsftpConf = '/etc/vsftpd.conf';
+if (file_exists($vsftpConf)) {
+    $vsftpContent = file_get_contents($vsftpConf);
+    if (strpos($vsftpContent, 'max_clients') === false) {
+        $vsftpContent .= "\n# Connection limits and timeouts (added by panel update)\nmax_clients=200\nmax_per_ip=20\ndata_connection_timeout=600\nidle_session_timeout=600\n";
+        file_put_contents($vsftpConf, $vsftpContent);
+        shell_exec('systemctl restart vsftpd 2>/dev/null');
+        log_msg('Added vsftpd connection limits and timeouts');
     }
 }
 

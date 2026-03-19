@@ -49,10 +49,29 @@ mkdir -p "$WG_PEERS_DIR"
 
 # Read server info from wg0.conf
 SERVER_PRIVKEY=$(grep '^PrivateKey' "$WG_CONF" | awk '{print $3}')
-SERVER_PUBKEY=$(echo "$SERVER_PRIVKEY" | wg pubkey)
+SERVER_PUBKEY=$(echo "$SERVER_PRIVKEY" | wg pubkey 2>/dev/null)
 WG_PORT=$(grep '^ListenPort' "$WG_CONF" | awk '{print $3}')
 SERVER_IP=$(grep '^Address' "$WG_CONF" | awk '{print $3}' | cut -d'/' -f1)
+
+# Validate parsed config values
+if [ -z "$SERVER_PRIVKEY" ]; then
+    echo -e "${RED}Error: could not read PrivateKey from ${WG_CONF}${NC}"; exit 1
+fi
+if [ -z "$SERVER_PUBKEY" ]; then
+    echo -e "${RED}Error: could not derive public key from server private key${NC}"; exit 1
+fi
+if [ -z "$WG_PORT" ]; then
+    echo -e "${RED}Error: could not read ListenPort from ${WG_CONF}${NC}"; exit 1
+fi
+if [ -z "$SERVER_IP" ]; then
+    echo -e "${RED}Error: could not read Address from ${WG_CONF}${NC}"; exit 1
+fi
+
 WG_NET=$(echo "$SERVER_IP" | sed 's/\.[0-9]*$//')  # e.g. 10.10.0
+
+if [ -z "$WG_NET" ]; then
+    echo -e "${RED}Error: could not determine WireGuard subnet from Address ${SERVER_IP}${NC}"; exit 1
+fi
 
 # Read endpoint from panel DB or fall back to detecting server IP
 WG_ENDPOINT=""
@@ -77,7 +96,7 @@ if [ "$ACTION" = "add" ]; then
     # Assign next available IP in subnet
     LAST_OCTET=1
     while IFS= read -r existing; do
-        OCT=$(echo "$existing" | grep -oP "${WG_NET}\.\K[0-9]+" | sort -n | tail -1)
+        OCT=$(echo "$existing" | grep -oP "(?<![0-9])${WG_NET//./\\.}\.\K[0-9]+" | sort -n | tail -1)
         [ -n "$OCT" ] && [ "$OCT" -gt "$LAST_OCTET" ] && LAST_OCTET="$OCT"
     done < <(grep 'AllowedIPs' "$WG_CONF" 2>/dev/null)
     PEER_IP="${WG_NET}.$((LAST_OCTET + 1))"
@@ -115,7 +134,9 @@ SERVERBLOCK
 
     # Reload WireGuard config live (no full restart needed)
     if systemctl is-active --quiet wg-quick@wg0; then
-        wg addconf wg0 <(echo -e "[Peer]\nPublicKey = ${PEER_PUBKEY}\nPresharedKey = ${PEER_PSK}\nAllowedIPs = ${PEER_IP}/32") 2>/dev/null
+        if ! wg addconf wg0 <(echo -e "[Peer]\nPublicKey = ${PEER_PUBKEY}\nPresharedKey = ${PEER_PSK}\nAllowedIPs = ${PEER_IP}/32") 2>/dev/null; then
+            echo -e "${YELLOW}Warning: live config update failed. Peer is saved but WireGuard may need a restart.${NC}" >&2
+        fi
     fi
 
     # Save to panel DB (escape single quotes for SQL safety)
@@ -150,17 +171,36 @@ if [ "$ACTION" = "remove" ]; then
 
     PEER_PUBKEY=$(grep '^PublicKey' "$PEER_CONF" | awk '{print $3}')
 
-    # Remove [Peer] block from wg0.conf
+    # Remove [Peer] block from wg0.conf (line-by-line, safer than regex)
     python3 - "$WG_CONF" "$PEER_PUBKEY" << 'PYEOF'
 import sys, re
-conf_path, pubkey = sys.argv[1], sys.argv[2]
-with open(conf_path) as f:
-    content = f.read()
-# Remove the [Peer] block with this pubkey (including preceding # Peer: comment)
-pattern = r'(\n# Peer: [^\n]*\n)?\[Peer\][^\[]*PublicKey\s*=\s*' + re.escape(pubkey) + r'[^\[]*'
-new_content = re.sub(pattern, '', content, flags=re.DOTALL)
-with open(conf_path, 'w') as f:
-    f.write(new_content)
+conf_file = sys.argv[1]
+pubkey = sys.argv[2]
+with open(conf_file) as f:
+    lines = f.readlines()
+new_lines = []
+skip = False
+for line in lines:
+    if line.strip().startswith('[Peer]'):
+        # Reset skip when entering a new peer block
+        skip = False
+    if skip:
+        continue
+    if line.strip().startswith('PublicKey') and pubkey in line:
+        # Remove this peer block - go back to remove [Peer] line and any comment before it
+        while new_lines and (new_lines[-1].strip().startswith('[Peer]') or new_lines[-1].strip().startswith('# Peer:')):
+            new_lines.pop()
+        # Also remove trailing blank line before the comment/[Peer] if present
+        while new_lines and new_lines[-1].strip() == '':
+            new_lines.pop()
+        skip = True
+        continue
+    new_lines.append(line)
+# Ensure file ends with a newline
+if new_lines and not new_lines[-1].endswith('\n'):
+    new_lines[-1] += '\n'
+with open(conf_file, 'w') as f:
+    f.writelines(new_lines)
 PYEOF
 
     # Remove peer from live WireGuard config
@@ -190,7 +230,7 @@ if [ "$ACTION" = "list" ]; then
         [ -f "$conf" ] || continue
         NAME=$(basename "$conf" .conf)
         IP=$(grep '^Address' "$conf" | awk '{print $3}')
-        PUBKEY=$(grep '^PublicKey' "${WG_PEERS_DIR}/../wg0.conf" 2>/dev/null | grep -A1 "# Peer: ${NAME}" | grep PublicKey | awk '{print $3}')
+        PUBKEY=$(grep '^PublicKey' "$WG_CONF" 2>/dev/null | grep -A1 "# Peer: ${NAME}" | grep PublicKey | awk '{print $3}')
         echo -e "  ${GREEN}${NAME}${NC}  →  ${IP}"
         FOUND=$((FOUND + 1))
     done

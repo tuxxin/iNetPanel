@@ -103,9 +103,9 @@ $view = new View(THEME_PATH);
 // 6. ROUTE DEFINITIONS
 // -------------------------------------------------------------------
 
-// Root redirect
+// Root — blank page (no redirect, limits exposure and indexing)
 $router->add('/', function () {
-    header('Location: /admin/dashboard');
+    http_response_code(403);
     exit;
 });
 
@@ -139,9 +139,9 @@ $router->add('/logout', function () {
 // ADMIN ROUTES — all guarded by Auth::check()
 // -------------------------------------------------------------------
 
-$router->add('/admin', function () use ($view) {
-    Auth::check();
-    $view->renderAdmin('Dashboard', SRC_PATH . '/dashboard.php');
+$router->add('/admin', function () {
+    header('Location: /login');
+    exit;
 });
 $router->add('/admin/dashboard', function () use ($view) {
     Auth::check();

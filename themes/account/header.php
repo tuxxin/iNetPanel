@@ -33,12 +33,24 @@
         <a href="/user/dashboard" class="nav-brand"><img src="/assets/img/iNetPanel-Logo.webp" alt="iNetPanel"></a>
         <span class="text-white-50 d-none d-md-inline">|</span>
         <span class="nav-domain d-none d-md-inline">
-            <i class="fas fa-globe me-1" style="color: var(--brand-cyan);"></i>
-            <?= htmlspecialchars(AccountAuth::domain() ?? '') ?>
+            <i class="fas fa-user me-1" style="color: var(--brand-cyan);"></i>
+            <?= htmlspecialchars(AccountAuth::username() ?? '') ?>
         </span>
     </div>
     <div class="d-flex align-items-center gap-3">
-        <span class="text-white-50 small d-none d-sm-inline"><i class="fas fa-clock me-1"></i><?= date('g:i A T') ?></span>
+        <span class="text-white-50 small d-none d-sm-inline" id="live-clock"><i class="fas fa-clock me-1"></i><?= date('g:i:s A T') ?></span>
+        <script>
+        (function(){
+            const tz = <?= json_encode(date_default_timezone_get()) ?>;
+            const el = document.getElementById('live-clock');
+            if (!el) return;
+            setInterval(function(){
+                const now = new Date().toLocaleTimeString('en-US', {timeZone: tz, hour:'numeric', minute:'2-digit', second:'2-digit', hour12:true});
+                const tzAbbr = new Date().toLocaleTimeString('en-US', {timeZone: tz, timeZoneName:'short'}).split(' ').pop();
+                el.innerHTML = '<i class="fas fa-clock me-1"></i>' + now + ' ' + tzAbbr;
+            }, 1000);
+        })();
+        </script>
         <a href="/user/logout" class="btn btn-sm btn-outline-light opacity-75">
             <i class="fas fa-sign-out-alt me-1"></i>Logout
         </a>

@@ -9,13 +9,15 @@
 #        backup_accounts.sh --single <username>
 # ==============================================================================
 BACKUP_DIR="/backup"
-RETENTION_DAYS=3        # Change to adjust how many days of backups to keep
+PANEL_DB="/var/www/inetpanel/db/inetpanel.db"
+# Read retention from panel DB, fallback to 3
+RETENTION_DAYS=$(sqlite3 "$PANEL_DB" "SELECT value FROM settings WHERE key='backup_retention'" 2>/dev/null)
+RETENTION_DAYS=${RETENTION_DAYS:-3}
 if [ -f /root/.mysql_root_pass ]; then
     DB_ROOT_PASS=$(cat /root/.mysql_root_pass)
 else
     DB_ROOT_PASS=""
 fi
-PANEL_DB="/var/www/inetpanel/db/inetpanel.db"
 DATE=$(date +%Y-%m-%d)
 
 # Disable colors when not running in a terminal (e.g. cron)
@@ -135,7 +137,8 @@ else
         rm -f "$old"
         echo -e "  Removed: $(basename "$old")"
         REMOVED=$((REMOVED + 1))
-    done < <(find "$BACKUP_DIR" -name "*.tgz" -mtime +"$RETENTION_DAYS" -print0)
+    MTIME_DAYS=$((RETENTION_DAYS - 1))
+    done < <(find "$BACKUP_DIR" -name "*.tgz" -mtime +"$MTIME_DAYS" -print0)
     echo -e "  Removed $REMOVED old backup(s)."
 fi
 

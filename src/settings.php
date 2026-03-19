@@ -88,15 +88,31 @@ function s(string $key, string $default = ''): string {
                 <div class="modal fade" id="updateOutputModal" tabindex="-1">
                     <div class="modal-dialog modal-lg">
                         <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title"><i class="fas fa-terminal me-2"></i>Update Output</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            <div class="modal-header bg-success text-white">
+                                <h5 class="modal-title"><i class="fas fa-check-circle me-2"></i>Update Complete</h5>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                             </div>
                             <div class="modal-body">
-                                <pre id="update-output" class="bg-dark text-light p-3 rounded small" style="max-height:400px;overflow-y:auto"></pre>
+                                <!-- Changelog section -->
+                                <div id="changelog-section" class="d-none">
+                                    <h6 class="fw-bold mb-2"><i class="fas fa-list-ul me-1"></i>What's New</h6>
+                                    <div id="update-changelog" class="border rounded p-3 mb-3" style="max-height:350px;overflow-y:auto;font-size:.9rem;line-height:1.6;"></div>
+                                </div>
+                                <!-- Collapsible raw output -->
+                                <div>
+                                    <a class="small text-muted" data-bs-toggle="collapse" href="#update-output-wrap" role="button">
+                                        <i class="fas fa-terminal me-1"></i>Show update log
+                                    </a>
+                                    <div class="collapse mt-2" id="update-output-wrap">
+                                        <pre id="update-output" class="bg-dark text-light p-3 rounded small" style="max-height:250px;overflow-y:auto"></pre>
+                                    </div>
+                                </div>
                             </div>
                             <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                <a id="changelog-gh-link" href="#" target="_blank" class="btn btn-outline-secondary btn-sm d-none">
+                                    <i class="fab fa-github me-1"></i>View on GitHub
+                                </a>
+                                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Done</button>
                             </div>
                         </div>
                     </div>
@@ -224,13 +240,20 @@ function s(string $key, string $default = ''): string {
                         <div class="col-md-6">
                             <label class="form-label fw-semibold">Server Hostname</label>
                             <div class="input-group">
-                                <input type="text" class="form-control" id="server-hostname" value="<?= htmlspecialchars(gethostname()) ?>" placeholder="e.g. myserver.example.com">
+                                <input type="text" class="form-control" id="server-hostname" value="<?= htmlspecialchars(DB::setting('server_hostname', gethostname())) ?>" placeholder="e.g. panel.example.com">
+                                <?php if (DB::setting('cf_enabled', '0') === '1'): ?>
+                                <button class="btn btn-outline-secondary" type="button" id="verify-hostname-btn" onclick="verifyHostname()">
+                                    <i class="fas fa-check-circle me-1"></i> Verify
+                                </button>
+                                <?php endif; ?>
                                 <button class="btn btn-outline-primary" type="button" id="save-hostname-btn">
                                     <span class="spinner-border spinner-border-sm d-none me-1" id="hostname-spinner"></span>
                                     Apply
                                 </button>
                             </div>
-                            <div class="form-text">Changes the system hostname. A reboot is recommended after changing.</div>
+                            <div id="hostname-status"></div>
+                            <div id="server-ip-info" class="mt-2"></div>
+                            <div class="form-text">The DNS hostname used to access your panel. SSL will be issued automatically.</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-semibold">Timezone</label>
@@ -650,11 +673,11 @@ function loadWgPeers() {
             }
             tbody.innerHTML = data.data.map(p =>
                 `<tr>
-                    <td class="fw-medium small">${p.domain_name}</td>
+                    <td class="fw-medium small">${p.hosting_user}</td>
                     <td class="small text-muted">${p.peer_ip}</td>
                     <td class="small text-muted">${p.created_at ? p.created_at.substring(0,10) : '—'}</td>
                     <td class="text-end">
-                        <button class="btn btn-xs btn-outline-danger btn-sm py-0 px-1" onclick="removePeer('${p.domain_name}')" title="Remove"><i class="fas fa-times"></i></button>
+                        <button class="btn btn-xs btn-outline-danger btn-sm py-0 px-1" onclick="removePeer('${p.hosting_user}')" title="Remove"><i class="fas fa-times"></i></button>
                     </td>
                 </tr>`
             ).join('');
@@ -711,7 +734,10 @@ document.getElementById('add-peer-btn').addEventListener('click', function () {
 
 document.getElementById('add-peer-confirm-btn').addEventListener('click', function () {
     const name = document.getElementById('new-peer-name').value.trim();
-    if (!name) return;
+    if (!name || !/^[a-zA-Z0-9._-]+$/.test(name)) {
+        showAlert('Invalid peer name. Use letters, numbers, dots, underscores, and hyphens only.', 'warning');
+        return;
+    }
     const spinner = document.getElementById('add-peer-spinner');
     spinner.classList.remove('d-none');
     this.disabled = true;
@@ -807,6 +833,21 @@ if (checkNowBtn) {
     });
 }
 
+// Lightweight Markdown → HTML for GitHub release notes
+function mdToHtml(md) {
+    return md
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/^### (.+)$/gm, '<h6 class="fw-bold mt-3 mb-1">$1</h6>')
+        .replace(/^## (.+)$/gm, '<h5 class="fw-bold mt-3 mb-2">$1</h5>')
+        .replace(/^# (.+)$/gm, '<h4 class="fw-bold mt-3 mb-2">$1</h4>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/`([^`]+)`/g, '<code class="bg-light px-1 rounded">$1</code>')
+        .replace(/^- (.+)$/gm, '<li>$1</li>')
+        .replace(/(<li>.*<\/li>\n?)+/gs, '<ul class="mb-2">$&</ul>')
+        .replace(/\n{2,}/g, '<br><br>')
+        .replace(/\n/g, '<br>');
+}
+
 if (updateNowBtn) {
     updateNowBtn.addEventListener('click', function () {
         const spinner = document.getElementById('update-spinner');
@@ -819,6 +860,15 @@ if (updateNowBtn) {
                 spinner.classList.add('d-none');
                 this.disabled = false;
                 document.getElementById('update-output').textContent = data.output || '(no output)';
+                // Render changelog if available
+                const clSection = document.getElementById('changelog-section');
+                const clDiv = document.getElementById('update-changelog');
+                if (data.changelog && data.changelog.trim()) {
+                    clDiv.innerHTML = mdToHtml(data.changelog);
+                    clSection.classList.remove('d-none');
+                } else {
+                    clSection.classList.add('d-none');
+                }
                 new bootstrap.Modal(document.getElementById('updateOutputModal')).show();
             })
             .catch(() => { spinner.classList.add('d-none'); this.disabled = false; showAlert('Request failed.', 'danger'); });
@@ -868,6 +918,67 @@ document.getElementById('save-hostname-btn').addEventListener('click', function 
         })
         .catch(() => { spinner.classList.add('d-none'); this.disabled = false; showAlert('Request failed.', 'danger'); });
 });
+
+// ── Hostname verification (Cloudflare DNS) ──────────────────────────────────
+function verifyHostname() {
+    const hostname = document.getElementById('server-hostname').value.trim();
+    if (!hostname) return;
+    const btn = document.getElementById('verify-hostname-btn');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    const fd = new FormData();
+    fd.append('action', 'verify_hostname');
+    fd.append('hostname', hostname);
+    fetch('/api/settings', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            const el = document.getElementById('hostname-status');
+            if (data.exists) {
+                el.innerHTML = '<div class="alert alert-success py-2 mt-2 mb-0 small"><i class="fas fa-check-circle me-1"></i> DNS record found — points to <strong>' + data.ip + '</strong></div>';
+            } else if (data.zone_found) {
+                el.innerHTML = '<div class="alert alert-warning py-2 mt-2 mb-0 small"><i class="fas fa-exclamation-triangle me-1"></i> Zone found but no A record for this hostname. <button class="btn btn-sm btn-outline-success ms-2" onclick="createHostnameDns()"><i class="fas fa-plus me-1"></i>Create A Record</button></div>';
+            } else {
+                el.innerHTML = '<div class="alert alert-danger py-2 mt-2 mb-0 small"><i class="fas fa-times-circle me-1"></i> Zone not found in your Cloudflare account.</div>';
+            }
+        })
+        .catch(() => { document.getElementById('hostname-status').innerHTML = '<div class="alert alert-danger py-2 mt-2 mb-0 small">Verification failed.</div>'; })
+        .finally(() => { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Verify'; });
+}
+
+function createHostnameDns() {
+    const hostname = document.getElementById('server-hostname').value.trim();
+    const fd = new FormData();
+    fd.append('action', 'create_hostname_dns');
+    fd.append('hostname', hostname);
+    fetch('/api/settings', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            const el = document.getElementById('hostname-status');
+            if (data.success) {
+                el.innerHTML = '<div class="alert alert-success py-2 mt-2 mb-0 small"><i class="fas fa-check-circle me-1"></i> A record created successfully!</div>';
+            } else {
+                el.innerHTML = '<div class="alert alert-danger py-2 mt-2 mb-0 small">' + (data.message || 'Failed to create DNS record.') + '</div>';
+            }
+        })
+        .catch(() => { document.getElementById('hostname-status').innerHTML = '<div class="alert alert-danger py-2 mt-2 mb-0 small">Failed to create DNS record.</div>'; });
+}
+
+// ── Server IP detection ─────────────────────────────────────────────────────
+(function detectServerIp() {
+    const fd = new FormData();
+    fd.append('action', 'detect_ip');
+    fetch('/api/settings', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            const el = document.getElementById('server-ip-info');
+            if (!el) return;
+            const ip = data.ip || 'Unknown';
+            if (data.is_private) {
+                el.innerHTML = '<div class="alert alert-warning border-0 py-2 mb-0 small"><i class="fas fa-exclamation-triangle me-1"></i> <strong>Server IP: ' + ip + '</strong> (Private/Local Address)<br>This hostname will only resolve within your local network. For remote access to the Admin Panel, Client Portal, and phpMyAdmin, enable the VPN under the WireGuard tab.</div>';
+            } else {
+                el.innerHTML = '<div class="alert alert-success border-0 py-2 mb-0 small"><i class="fas fa-check-circle me-1"></i> <strong>Server IP: ' + ip + '</strong> (Public Address)</div>';
+            }
+        }).catch(() => {});
+})();
 
 document.getElementById('reboot-now-btn').addEventListener('click', function () {
     this.disabled = true;

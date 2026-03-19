@@ -104,7 +104,15 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'Invalid peer name.']); break;
         }
 
+        $existing = DB::fetchOne('SELECT id FROM wg_peers WHERE hosting_user = ?', [$name]);
+        if (!$existing) {
+            echo json_encode(['success' => false, 'error' => 'Peer does not exist.']); break;
+        }
+
         $result = Shell::run('wg_peer', ['--remove', '--name', $name]);
+        if ($result['success']) {
+            DB::delete('wg_peers', 'hosting_user = ?', [$name]);
+        }
 
         echo json_encode([
             'success' => $result['success'],
@@ -127,7 +135,10 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'Peer config not found.']); break;
         }
 
-        $config = file_get_contents($confPath);
+        $config = @file_get_contents($confPath);
+        if ($config === false) {
+            echo json_encode(['success' => false, 'error' => 'Failed to read peer config file.']); break;
+        }
         echo json_encode(['success' => true, 'config' => $config, 'name' => $name]);
         break;
 

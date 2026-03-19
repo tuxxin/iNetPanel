@@ -138,7 +138,8 @@ switch ($action) {
         $phpBin = 'php' . DB::setting('php_default_version', '8.4');
         $updateResult = Shell::exec('sudo ' . escapeshellarg($phpBin) . ' /var/www/inetpanel/scripts/panel_update.php --force', 'panel-update');
         $output = $updateResult['output'];
-        echo json_encode(['success' => true, 'output' => trim($output ?: 'No output.')]);
+        $changelog = DB::setting('panel_latest_changelog', '');
+        echo json_encode(['success' => true, 'output' => trim($output ?: 'No output.'), 'changelog' => $changelog]);
         break;
 
     case 'check_updates':
@@ -233,7 +234,84 @@ switch ($action) {
             $result = Shell::run('panel_ssl', [$hostname]);
             $sslIssued = $result['success'];
         }
+        // Update MOTD with new hostname
+        // Use hostname -I for internal/local IP (not the public-facing route IP)
+        $serverIp = trim(explode(' ', shell_exec("hostname -I 2>/dev/null") ?: '')[0]);
+        if (!$serverIp) $serverIp = trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: '');
+        $motdHost = $hostname ?: $serverIp;
+        $motdContent = "\n"
+            . "  iNetPanel — by Tuxxin.com\n"
+            . "  ───────────────────────────────\n"
+            . "  Admin Panel:    https://{$motdHost}/admin\n"
+            . "  Client Portal:  https://{$motdHost}/user\n"
+            . "  phpMyAdmin:     https://{$motdHost}:8443\n"
+            . "  ───────────────────────────────\n"
+            . "  Run  inetp --help  for CLI commands\n"
+            . "  ───────────────────────────────\n\n";
+        file_put_contents('/tmp/inetp_motd', $motdContent);
+        shell_exec('sudo /bin/cp /tmp/inetp_motd /etc/motd 2>/dev/null');
+        @unlink('/tmp/inetp_motd');
+
         echo json_encode(['success' => true, 'ssl_issued' => $sslIssued]);
+        break;
+
+    case 'detect_ip':
+        Auth::requireAdmin();
+        $ip = trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: '');
+        if (!$ip) $ip = trim(shell_exec("hostname -I | awk '{print \$1}'") ?: '');
+        $isPrivate = !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+        echo json_encode(['success' => true, 'ip' => $ip, 'is_private' => $isPrivate]);
+        break;
+
+    case 'verify_hostname':
+        Auth::requireAdmin();
+        $hostname = trim($_POST['hostname'] ?? '');
+        $cfEnabled = DB::setting('cf_enabled', '0') === '1';
+        if (!$hostname || !$cfEnabled) {
+            echo json_encode(['exists' => false, 'zone_found' => false]);
+            break;
+        }
+        $cf = new CloudflareAPI();
+        try {
+            $zoneId = $cf->findZoneForHostname($hostname);
+            if (!$zoneId) {
+                echo json_encode(['exists' => false, 'zone_found' => false]);
+                break;
+            }
+            $records = $cf->listDNSRecords($zoneId, ['type' => 'A', 'name' => $hostname]);
+            if (!empty($records['result'])) {
+                echo json_encode(['exists' => true, 'zone_found' => true, 'ip' => $records['result'][0]['content'], 'zone_id' => $zoneId]);
+            } else {
+                echo json_encode(['exists' => false, 'zone_found' => true, 'zone_id' => $zoneId]);
+            }
+        } catch (Throwable $e) {
+            echo json_encode(['exists' => false, 'zone_found' => false, 'error' => $e->getMessage()]);
+        }
+        break;
+
+    case 'create_hostname_dns':
+        Auth::requireAdmin();
+        $hostname = trim($_POST['hostname'] ?? '');
+        $cfEnabled = DB::setting('cf_enabled', '0') === '1';
+        if (!$hostname || !$cfEnabled) {
+            echo json_encode(['success' => false, 'message' => 'Cloudflare not configured.']);
+            break;
+        }
+        $cf = new CloudflareAPI();
+        $serverIp = trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: '');
+        try {
+            $zoneId = $cf->findZoneForHostname($hostname);
+            if (!$zoneId) {
+                echo json_encode(['success' => false, 'message' => 'Zone not found.']);
+                break;
+            }
+            $result = $cf->createDNSRecord($zoneId, [
+                'type' => 'A', 'name' => $hostname, 'content' => $serverIp, 'proxied' => true, 'ttl' => 1,
+            ]);
+            echo json_encode(['success' => $result['success'] ?? false, 'message' => $result['errors'][0]['message'] ?? '']);
+        } catch (Throwable $e) {
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
         break;
 
     case 'reboot':

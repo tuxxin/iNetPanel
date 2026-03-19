@@ -65,6 +65,138 @@ function validateDirPath(string $docRoot, string $dir): string|false
 
 switch ($action) {
 
+    // ── Domains ─────────────────────────────────────────────────────────
+
+    case 'list_domains':
+        $domains = DB::fetchAll(
+            'SELECT d.domain_name, d.document_root, d.php_version, d.port, d.status, d.created_at
+             FROM domains d JOIN hosting_users h ON d.hosting_user_id = h.id
+             WHERE h.username = ? ORDER BY d.domain_name',
+            [$username]
+        );
+        // Add disk usage per domain
+        foreach ($domains as &$d) {
+            $dr = $d['document_root'] ?? "/home/{$username}/{$d['domain_name']}/www";
+            $d['disk'] = trim(shell_exec('du -sh ' . escapeshellarg($dr) . ' 2>/dev/null | cut -f1') ?: '—');
+        }
+        unset($d);
+        echo json_encode(['success' => true, 'domains' => $domains]);
+        break;
+
+    // ── Databases ───────────────────────────────────────────────────────
+
+    case 'list_databases':
+        $rootPass = trim(shell_exec('sudo /bin/cat /root/.mysql_root_pass 2>/dev/null') ?: '');
+        $cmd = "mysql -u root -p" . escapeshellarg($rootPass) . " -N -e \"SHOW DATABASES LIKE '" . addslashes($username) . "\\_%'\" 2>/dev/null";
+        $output = [];
+        exec($cmd, $output);
+        $dbs = [];
+        foreach ($output as $dbName) {
+            $dbName = trim($dbName);
+            if (!$dbName) continue;
+            // Get size
+            $sizeCmd = "mysql -u root -p" . escapeshellarg($rootPass) . " -N -e \"SELECT IFNULL(ROUND(SUM(data_length + index_length), 0), 0) FROM information_schema.TABLES WHERE table_schema = '" . addslashes($dbName) . "'\" 2>/dev/null";
+            $sizeBytes = (int) trim(shell_exec($sizeCmd) ?: '0');
+            $dbs[] = ['name' => $dbName, 'size' => $sizeBytes, 'size_h' => $sizeBytes > 0 ? round($sizeBytes / 1024 / 1024, 2) . ' MB' : '0 MB'];
+        }
+        echo json_encode(['success' => true, 'databases' => $dbs]);
+        break;
+
+    case 'create_database':
+        $suffix = trim($_POST['suffix'] ?? '');
+        if (!$suffix || !preg_match('/^[a-zA-Z0-9_]{1,32}$/', $suffix)) {
+            echo json_encode(['success' => false, 'error' => 'Invalid database name. Use letters, numbers, and underscores only (max 32 chars).']);
+            break;
+        }
+        $dbName = $username . '_' . $suffix;
+        $rootPass = trim(shell_exec('sudo /bin/cat /root/.mysql_root_pass 2>/dev/null') ?: '');
+        // Check if exists
+        $exists = trim(shell_exec("mysql -u root -p" . escapeshellarg($rootPass) . " -N -e \"SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = '" . addslashes($dbName) . "'\" 2>/dev/null") ?: '');
+        if ($exists) {
+            echo json_encode(['success' => false, 'error' => "Database '{$dbName}' already exists."]);
+            break;
+        }
+        $sql = "CREATE DATABASE " . escapeshellarg($dbName) . "; GRANT ALL PRIVILEGES ON \`" . addslashes($dbName) . "\`.* TO '" . addslashes($username) . "'@'localhost'; FLUSH PRIVILEGES;";
+        $result = shell_exec("mysql -u root -p" . escapeshellarg($rootPass) . " -e " . escapeshellarg($sql) . " 2>&1");
+        if (stripos($result, 'error') !== false) {
+            echo json_encode(['success' => false, 'error' => 'Failed to create database: ' . trim($result)]);
+        } else {
+            echo json_encode(['success' => true, 'database' => $dbName]);
+        }
+        break;
+
+    // ── Multi-PHP ───────────────────────────────────────────────────────
+
+    case 'list_php_versions':
+        $installed = [];
+        foreach (glob('/usr/sbin/php-fpm*') as $bin) {
+            if (preg_match('/php-fpm(\d+\.\d+)/', $bin, $m)) {
+                $installed[] = $m[1];
+            }
+        }
+        sort($installed);
+        $domains = DB::fetchAll(
+            'SELECT d.domain_name, d.php_version FROM domains d
+             JOIN hosting_users h ON d.hosting_user_id = h.id
+             WHERE h.username = ? ORDER BY d.domain_name',
+            [$username]
+        );
+        $defaultVer = DB::setting('php_default_version', '8.4');
+        echo json_encode(['success' => true, 'installed' => $installed, 'default' => $defaultVer, 'domains' => $domains]);
+        break;
+
+    case 'set_php_version':
+        $targetDomain = trim($_POST['domain'] ?? '');
+        $newVer = trim($_POST['version'] ?? '');
+        if (!$targetDomain || !$newVer) {
+            echo json_encode(['success' => false, 'error' => 'Missing domain or version.']);
+            break;
+        }
+        // Verify domain belongs to user
+        if (!in_array($targetDomain, $ownedDomains, true)) {
+            echo json_encode(['success' => false, 'error' => 'Access denied.']);
+            break;
+        }
+        // Verify version is installed
+        if (!file_exists("/usr/sbin/php-fpm{$newVer}")) {
+            echo json_encode(['success' => false, 'error' => "PHP {$newVer} is not installed."]);
+            break;
+        }
+        $currentDefault = DB::setting('php_default_version', '8.4');
+        $domainRow = DB::fetchOne('SELECT php_version FROM domains WHERE domain_name = ?', [$targetDomain]);
+        $currentVer = ($domainRow['php_version'] ?? 'inherit') === 'inherit' ? $currentDefault : $domainRow['php_version'];
+
+        // Update domain record
+        DB::query('UPDATE domains SET php_version = ? WHERE domain_name = ?', [$newVer, $targetDomain]);
+
+        // Move FPM pool config
+        $oldPool = "/etc/php/{$currentVer}/fpm/pool.d/{$targetDomain}.conf";
+        $newPool = "/etc/php/{$newVer}/fpm/pool.d/{$targetDomain}.conf";
+        if (file_exists($oldPool) && $currentVer !== $newVer) {
+            $poolContent = file_get_contents($oldPool);
+            $poolContent = str_replace("php{$currentVer}-fpm", "php{$newVer}-fpm", $poolContent);
+            file_put_contents("/tmp/inetp_pool_{$targetDomain}", $poolContent);
+            shell_exec("sudo /bin/cp " . escapeshellarg("/tmp/inetp_pool_{$targetDomain}") . " " . escapeshellarg($newPool) . " 2>/dev/null");
+            shell_exec("sudo /bin/rm -f " . escapeshellarg($oldPool) . " 2>/dev/null");
+            @unlink("/tmp/inetp_pool_{$targetDomain}");
+        }
+
+        // Update Apache vhost socket
+        $vhost = "/etc/apache2/sites-available/{$targetDomain}.conf";
+        if (file_exists($vhost)) {
+            shell_exec("sudo /bin/sed -i 's|php{$currentVer}-fpm|php{$newVer}-fpm|g' " . escapeshellarg($vhost) . " 2>/dev/null");
+        }
+
+        // Send response BEFORE reloading — FPM reload kills the current PHP process
+        echo json_encode(['success' => true, 'version' => $newVer]);
+        if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+
+        // Reload services after response is sent
+        shell_exec("sudo /bin/systemctl reload php{$currentVer}-fpm 2>/dev/null");
+        shell_exec("sudo /bin/systemctl reload php{$newVer}-fpm 2>/dev/null");
+        shell_exec("sudo /bin/systemctl reload apache2 2>/dev/null");
+        break;
+
     // ── DNS ──────────────────────────────────────────────────────────────
 
     case 'dns':
@@ -244,6 +376,31 @@ switch ($action) {
         header('Content-Length: ' . filesize($path));
         readfile($path);
         exit;
+
+    // ── Image Optimizer ──────────────────────────────────────────────────
+
+    case 'optimize_images':
+        $dir = trim($_POST['dir'] ?? 'www/');
+        // Build the full path: /home/{username}/{domain}/{dir}
+        $siteDir = "/home/{$username}/{$reqDomain}";
+        $targetDir = realpath($siteDir . '/' . $dir);
+        if (!$targetDir || !str_starts_with($targetDir, $siteDir)) {
+            echo json_encode(['success' => false, 'error' => 'Invalid directory.']);
+            break;
+        }
+        // Build flags
+        $args = ['--dir' => $targetDir];
+        if (($_POST['dry_run'] ?? '0') === '1') $args[] = '--dry-run';
+        if (($_POST['verbose'] ?? '0') === '1') $args[] = '--verbose';
+
+        // Run optimize_images via inetp (runs as root via sudo)
+        $result = Shell::run('optimize_images', $args);
+        echo json_encode([
+            'success' => $result['success'],
+            'output'  => $result['output'] ?? '',
+            'error'   => $result['success'] ? null : ($result['output'] ?: 'Optimization failed.'),
+        ]);
+        break;
 
     // ── SSH Keys ──────────────────────────────────────────────────────────
 

@@ -137,6 +137,17 @@ inetp --help
 | `update` | Run system package update |
 | `panel_update` | Update iNetPanel from GitHub |
 | `service_monitor` | Enable/disable/run automatic service health checks |
+| `status` | Server health summary (CPU, RAM, disk, services, SSL, backups) |
+| `benchmark` | Quick server benchmark (disk I/O, network, PHP, MySQL) |
+| `speedtest` | Network bandwidth test with latency checks |
+| `dns_check` | DNS, SSL, and connectivity diagnostics for a domain |
+| `disk_report` | Disk usage breakdown by user/domain with top files |
+| `audit` | Security audit (permissions, ports, SSH, SSL, PHP, firewall) |
+| `malware_scan` | Scan PHP files for backdoors and webshells |
+| `reset_password` | Reset FTP/SSH/MySQL password for a hosting user |
+| `cleanup` | Remove temp files, old logs, orphaned FPM pools |
+| `rotate_logs` | Force log rotation for system and user logs |
+| `db_repair` | Check and repair MariaDB tables + SQLite vacuum |
 | `list` | List all hosting users and their domains |
 
 ---

@@ -10,8 +10,13 @@ header('Referrer-Policy: strict-origin-when-cross-origin');
 // --- LOCK FILE CHECK: redirect to login if already installed ---
 $projectRoot = dirname(__DIR__);
 $lockFile    = $projectRoot . '/db/.installed';
-if (file_exists($lockFile) && ($_SERVER['REQUEST_METHOD'] !== 'POST')) {
-    header('Location: /login');
+if (file_exists($lockFile)) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'Already installed.']);
+    } else {
+        header('Location: /login');
+    }
     exit;
 }
 
@@ -83,7 +88,114 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
 
-    // 2. INSTALL ACTION
+    // 2. DETECT SERVER IP
+    if ($_POST['action'] === 'detect_ip') {
+        $ip = trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: '');
+        if (!$ip) $ip = trim(shell_exec("hostname -I | awk '{print \$1}'") ?: '');
+        $isPrivate = !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+        echo json_encode(['ip' => $ip, 'is_private' => $isPrivate]);
+        exit;
+    }
+
+    // 3. VERIFY HOSTNAME DNS
+    if ($_POST['action'] === 'verify_hostname') {
+        $hostname = trim($_POST['hostname'] ?? '');
+        $email = $_POST['email'] ?? '';
+        $apiKey = $_POST['api_key'] ?? '';
+
+        if (!$hostname || !$email || !$apiKey) {
+            echo json_encode(['exists' => false, 'zone_found' => false, 'error' => 'Missing parameters']);
+            exit;
+        }
+
+        $cfHeaders = ["X-Auth-Email: {$email}", "X-Auth-Key: {$apiKey}", "Content-Type: application/json"];
+
+        // Extract zone from hostname (last two parts: example.com from panel.example.com)
+        $parts = explode('.', $hostname);
+        $zone = count($parts) >= 2 ? implode('.', array_slice($parts, -2)) : $hostname;
+
+        // Find zone ID
+        $ch = curl_init("https://api.cloudflare.com/client/v4/zones?name={$zone}");
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $cfHeaders, CURLOPT_TIMEOUT => 15]);
+        $resp = json_decode(curl_exec($ch), true);
+        curl_close($ch);
+
+        if (!($resp['success'] ?? false) || empty($resp['result'])) {
+            echo json_encode(['exists' => false, 'zone_found' => false]);
+            exit;
+        }
+
+        $zoneId = $resp['result'][0]['id'];
+
+        // Check for A record
+        $ch = curl_init("https://api.cloudflare.com/client/v4/zones/{$zoneId}/dns_records?type=A&name={$hostname}");
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $cfHeaders, CURLOPT_TIMEOUT => 15]);
+        $resp = json_decode(curl_exec($ch), true);
+        curl_close($ch);
+
+        if (!empty($resp['result'])) {
+            echo json_encode(['exists' => true, 'zone_found' => true, 'ip' => $resp['result'][0]['content'], 'zone_id' => $zoneId]);
+        } else {
+            echo json_encode(['exists' => false, 'zone_found' => true, 'zone_id' => $zoneId]);
+        }
+        exit;
+    }
+
+    // 4. CREATE HOSTNAME DNS RECORD
+    if ($_POST['action'] === 'create_hostname_dns') {
+        $hostname = trim($_POST['hostname'] ?? '');
+        $email = $_POST['email'] ?? '';
+        $apiKey = $_POST['api_key'] ?? '';
+
+        $cfHeaders = ["X-Auth-Email: {$email}", "X-Auth-Key: {$apiKey}", "Content-Type: application/json"];
+
+        // Detect server IP (public-facing for DNS record)
+        $serverIp = trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: '');
+        if (!$serverIp) $serverIp = trim(shell_exec("hostname -I 2>/dev/null | awk '{print \$1}'") ?: '');
+        if (!$serverIp) {
+            echo json_encode(['success' => false, 'message' => 'Could not detect server IP.']);
+            exit;
+        }
+
+        // Find zone ID
+        $parts = explode('.', $hostname);
+        $zone = count($parts) >= 2 ? implode('.', array_slice($parts, -2)) : $hostname;
+
+        $ch = curl_init("https://api.cloudflare.com/client/v4/zones?name={$zone}");
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $cfHeaders, CURLOPT_TIMEOUT => 15]);
+        $resp = json_decode(curl_exec($ch), true);
+        curl_close($ch);
+
+        if (empty($resp['result'])) {
+            echo json_encode(['success' => false, 'message' => 'Zone not found']);
+            exit;
+        }
+
+        $zoneId = $resp['result'][0]['id'];
+
+        // Create A record
+        $ch = curl_init("https://api.cloudflare.com/client/v4/zones/{$zoneId}/dns_records");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => $cfHeaders,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode([
+                'type' => 'A',
+                'name' => $hostname,
+                'content' => $serverIp,
+                'proxied' => true,
+                'ttl' => 1,
+            ]),
+        ]);
+        $resp = json_decode(curl_exec($ch), true);
+        curl_close($ch);
+
+        echo json_encode(['success' => $resp['success'] ?? false, 'message' => $resp['errors'][0]['message'] ?? '']);
+        exit;
+    }
+
+    // 5. INSTALL ACTION
     if ($_POST['action'] === 'install') {
         if (file_exists($lockFile)) {
             echo json_encode(['success' => false, 'message' => 'Panel is already installed.']);
@@ -200,7 +312,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     user TEXT,
                     ip_address TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )"
+                )",
+                "CREATE TABLE IF NOT EXISTS stats_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts INTEGER NOT NULL,
+                    cpu REAL NOT NULL DEFAULT 0,
+                    mem INTEGER NOT NULL DEFAULT 0,
+                    net_bytes INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT ''
+                )",
+                "CREATE INDEX IF NOT EXISTS idx_stats_ts ON stats_history(ts)"
             ];
 
             foreach ($queries as $sql) {
@@ -208,7 +329,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             // Set schema version to latest migration
-            $db->exec("INSERT OR REPLACE INTO settings (key, value, category) VALUES ('schema_version', '1', 'system')");
+            $db->exec("INSERT OR REPLACE INTO settings (key, value, category) VALUES ('schema_version', '2', 'system')");
 
             // --- STEP D: DATA SEEDING ---
             
@@ -231,7 +352,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             // Cloudflare Setup
-            $cfEnabled   = ($_POST['dns_mode'] === 'cloudflare') ? 1 : 0;
+            $cfEnabled   = (($_POST['dns_mode'] ?? '') === 'cloudflare') ? 1 : 0;
             $cfAccountId = trim($_POST['cf_account_id'] ?? '');
 
             // Settings
@@ -263,8 +384,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 }
             }
 
+            $serverHostnameDns = trim($_POST['server_hostname_dns'] ?? '');
+
             $settings = [
-                'server_hostname'   => ($ddnsHostname !== '') ? $ddnsHostname : $_POST['hostname'],
+                'server_hostname'   => ($serverHostnameDns !== '') ? $serverHostnameDns : (($ddnsHostname !== '') ? $ddnsHostname : $_POST['hostname']),
                 'timezone'          => $_POST['timezone'],
                 'admin_email'       => ($cfEnabled && !empty($_POST['cf_email'])) ? $_POST['cf_email'] : 'admin@' . $_POST['hostname'],
                 'default_theme'     => 'light',
@@ -334,14 +457,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($tzExit !== 0) {
                 error_log('iNetPanel install: timedatectl failed: ' . implode("\n", $tzOut));
             }
-            // Apply timezone to MariaDB (runtime + persistent config)
+            // Apply timezone to MariaDB (load tz tables first, then set runtime + persistent)
             $mysqlPass = trim(@file_get_contents('/root/.mysql_root_pass') ?: '');
+            exec('mysql_tzinfo_to_sql /usr/share/zoneinfo 2>/dev/null | mysql -u root -p' . escapeshellarg($mysqlPass) . ' mysql 2>&1');
             exec('mysql -u root -p' . escapeshellarg($mysqlPass) . ' -e ' . escapeshellarg("SET GLOBAL time_zone = '{$tz}'") . ' 2>&1', $mtzOut, $mtzExit);
-            @file_put_contents('/tmp/inetp_tz.cnf', "[mysqld]\ndefault_time_zone = {$tz}\n");
-            exec('sudo /bin/cp /tmp/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf 2>&1');
+            if ($mtzExit === 0) {
+                @file_put_contents('/tmp/inetp_tz.cnf', "[mysqld]\ndefault_time_zone = {$tz}\n");
+                exec('sudo /bin/cp /tmp/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf 2>&1');
+            }
 
-            // Apply system hostname (prefer DDNS hostname if set)
-            $sysHostname = ($ddnsHostname !== '') ? $ddnsHostname : ($_POST['hostname'] ?? '');
+            // Apply system hostname (prefer server_hostname_dns, then DDNS hostname)
+            $sysHostname = ($serverHostnameDns !== '') ? $serverHostnameDns : (($ddnsHostname !== '') ? $ddnsHostname : ($_POST['hostname'] ?? ''));
             if ($sysHostname && preg_match('/^[a-zA-Z0-9][a-zA-Z0-9.\-]*$/', $sysHostname)) {
                 $oldHostname = gethostname();
                 exec('sudo /usr/bin/hostnamectl set-hostname ' . escapeshellarg($sysHostname) . ' 2>&1', $hnOut, $hnExit);
@@ -359,6 +485,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     }
                 }
             }
+
+            // Generate MOTD — use internal IP, not public-facing route IP
+            $serverIp = trim(explode(' ', shell_exec("hostname -I 2>/dev/null") ?: '')[0]);
+            if (!$serverIp) $serverIp = trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: '');
+            $motdHost = $serverHostnameDns ?: $serverIp;
+            $motdContent = "\n"
+                . "  iNetPanel — by Tuxxin.com\n"
+                . "  ───────────────────────────────\n"
+                . "  Admin Panel:    https://{$motdHost}/admin\n"
+                . "  Client Portal:  https://{$motdHost}/user\n"
+                . "  phpMyAdmin:     https://{$motdHost}:8443\n"
+                . "  ───────────────────────────────\n"
+                . "  Run  inetp --help  for CLI commands\n"
+                . "  ───────────────────────────────\n\n";
+            file_put_contents('/tmp/inetp_motd', $motdContent);
+            shell_exec('sudo /bin/cp /tmp/inetp_motd /etc/motd 2>/dev/null');
+            @unlink('/tmp/inetp_motd');
 
             // Create Cloudflare Zero Trust Tunnel if CF is enabled + account ID provided
             if ($cfEnabled && $cfAccountId) {
@@ -429,7 +572,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             // Issue SSL for panel services (LE first, self-signed fallback)
-            $sslHostname = ($ddnsHostname !== '') ? $ddnsHostname : ($_POST['hostname'] ?? '');
+            $sslHostname = ($serverHostnameDns !== '') ? $serverHostnameDns : (($ddnsHostname !== '') ? $ddnsHostname : ($_POST['hostname'] ?? ''));
             if ($sslHostname && strpos($sslHostname, '.') !== false) {
                 exec('sudo /usr/local/bin/inetp panel_ssl ' . escapeshellarg($sslHostname) . ' 2>&1', $sslOut, $sslExit);
                 if ($sslExit !== 0) {
@@ -570,6 +713,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         <div class="step-dot" id="dot2">2</div>
         <div class="step-dot" id="dot3">3</div>
         <div class="step-dot" id="dot4">4</div>
+        <div class="step-dot" id="dot5">5</div>
+        <div class="step-dot" id="dot6">6</div>
     </div>
 
     <form id="installForm" onsubmit="return false;">
@@ -621,8 +766,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                            value="iNetPanel_01" id="serverHostname" maxlength="32">
                 </div>
                 <div class="form-text text-muted small">
-                    <i class="fas fa-info-circle me-1"></i> Used for your <strong>Zero Trust Tunnel</strong> name.
-                    <br>Allowed: <strong>A-Z, a-z, 0-9, _</strong> only.
+                    This name appears in the browser title bar and is used as your Cloudflare Tunnel identifier. Allowed: A-Z, a-z, 0-9, _ only.
                 </div>
             </div>
 
@@ -690,7 +834,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     <a href="#" class="small text-decoration-none" data-bs-toggle="modal" data-bs-target="#cfHelpModal">
                         <i class="fas fa-question-circle me-1"></i> Get API Key
                     </a>
-                    <button class="btn btn-sm btn-outline-primary" onclick="testCloudflareConnection()">
+                    <button class="btn btn-sm btn-outline-primary" onclick="testCloudflareConnection(this)">
                         <i class="fas fa-plug me-1"></i> Test Connection
                     </button>
                 </div>
@@ -703,9 +847,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </div>
             </div>
 
+            <div class="d-flex gap-2 mt-4">
+                <button class="btn btn-light border w-50" onclick="prevStep(2)">Back</button>
+                <button class="btn btn-brand w-50" id="btnStep3Next" onclick="validateStep3()">Next Step</button>
+            </div>
+        </div>
+
+        <!-- Step 4: DDNS & VPN (only shown when Cloudflare selected) -->
+        <div class="step-content" id="step4">
+            <h4 class="mb-4 text-center">DDNS & VPN</h4>
+
             <!-- CF DDNS -->
-            <div id="cfDdnsSection">
-            <hr class="my-3">
             <div class="mb-3">
                 <div class="d-flex align-items-center justify-content-between">
                     <div>
@@ -733,15 +885,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </div>
                 <input type="text" class="form-control form-control-sm mb-2" id="ddnsZoneId" placeholder="Cloudflare Zone ID (optional — auto-detected if blank)">
             </div>
-            </div><!-- /cfDdnsSection -->
+            <div class="alert alert-info border-0 py-2 small"><i class="fas fa-info-circle me-1"></i> DDNS is recommended only when VPN is enabled — it keeps your dynamic IP updated for VPN endpoint resolution.</div>
 
             <!-- WireGuard VPN -->
-            <hr class="my-3">
             <div class="mb-3">
                 <div class="d-flex align-items-center justify-content-between">
                     <div>
                         <label class="form-label mb-0">WireGuard VPN</label>
-                        <div class="form-text mt-0">Full server lockdown — only the WireGuard port is publicly open. SSH, FTP, panel, and phpMyAdmin are VPN-only. Public web traffic routes through Cloudflare Tunnel.</div>
+                        <div class="form-text mt-0">Enable VPN for secure remote access to the Admin Panel, Client Portal, FTP, and SSH. Without VPN, these services are only accessible locally or via Cloudflare Tunnel.</div>
                     </div>
                     <div class="form-check form-switch ms-3">
                         <input class="form-check-input" type="checkbox" id="wgEnabled" onchange="toggleWireGuard(this.checked)" style="width:2.5em;height:1.4em;">
@@ -764,32 +915,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 <input type="text" class="form-control form-control-sm" id="wgEndpoint" placeholder="Endpoint hostname (leave blank to use server IP)">
             </div>
 
-            <hr class="my-3">
-            <div class="alert alert-info border-0 shadow-sm mb-3">
-                <i class="fas fa-shield-halved me-2"></i>
-                <strong>Firewall:</strong> Firewalld + Fail2Ban are installed and active by default.
-                <br><span class="small text-muted">Recommended for public servers (dedicated, VPS, etc). Manage rules from the admin panel after setup.</span>
-            </div>
-
-            <div class="alert alert-info border-0 shadow-sm mb-0">
-                <i class="fas fa-lock me-2"></i>
-                <strong>SSL:</strong> Let's Encrypt certificates are automatically issued for each hosted domain via Cloudflare DNS.
-                <br><span class="small text-muted">All hosted sites use HTTPS. Certificates auto-renew daily. Manage from the admin panel after setup.</span>
-            </div>
-
             <div class="d-flex gap-2 mt-4">
-                <button class="btn btn-light border w-50" onclick="prevStep(2)">Back</button>
-                <button class="btn btn-brand w-50" id="btnStep3Next" onclick="validateStep3()">Next Step</button>
+                <button class="btn btn-light border w-50" onclick="prevStep(3)">Back</button>
+                <button class="btn btn-brand w-50" onclick="validateStep4()">Next Step</button>
             </div>
         </div>
 
-        <div class="step-content" id="step4">
+        <!-- Step 5: Server Hostname -->
+        <div class="step-content" id="step5">
+            <h4 class="mb-4 text-center">Server Hostname</h4>
+
+            <div class="mb-3">
+                <label class="form-label">Hostname</label>
+                <div class="input-group">
+                    <span class="input-group-text bg-light"><i class="fas fa-globe"></i></span>
+                    <input type="text" class="form-control" id="serverHostnameDns" placeholder="e.g. panel.example.com">
+                    <button class="btn btn-outline-primary" type="button" id="btnVerifyHostname" onclick="verifyHostname()" style="display:none;">
+                        <i class="fas fa-check-circle me-1"></i> Verify
+                    </button>
+                </div>
+                <div class="form-text">The DNS hostname used to access your panel. SSL certificate will be issued for this hostname.</div>
+                <div id="hostnameStatus"></div>
+            </div>
+
+            <div class="mb-3" id="serverIpInfo">
+                <!-- Populated by JS on step load -->
+            </div>
+
+            <div class="d-flex gap-2 mt-4">
+                <button class="btn btn-light border w-50" onclick="prevStep(prevStepFromStep5())">Back</button>
+                <button class="btn btn-brand w-50" id="btnStep5Next" onclick="validateStep5()">Complete Installation</button>
+            </div>
+        </div>
+
+        <!-- Step 6: Installation -->
+        <div class="step-content" id="step6">
             <div id="installSpinner" class="text-center py-4">
                 <div class="spinner-border text-primary mb-3" style="width:3rem;height:3rem" role="status"></div>
                 <h5 class="fw-bold mb-2">Installing iNetPanel...</h5>
                 <p class="small text-muted mb-3" id="installStage">Setting up your panel — this may take up to a minute...</p>
             </div>
-            
+
             <div id="installError" class="d-none text-center">
                 <div class="alert alert-danger border-0 shadow-sm text-start">
                     <h6 class="alert-heading fw-bold"><i class="fas fa-times-circle me-2"></i> Installation Failed</h6>
@@ -833,7 +999,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         username: '', password: '', hostname: '', timezone: '',
         dns_mode: 'cloudflare', cf_email: '', cf_key: '',
         ddns_enabled: '0', ddns_hostname: '', ddns_zone_id: '', ddns_interval: '5',
-        wg_enabled: '0', wg_port: '1443', wg_subnet: '10.10.0.0/24', wg_endpoint: '', cf_account_id: ''
+        wg_enabled: '0', wg_port: '1443', wg_subnet: '10.10.0.0/24', wg_endpoint: '', cf_account_id: '',
+        server_hostname_dns: ''
     };
 
     function toggleDDNS(on) {
@@ -893,6 +1060,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             d.innerHTML = '<i class="fas fa-check"></i>';
         }
         document.getElementById('dot'+step).classList.add('active');
+
+        // Step 5 initialization
+        if (step === 5) {
+            // Show/hide verify button based on CF mode
+            document.getElementById('btnVerifyHostname').style.display = installData.dns_mode === 'cloudflare' ? '' : 'none';
+
+            // Detect server IP
+            fetch('install.php', { method: 'POST', body: new URLSearchParams({ action: 'detect_ip' }) })
+                .then(r => r.json())
+                .then(data => {
+                    const ipDiv = document.getElementById('serverIpInfo');
+                    const ip = data.ip || 'Unknown';
+                    const isPrivate = data.is_private;
+                    if (isPrivate) {
+                        ipDiv.innerHTML = `<div class="alert alert-warning border-0 py-2 small">
+                            <i class="fas fa-exclamation-triangle me-1"></i>
+                            <strong>Server IP: ${ip}</strong> (Private/Local Address)
+                            <br>This hostname will only resolve within your local network. For remote access to the Admin Panel, Client Portal, and phpMyAdmin, go back and enable the VPN in Step 4.
+                        </div>`;
+                    } else {
+                        ipDiv.innerHTML = `<div class="alert alert-success border-0 py-2 small">
+                            <i class="fas fa-check-circle me-1"></i>
+                            <strong>Server IP: ${ip}</strong> (Public Address)
+                        </div>`;
+                    }
+                });
+        }
     }
 
     function selectDnsOption(option) {
@@ -901,13 +1095,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         document.getElementById('optManual').classList.toggle('selected', option !== 'cloudflare');
         document.getElementById('cloudflareContent').style.display = option === 'cloudflare' ? 'block' : 'none';
         document.getElementById('manualContent').style.display = option !== 'cloudflare' ? 'block' : 'none';
-        document.getElementById('cfDdnsSection').style.display = option === 'cloudflare' ? 'block' : 'none';
     }
 
     function checkStrength(p) {
         let s = 0; if(p.length > 5) s+=33; if(p.length > 8) s+=33; if(p.match(/[A-Z0-9]/)) s+=34;
         const b = document.getElementById('passStrengthBar');
         b.style.width = s+'%'; b.className = 'progress-bar ' + (s<50?'bg-danger':s<80?'bg-warning':'bg-success');
+    }
+
+    function prevStepFromStep5() {
+        return installData.dns_mode === 'cloudflare' ? 4 : 3;
     }
 
     // --- API & Install Logic ---
@@ -926,9 +1123,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         return fd;
     }
 
-    async function testCloudflareConnection() {
+    async function testCloudflareConnection(btn) {
         const fd = getCfFormData(); if(!fd) return;
-        const btn = event.target; const txt = btn.innerHTML;
+        const txt = btn.innerHTML;
         btn.disabled = true; btn.innerHTML = 'Testing...';
         try {
             const req = await fetch('install.php', { method:'POST', body:fd });
@@ -936,9 +1133,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if(res.success) {
                 document.getElementById('cfSuccessMsg').classList.remove('d-none');
                 document.getElementById('cfErrorMsg').classList.add('d-none');
-            } else { 
-                document.getElementById('cfErrorMsg').textContent = res.message; 
-                document.getElementById('cfErrorMsg').classList.remove('d-none'); 
+            } else {
+                document.getElementById('cfErrorMsg').textContent = res.message;
+                document.getElementById('cfErrorMsg').classList.remove('d-none');
                 document.getElementById('cfSuccessMsg').classList.add('d-none');
             }
         } catch(e) { alert("Connection Failed"); }
@@ -946,45 +1143,104 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 
     async function validateStep3() {
-        if(installData.dns_mode === 'cloudflare') {
-            const fd = getCfFormData(); if(!fd) return;
+        if (installData.dns_mode === 'cloudflare') {
+            const fd = getCfFormData(); if (!fd) return;
             const btn = document.getElementById('btnStep3Next');
             btn.disabled = true; btn.innerHTML = 'Verifying...';
             try {
-                const req = await fetch('install.php', { method:'POST', body:fd });
+                const req = await fetch('install.php', { method: 'POST', body: fd });
                 const res = await req.json();
-                if(res.success) {
-                    installData.cf_email      = document.getElementById('cfEmail').value;
-                    installData.cf_key        = document.getElementById('cfApiKey').value;
+                if (res.success) {
+                    installData.cf_email = document.getElementById('cfEmail').value;
+                    installData.cf_key = document.getElementById('cfApiKey').value;
                     installData.cf_account_id = document.getElementById('cfAccountId').value;
-                    runInstallation();
+                    showStep(4); // Go to DDNS/VPN step
                 } else {
                     document.getElementById('cfErrorMsg').textContent = res.message;
                     document.getElementById('cfErrorMsg').classList.remove('d-none');
                     btn.disabled = false; btn.innerHTML = 'Next Step';
                 }
-            } catch(e) { alert("Error"); btn.disabled = false; btn.innerHTML = 'Next Step'; }
-        } else { runInstallation(); }
+            } catch(e) { alert('Error'); btn.disabled = false; btn.innerHTML = 'Next Step'; }
+        } else {
+            showStep(5); // Skip DDNS/VPN, go directly to hostname
+        }
+    }
+
+    function validateStep4() {
+        // Collect DDNS values
+        if (document.getElementById('ddnsEnabled').checked) {
+            installData.ddns_enabled = '1';
+            installData.ddns_hostname = document.getElementById('ddnsHostname').value;
+            installData.ddns_zone_id = document.getElementById('ddnsZoneId').value;
+            installData.ddns_interval = document.getElementById('ddnsInterval').value;
+        }
+        // Collect WG values
+        if (document.getElementById('wgEnabled').checked) {
+            installData.wg_enabled = '1';
+            installData.wg_port = document.getElementById('wgPort').value;
+            installData.wg_subnet = document.getElementById('wgSubnet').value;
+            installData.wg_endpoint = document.getElementById('wgEndpoint').value;
+        }
+        showStep(5);
+    }
+
+    function validateStep5() {
+        installData.server_hostname_dns = document.getElementById('serverHostnameDns').value.trim();
+        runInstallation();
+    }
+
+    async function verifyHostname() {
+        const hostname = document.getElementById('serverHostnameDns').value.trim();
+        if (!hostname) { return; }
+        const btn = document.getElementById('btnVerifyHostname');
+        btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+        const fd = new FormData();
+        fd.append('action', 'verify_hostname');
+        fd.append('hostname', hostname);
+        fd.append('email', installData.cf_email);
+        fd.append('api_key', installData.cf_key);
+
+        try {
+            const req = await fetch('install.php', { method: 'POST', body: fd });
+            const res = await req.json();
+            const statusDiv = document.getElementById('hostnameStatus');
+            if (res.exists) {
+                statusDiv.innerHTML = '<div class="alert alert-success py-2 mt-2 small"><i class="fas fa-check-circle me-1"></i> DNS record found — points to ' + res.ip + '</div>';
+            } else if (res.zone_found) {
+                statusDiv.innerHTML = '<div class="alert alert-warning py-2 mt-2 small"><i class="fas fa-exclamation-triangle me-1"></i> Zone found but no A record for this hostname. <button class="btn btn-sm btn-outline-success ms-2" onclick="createHostnameDns()"><i class="fas fa-plus me-1"></i>Create A Record</button></div>';
+            } else {
+                statusDiv.innerHTML = '<div class="alert alert-danger py-2 mt-2 small"><i class="fas fa-times-circle me-1"></i> Zone not found in your Cloudflare account.</div>';
+            }
+        } catch(e) {
+            document.getElementById('hostnameStatus').innerHTML = '<div class="alert alert-danger py-2 mt-2 small">Verification failed.</div>';
+        }
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Verify';
+    }
+
+    async function createHostnameDns() {
+        const hostname = document.getElementById('serverHostnameDns').value.trim();
+        const fd = new FormData();
+        fd.append('action', 'create_hostname_dns');
+        fd.append('hostname', hostname);
+        fd.append('email', installData.cf_email);
+        fd.append('api_key', installData.cf_key);
+
+        try {
+            const req = await fetch('install.php', { method: 'POST', body: fd });
+            const res = await req.json();
+            if (res.success) {
+                document.getElementById('hostnameStatus').innerHTML = '<div class="alert alert-success py-2 mt-2 small"><i class="fas fa-check-circle me-1"></i> A record created successfully!</div>';
+            } else {
+                document.getElementById('hostnameStatus').innerHTML = '<div class="alert alert-danger py-2 mt-2 small">' + (res.message || 'Failed to create DNS record.') + '</div>';
+            }
+        } catch(e) {
+            document.getElementById('hostnameStatus').innerHTML = '<div class="alert alert-danger py-2 mt-2 small">Failed to create DNS record.</div>';
+        }
     }
 
     async function runInstallation() {
-        // Collect DDNS + WG values before going to step 4
-        if (document.getElementById('ddnsEnabled').checked) {
-            installData.ddns_enabled  = '1';
-            const ddnsHost = document.getElementById('ddnsHostname');
-            if (!ddnsHost.value) ddnsHost.value = document.getElementById('serverHostname').value;
-            installData.ddns_hostname = ddnsHost.value;
-            installData.ddns_zone_id  = document.getElementById('ddnsZoneId').value;
-            installData.ddns_interval = document.getElementById('ddnsInterval').value;
-        }
-        if (document.getElementById('wgEnabled').checked) {
-            installData.wg_enabled  = '1';
-            installData.wg_port     = document.getElementById('wgPort').value;
-            installData.wg_subnet   = document.getElementById('wgSubnet').value;
-            installData.wg_endpoint = document.getElementById('wgEndpoint').value;
-        }
-
-        showStep(4);
+        showStep(6);
         document.getElementById('installSpinner').classList.remove('d-none');
         document.getElementById('installError').classList.add('d-none');
 

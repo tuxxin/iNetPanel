@@ -149,11 +149,21 @@ $cpuClass = $cpuLoad > 2 ? 'danger' : ($cpuLoad > 1 ? 'warning' : 'success');
 
 <!-- Resource history chart -->
 <div class="card border-0 shadow-sm">
-    <div class="card-header bg-white py-3">
-        <h6 class="mb-0"><i class="fas fa-chart-line me-2 text-primary"></i>Resource History (last 60 polls)</h6>
+    <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="fas fa-chart-area me-2 text-primary"></i>Resource History</h6>
+        <div class="d-flex align-items-center gap-2">
+            <div class="btn-group btn-group-sm" id="range-btns">
+                <button class="btn btn-outline-primary active" data-range="hour">1 Hour</button>
+                <button class="btn btn-outline-primary" data-range="day">24 Hours</button>
+                <button class="btn btn-outline-primary" data-range="week">7 Days</button>
+            </div>
+            <span class="badge bg-light text-dark border" id="chart-cpu-now" style="font-size:.75rem;"><i class="fas fa-microchip me-1 text-primary"></i>CPU: —</span>
+            <span class="badge bg-light text-dark border" id="chart-mem-now" style="font-size:.75rem;"><i class="fas fa-memory me-1 text-success"></i>RAM: —</span>
+            <span class="badge bg-light text-dark border" id="chart-net-now" style="font-size:.75rem;"><i class="fas fa-network-wired me-1 text-info"></i>Net: —</span>
+        </div>
     </div>
     <div class="card-body">
-        <canvas id="resChart" height="80"></canvas>
+        <canvas id="resChart" height="90"></canvas>
     </div>
 </div>
 
@@ -199,42 +209,115 @@ document.addEventListener('DOMContentLoaded', function () {
             document.getElementById('dash-accounts').innerHTML = '<li class="list-group-item text-muted small ps-3">Account data unavailable</li>';
         });
 
-    // ── Resource chart (polling every 5s, stores last 60 points) ────────
-    const labels = [], cpuData = [], memData = [];
+    // ── Resource chart — history from DB + live polling ────────────────
+    let currentRange = 'hour';
+    const labels = [], cpuData = [], memData = [], netData = [];
+
     const ctx = document.getElementById('resChart').getContext('2d');
     const chart = new Chart(ctx, {
         type: 'line',
         data: {
             labels,
             datasets: [
-                { label: 'CPU Load (1m)', data: cpuData, borderColor: '#0050d5', backgroundColor: 'rgba(0,80,213,.07)', tension: 0.4, pointRadius: 0 },
-                { label: 'RAM %',         data: memData, borderColor: '#7a00d5', backgroundColor: 'rgba(122,0,213,.07)', tension: 0.4, pointRadius: 0 },
+                { label: 'CPU Load', data: cpuData, borderColor: '#0050d5', backgroundColor: 'rgba(0,80,213,.08)', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: true },
+                { label: 'RAM %', data: memData, borderColor: '#7a00d5', backgroundColor: 'rgba(122,0,213,.08)', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: true },
+                { label: 'Network KB/s', data: netData, borderColor: '#0891b2', backgroundColor: 'rgba(8,145,178,.06)', borderWidth: 1.5, tension: 0.4, pointRadius: 0, fill: true, yAxisID: 'y1' },
             ]
         },
         options: {
             animation: false,
+            interaction: { mode: 'index', intersect: false },
             scales: {
-                x: { display: false },
-                y: { beginAtZero: true, suggestedMax: 100, ticks: { callback: v => v + (v <= 10 ? '' : '%') } }
+                x: {
+                    display: true,
+                    ticks: { maxTicksLimit: 10, font: { size: 10 }, color: '#aaa' },
+                    grid: { display: false }
+                },
+                y: {
+                    beginAtZero: true,
+                    suggestedMax: 100,
+                    position: 'left',
+                    ticks: { callback: v => v + '%', font: { size: 10 }, color: '#aaa' },
+                    grid: { color: 'rgba(0,0,0,.04)' }
+                },
+                y1: {
+                    beginAtZero: true,
+                    position: 'right',
+                    ticks: { callback: v => v + ' KB/s', font: { size: 10 }, color: '#aaa' },
+                    grid: { drawOnChartArea: false }
+                }
             },
-            plugins: { legend: { position: 'top' } }
+            plugins: {
+                legend: { position: 'top', labels: { usePointStyle: true, pointStyle: 'circle', padding: 15, font: { size: 11 } } },
+                tooltip: {
+                    callbacks: {
+                        label: function(c) {
+                            if (c.datasetIndex === 0) return ' CPU Load: ' + c.raw;
+                            if (c.datasetIndex === 1) return ' RAM: ' + c.raw + '%';
+                            return ' Network: ' + c.raw + ' KB/s';
+                        }
+                    }
+                }
+            }
         }
     });
 
-    function pollStats() {
+    function fmtTs(ts, range) {
+        const d = new Date(ts * 1000);
+        if (range === 'week') return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        if (range === 'day') return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function loadHistory(range) {
+        currentRange = range;
+        fetch('/api/stats?action=history&range=' + range)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) return;
+                labels.length = 0; cpuData.length = 0; memData.length = 0; netData.length = 0;
+                data.points.forEach(p => {
+                    labels.push(fmtTs(p.ts, range));
+                    cpuData.push(p.cpu);
+                    memData.push(p.mem);
+                    netData.push(p.net);
+                });
+                chart.update('none');
+                if (!data.points.length) {
+                    labels.push('No data');
+                    cpuData.push(0); memData.push(0); netData.push(0);
+                    chart.update('none');
+                }
+            })
+            .catch(() => {});
+    }
+
+    // Range button handlers
+    document.querySelectorAll('#range-btns button').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('#range-btns button').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            loadHistory(this.dataset.range);
+        });
+    });
+
+    // Initial load + live badge polling
+    loadHistory('hour');
+
+    function pollLive() {
         fetch('/api/stats')
             .then(r => r.json())
             .then(data => {
                 if (!data.success) return;
-                labels.push(new Date().toLocaleTimeString());
-                cpuData.push(data.cpu);
-                memData.push(data.mem);
-                if (labels.length > 60) { labels.shift(); cpuData.shift(); memData.shift(); }
-                chart.update('none');
+                document.getElementById('chart-cpu-now').innerHTML = `<i class="fas fa-microchip me-1 text-primary"></i>CPU: ${data.cpu}`;
+                document.getElementById('chart-mem-now').innerHTML = `<i class="fas fa-memory me-1 text-success"></i>RAM: ${data.mem}%`;
             })
             .catch(() => {});
     }
-    pollStats();
-    setInterval(pollStats, 5000);
+    pollLive();
+    setInterval(pollLive, 15000);
+
+    // Refresh chart data every 60s to pick up new history points
+    setInterval(() => loadHistory(currentRange), 60000);
 });
 </script>

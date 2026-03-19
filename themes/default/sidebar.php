@@ -106,16 +106,21 @@
 
     <div class="sidebar-footer">
         <?php $panel_version = class_exists('Version') ? Version::display() : 'v0.107'; ?>
-        <div class="sidebar-version-block">
-            <div class="d-flex align-items-center gap-2">
-                <span class="version-label">iNetPanel</span>
-                <a href="https://github.com/tuxxin/iNetPanel" class="version-badge text-decoration-none d-flex align-items-center gap-1" target="_blank" title="GitHub">
-                    <i class="fab fa-github" style="font-size:0.7rem;"></i><?php echo htmlspecialchars($panel_version); ?>
-                </a>
+        <div class="d-flex align-items-center justify-content-between w-100">
+            <div class="sidebar-version-block">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="version-label">iNetPanel</span>
+                    <a href="https://github.com/tuxxin/iNetPanel" class="version-badge text-decoration-none d-flex align-items-center gap-1" target="_blank" title="GitHub">
+                        <i class="fab fa-github" style="font-size:0.7rem;"></i><?php echo htmlspecialchars($panel_version); ?>
+                    </a>
+                </div>
+                <div class="version-sub text-muted" style="font-size: 0.68rem; margin-top: 2px;">
+                    Powered by <a href="https://tuxxin.com" target="_blank" class="ticore-tag text-decoration-none">Tuxxin.com</a>
+                </div>
             </div>
-            <div class="version-sub text-muted" style="font-size: 0.68rem; margin-top: 2px;">
-                Powered by <a href="https://tuxxin.com" target="_blank" class="ticore-tag text-decoration-none">Tuxxin.com</a>
-            </div>
+            <a href="#" data-bs-toggle="modal" data-bs-target="#bmcModal" title="Support iNetPanel" style="font-size:1.4rem;color:#FFDD00;text-decoration:none;line-height:1;">
+                <i class="fas fa-mug-hot"></i>
+            </a>
         </div>
     </div>
 </div>
@@ -129,6 +134,31 @@ function sidebarReboot() {
         .catch(() => {});
 }
 </script>
+
+<!-- Buy Me a Coffee Modal -->
+<div class="modal fade" id="bmcModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header" style="background:#FFDD00;">
+                <h5 class="modal-title fw-bold"><i class="fas fa-mug-hot me-2"></i>Support iNetPanel</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <p class="small text-muted mb-3">iNetPanel is free and open source. If it saves you time, consider buying me a coffee!</p>
+                <div class="d-grid gap-2">
+                    <a href="https://buymeacoffee.com/Tuxxin" target="_blank" class="btn fw-bold" style="background:#FFDD00;color:#000;">
+                        <i class="fas fa-coffee me-1"></i> One-Time Support
+                    </a>
+                    <a href="https://buymeacoffee.com/Tuxxin" target="_blank" class="btn btn-outline-dark fw-bold">
+                        <i class="fas fa-heart me-1"></i> Monthly Supporter
+                    </a>
+                    <p class="small text-muted mt-1 mb-0" style="font-size:.7rem;">Select "Make this monthly" on the page</p>
+                </div>
+                <p class="small text-muted mt-3 mb-0">Thank you for your support!</p>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div class="modal fade" id="sidebarRestartModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">

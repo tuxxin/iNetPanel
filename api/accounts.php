@@ -189,6 +189,11 @@ switch ($action) {
         $result = Shell::run('delete_user', ['--username' => $username]);
         if ($result['success']) {
             DB::delete('hosting_users', 'username = ?', [$username]);
+            // Clean up WireGuard peer config files + live interface before DB delete
+            $wgPeer = DB::fetchOne('SELECT id FROM wg_peers WHERE hosting_user = ?', [$username]);
+            if ($wgPeer) {
+                Shell::run('wg_peer', ['--remove', '--name' => $username]);
+            }
             DB::delete('wg_peers', 'hosting_user = ?', [$username]);
         }
         echo json_encode(shellResult($result));
@@ -259,7 +264,10 @@ switch ($action) {
             if (DB::setting('wg_auto_peer', '0') === '1') {
                 $existingPeer = DB::fetchOne('SELECT id FROM wg_peers WHERE hosting_user = ?', [$username]);
                 if (!$existingPeer) {
-                    Shell::run('wg_peer', ['--add', '--name' => $username]);
+                    $peerResult = Shell::run('wg_peer', ['--add', '--name' => $username]);
+                    if (!$peerResult['success']) {
+                        DB::insert('logs', ['source' => 'wireguard', 'level' => 'ERROR', 'message' => "Auto-peer creation failed for {$username}", 'details' => $peerResult['output'] ?? '', 'user' => Auth::user()['username'] ?? 'system', 'created_at' => date('Y-m-d H:i:s')]);
+                    }
                 }
             }
 
@@ -479,7 +487,10 @@ switch ($action) {
             if (DB::setting('wg_auto_peer', '0') === '1') {
                 $existingPeer = DB::fetchOne('SELECT id FROM wg_peers WHERE hosting_user = ?', [$username]);
                 if (!$existingPeer) {
-                    Shell::run('wg_peer', ['--add', '--name' => $username]);
+                    $peerResult = Shell::run('wg_peer', ['--add', '--name' => $username]);
+                    if (!$peerResult['success']) {
+                        DB::insert('logs', ['source' => 'wireguard', 'level' => 'ERROR', 'message' => "Auto-peer creation failed for {$username}", 'details' => $peerResult['output'] ?? '', 'user' => Auth::user()['username'] ?? 'system', 'created_at' => date('Y-m-d H:i:s')]);
+                    }
                 }
             }
 
@@ -707,6 +718,10 @@ switch ($action) {
                 $delResult = Shell::run('delete_user', ['--username' => $username]);
                 if ($delResult['success']) {
                     DB::delete('hosting_users', 'username = ?', [$username]);
+                    $wgPeer = DB::fetchOne('SELECT id FROM wg_peers WHERE hosting_user = ?', [$username]);
+                    if ($wgPeer) {
+                        Shell::run('wg_peer', ['--remove', '--name' => $username]);
+                    }
                     DB::delete('wg_peers', 'hosting_user = ?', [$username]);
                 }
             }

@@ -46,24 +46,18 @@ if (!$serverIp) {
 }
 $sshPort = DB::setting('ssh_port', '1022');
 $isSubdomain = substr_count($domain, '.') > 1;
+
+// Internal IP for FTP/SSH section
+$internalIp = trim(explode(' ', shell_exec("hostname -I 2>/dev/null") ?: '')[0]);
 ?>
 
-<!-- Header: username + domain selector -->
+<!-- Header: username + status badge -->
 <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
     <div>
-        <h4 class="fw-bold mb-0"><i class="fas fa-user me-2 text-primary"></i><?= htmlspecialchars($username) ?></h4>
-        <span class="text-muted small">Account Dashboard</span>
+        <h4 class="fw-bold mb-0"><?= htmlspecialchars($username) ?></h4>
+        <p class="text-muted small mb-0">Account Dashboard</p>
     </div>
-    <div class="d-flex align-items-center gap-2">
-        <?php if (count($allDomains) > 1): ?>
-        <select class="form-select form-select-sm" style="width:auto" onchange="window.location.href='/user/dashboard?domain='+encodeURIComponent(this.value)">
-            <?php foreach ($allDomains as $d): ?>
-            <option value="<?= htmlspecialchars($d['domain_name']) ?>" <?= $d['domain_name'] === $domain ? 'selected' : '' ?>>
-                <?= htmlspecialchars($d['domain_name']) ?>
-            </option>
-            <?php endforeach; ?>
-        </select>
-        <?php endif; ?>
+    <div>
         <span class="badge bg-<?= $status === 'active' ? 'success' : 'warning text-dark' ?> rounded-pill fs-6 px-3 py-2">
             <i class="fas fa-circle me-1" style="font-size:0.5rem;vertical-align:middle;"></i><?= ucfirst($status) ?>
         </span>
@@ -74,9 +68,10 @@ $isSubdomain = substr_count($domain, '.') > 1;
 <ul class="nav nav-tabs mb-4" id="portal-nav">
     <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#p-overview"><i class="fas fa-home me-1"></i>Overview</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#p-database"><i class="fas fa-database me-1"></i>Database</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#p-ftp-ssh"><i class="fas fa-terminal me-1"></i>FTP / SSH</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#p-files"><i class="fas fa-file-code me-1"></i>File Manager</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#p-backups"><i class="fas fa-archive me-1"></i>Backups</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#p-optimize"><i class="fas fa-bolt me-1"></i>Optimize</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#p-multiphp"><i class="fas fa-code-branch me-1"></i>Multi-PHP</button></li>
     <?php if ($cfEnabled): ?>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#p-dns"><i class="fas fa-globe me-1"></i>DNS</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#p-email"><i class="fas fa-envelope me-1"></i>Email</button></li>
@@ -88,86 +83,50 @@ $isSubdomain = substr_count($domain, '.') > 1;
 
             <!-- ═══ OVERVIEW ═══ -->
             <div class="tab-pane fade show active" id="p-overview">
-                <h5 class="fw-bold mb-3"><i class="fas fa-home me-2 text-primary"></i>Account Overview</h5>
-                <div class="card border shadow-sm">
-                    <div class="card-body p-0">
-                        <table class="table table-sm mb-0">
-                            <tbody>
-                                <tr><td class="ps-4 text-muted fw-semibold" style="width:35%">Domain</td>
-                                    <td class="pe-4 fw-bold"><?= htmlspecialchars($domain) ?></td></tr>
-                                <tr><td class="ps-4 text-muted fw-semibold">PHP Version</td>
-                                    <td class="pe-4"><?= htmlspecialchars($phpVer) ?></td></tr>
-                                <tr><td class="ps-4 text-muted fw-semibold">Web Root</td>
-                                    <td class="pe-4"><code style="font-size:0.8rem"><?= htmlspecialchars($docRoot) ?></code></td></tr>
-                                <tr><td class="ps-4 text-muted fw-semibold">Disk Usage</td>
-                                    <td class="pe-4"><?= htmlspecialchars($disk) ?></td></tr>
-                                <tr><td class="ps-4 text-muted fw-semibold">Server Port</td>
-                                    <td class="pe-4"><?= htmlspecialchars((string)$port) ?></td></tr>
-                                <tr><td class="ps-4 text-muted fw-semibold">Status</td>
-                                    <td class="pe-4">
-                                        <span class="badge bg-<?= $status === 'active' ? 'success' : 'warning text-dark' ?>"><?= ucfirst($status) ?></span>
-                                    </td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+                <h5 class="fw-bold mb-3"><i class="fas fa-tachometer-alt me-2 text-primary"></i>Overview</h5>
 
-            <!-- ═══ DATABASE ═══ -->
-            <div class="tab-pane fade" id="p-database">
-                <h5 class="fw-bold mb-3"><i class="fas fa-database me-2 text-primary"></i>Database</h5>
-                <div class="card border shadow-sm mb-3">
-                    <div class="card-body p-0">
-                        <table class="table table-sm mb-0">
-                            <tbody>
-                                <tr><td class="ps-4 text-muted fw-semibold" style="width:35%">DB Username</td>
-                                    <td class="pe-4 fw-bold"><code><?= htmlspecialchars($username) ?></code></td></tr>
-                                <tr><td class="ps-4 text-muted fw-semibold">DB Host</td>
-                                    <td class="pe-4"><code>localhost</code></td></tr>
-                                <tr><td class="ps-4 text-muted fw-semibold">DB Port</td>
-                                    <td class="pe-4"><code>3306</code></td></tr>
-                                <tr><td class="ps-4 text-muted fw-semibold">DB Prefix</td>
-                                    <td class="pe-4"><code><?= htmlspecialchars($username) ?>_</code></td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="card-footer bg-white border-top py-2 px-4">
-                        <a href="/user/phpmyadmin" target="_blank" class="btn btn-sm btn-outline-primary w-100">
-                            <i class="fas fa-database me-2"></i>Open phpMyAdmin
-                        </a>
-                    </div>
-                </div>
-                <div class="alert alert-info small py-2 mb-0">
-                    <i class="fas fa-info-circle me-1"></i>
-                    Use phpMyAdmin to create and manage your databases. All databases must use the prefix
-                    <code><?= htmlspecialchars($username) ?>_</code>
-                    (e.g., <code><?= htmlspecialchars($username) ?>_blog</code>, <code><?= htmlspecialchars($username) ?>_store</code>).
-                    Your database user has full access to all databases matching this prefix.
-                    Your database password is the same as your FTP/SSH password.
-                </div>
-            </div>
-
-            <!-- ═══ FTP / SSH ═══ -->
-            <div class="tab-pane fade" id="p-ftp-ssh">
-                <h5 class="fw-bold mb-3"><i class="fas fa-terminal me-2 text-primary"></i>FTP / SSH Access</h5>
+                <!-- All Domains Table -->
                 <div class="card border shadow-sm mb-4">
+                    <div class="card-body p-0">
+                        <table class="table table-sm table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="ps-3">Domain</th>
+                                    <th>PHP</th>
+                                    <th>Port</th>
+                                    <th>Disk</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="domains-tbody">
+                                <tr><td colspan="5" class="text-center text-muted py-3 small">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- FTP / SSH Access -->
+                <div class="card border shadow-sm mb-4">
+                    <div class="card-header bg-transparent fw-bold small">
+                        <i class="fas fa-terminal me-1"></i> FTP / SSH Access
+                    </div>
                     <div class="card-body">
                         <div class="row g-3">
                             <div class="col-sm-6 col-lg-3">
-                                <div class="small text-muted fw-semibold mb-1">Hostname</div>
-                                <code><?= htmlspecialchars($serverIp) ?></code>
+                                <div class="text-muted small">Server IP</div>
+                                <div class="fw-medium small"><?= htmlspecialchars($internalIp ?: '—') ?></div>
                             </div>
                             <div class="col-sm-6 col-lg-3">
-                                <div class="small text-muted fw-semibold mb-1">FTP Port</div>
-                                <code>21</code>
+                                <div class="text-muted small">FTP Port</div>
+                                <div class="fw-medium small">21</div>
                             </div>
                             <div class="col-sm-6 col-lg-3">
-                                <div class="small text-muted fw-semibold mb-1">SSH Port</div>
-                                <code><?= htmlspecialchars($sshPort) ?></code>
+                                <div class="text-muted small">SSH Port</div>
+                                <div class="fw-medium small"><?= htmlspecialchars(DB::setting('ssh_port', '1022')) ?></div>
                             </div>
                             <div class="col-sm-6 col-lg-3">
-                                <div class="small text-muted fw-semibold mb-1">Username</div>
-                                <code><?= htmlspecialchars($username) ?></code>
+                                <div class="text-muted small">Username</div>
+                                <div class="fw-medium small"><?= htmlspecialchars($username) ?></div>
                             </div>
                         </div>
                     </div>
@@ -238,9 +197,84 @@ $isSubdomain = substr_count($domain, '.') > 1;
                 </div>
             </div>
 
+            <!-- ═══ DATABASE ═══ -->
+            <div class="tab-pane fade" id="p-database">
+                <h5 class="fw-bold mb-3"><i class="fas fa-database me-2 text-primary"></i>Databases</h5>
+
+                <div class="alert alert-info small py-2 mb-3">
+                    <i class="fas fa-info-circle me-1"></i>
+                    All databases must use the prefix <strong><?= htmlspecialchars($username) ?>_</strong>. You can manage tables and data in <a href="/user/phpmyadmin" target="_blank" class="alert-link">phpMyAdmin</a>.
+                </div>
+
+                <!-- Create Database -->
+                <div class="card border shadow-sm mb-4">
+                    <div class="card-header bg-transparent fw-bold small">
+                        <i class="fas fa-plus-circle me-1"></i> Create Database
+                    </div>
+                    <div class="card-body">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text bg-light fw-medium"><?= htmlspecialchars($username) ?>_</span>
+                            <input type="text" class="form-control" id="new-db-suffix" placeholder="database_name" maxlength="32">
+                            <button class="btn btn-primary" onclick="createDatabase()">
+                                <i class="fas fa-plus me-1"></i> Create
+                            </button>
+                        </div>
+                        <div class="form-text">Letters, numbers, and underscores only.</div>
+                    </div>
+                </div>
+
+                <!-- Existing Databases -->
+                <div class="card border shadow-sm">
+                    <div class="card-header bg-transparent fw-bold small">
+                        <i class="fas fa-list me-1"></i> Existing Databases
+                    </div>
+                    <div class="card-body p-0">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="ps-3">Database Name</th>
+                                    <th>Size</th>
+                                    <th class="text-end pe-3">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="databases-tbody">
+                                <tr><td colspan="3" class="text-center text-muted py-3 small">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Delete DB Modal -->
+                <div class="modal fade" id="deleteDbModal" tabindex="-1">
+                    <div class="modal-dialog modal-sm">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h6 class="modal-title fw-bold">Delete Database</h6>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body text-center">
+                                <p class="small">Databases must be deleted directly in phpMyAdmin.</p>
+                                <a href="/user/phpmyadmin" target="_blank" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-external-link-alt me-1"></i> Open phpMyAdmin
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- ═══ FILE MANAGER ═══ -->
             <div class="tab-pane fade" id="p-files">
-                <h5 class="fw-bold mb-3"><i class="fas fa-file-code me-2 text-primary"></i>File Manager</h5>
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <h5 class="fw-bold mb-0"><i class="fas fa-file-code me-2 text-primary"></i>File Manager</h5>
+                    <select class="form-select form-select-sm w-auto" id="file-domain-select" onchange="switchFileDomain(this.value)">
+                        <?php foreach ($allDomains as $d): ?>
+                        <option value="<?= htmlspecialchars($d['domain_name']) ?>" <?= $d['domain_name'] === $domain ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($d['domain_name']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
                 <div class="alert alert-info small py-2">
                     <i class="fas fa-info-circle me-1"></i>
                     Edit <code>.htaccess</code> files to control URL rewriting, redirects, and access rules.
@@ -328,6 +362,92 @@ $isSubdomain = substr_count($domain, '.') > 1;
                             </thead>
                             <tbody id="backups-tbody">
                                 <tr><td colspan="4" class="text-center text-muted py-3 small">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ OPTIMIZE ═══ -->
+            <div class="tab-pane fade" id="p-optimize">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <h5 class="fw-bold mb-0"><i class="fas fa-bolt me-2 text-warning"></i>Image Optimizer</h5>
+                    <select class="form-select form-select-sm w-auto" id="optimize-domain-select" onchange="switchOptimizeDomain(this.value)">
+                        <?php foreach ($allDomains as $d): ?>
+                        <option value="<?= htmlspecialchars($d['domain_name']) ?>" <?= $d['domain_name'] === $domain ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($d['domain_name']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="alert alert-info small py-2 mb-3">
+                    <i class="fas fa-info-circle me-1"></i>
+                    <strong>What this does:</strong> Recursively scans the selected directory and optimizes all images:
+                    <ul class="mb-0 mt-1">
+                        <li><strong>JPEG</strong> — Compressed to 85% quality, ICC color profiles preserved (jpegoptim)</li>
+                        <li><strong>PNG</strong> — Lossy compression at 65–80% quality (pngquant)</li>
+                        <li><strong>GIF</strong> — Optimized at O3 level (gifsicle)</li>
+                        <li><strong>WebP</strong> — A <code>.webp</code> copy generated alongside each JPEG/PNG at 80% quality</li>
+                        <li><strong>AVIF</strong> — A <code>.avif</code> copy generated at quality 63 (better compression than WebP, if available)</li>
+                        <li><strong>SVG</strong> — Minified in-place (if svgo is installed)</li>
+                        <li><strong>Large images</strong> — Images wider than 2560px are automatically resized before optimization</li>
+                    </ul>
+                    Already-optimized files are skipped on re-runs. File ownership is preserved. Originals are modified in-place — this cannot be undone.
+                </div>
+
+                <div class="card border shadow-sm mb-3">
+                    <div class="card-body">
+                        <label class="form-label fw-semibold">Select Directory</label>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <select class="form-select form-select-sm" id="optimize-dir" style="max-width:400px;">
+                                <option value="">Loading...</option>
+                            </select>
+                            <button class="btn btn-sm btn-warning fw-semibold px-3" id="optimize-btn" disabled>
+                                <i class="fas fa-bolt me-1"></i>Optimize Images
+                            </button>
+                        </div>
+                        <div class="d-flex gap-3 mt-2">
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="optimize-dryrun">
+                                <label class="form-check-label small" for="optimize-dryrun">Preview only (dry run)</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="optimize-verbose">
+                                <label class="form-check-label small" for="optimize-verbose">Show per-file details</label>
+                            </div>
+                        </div>
+                        <div class="form-text">All subdirectories within the selected path will be scanned recursively.</div>
+                    </div>
+                </div>
+
+                <div id="optimize-output-wrap" class="d-none">
+                    <label class="form-label fw-semibold small text-muted">Output</label>
+                    <pre id="optimize-output" class="bg-dark text-success p-3 rounded small" style="max-height:400px;overflow-y:auto;font-size:.8rem;white-space:pre-wrap;"></pre>
+                </div>
+
+                <div id="optimize-result" class="d-none mt-3"></div>
+            </div>
+
+            <!-- ═══ MULTI-PHP ═══ -->
+            <div class="tab-pane fade" id="p-multiphp">
+                <h5 class="fw-bold mb-3"><i class="fas fa-code-branch me-2 text-primary"></i>Multi-PHP</h5>
+                <div class="alert alert-info small py-2 mb-3">
+                    <i class="fas fa-info-circle me-1"></i>
+                    Change the PHP version for each domain independently. The server default is shown in parentheses.
+                </div>
+                <div class="card border shadow-sm">
+                    <div class="card-body p-0">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="ps-3">Domain</th>
+                                    <th>Current Version</th>
+                                    <th>Change To</th>
+                                </tr>
+                            </thead>
+                            <tbody id="multiphp-tbody">
+                                <tr><td colspan="3" class="text-center text-muted py-3 small">Loading...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -531,9 +651,9 @@ $isSubdomain = substr_count($domain, '.') > 1;
 </div><!-- /tab-content -->
 
 <script>
-const DOMAIN = <?= json_encode($domain) ?>;
+let DOMAIN = <?= json_encode($domain) ?>;
 const USERNAME = <?= json_encode($username) ?>;
-const DOC_ROOT = <?= json_encode($docRoot) ?>;
+let DOC_ROOT = <?= json_encode($docRoot) ?>;
 
 function showToast(msg, type = 'success') {
     const id = 'toast-' + Date.now();
@@ -629,9 +749,83 @@ function generateKey() {
         });
 }
 
+// ── Overview — All Domains ──────────────────────────────────────────────────
+
+function loadDomains() {
+    apiFetch('/api/account?action=list_domains&domain=' + encodeURIComponent(DOMAIN))
+        .then(data => {
+            const tbody = document.getElementById('domains-tbody');
+            if (!data.success || !data.domains || !data.domains.length) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3 small">No domains found.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = data.domains.map(d => `<tr>
+                <td class="ps-3 small fw-medium">${d.domain_name}</td>
+                <td class="small"><span class="badge bg-primary">${d.php_version === 'inherit' ? 'Default' : d.php_version}</span></td>
+                <td class="small">${d.port || '—'}</td>
+                <td class="small">${d.disk}</td>
+                <td class="small">${d.status === 'active' ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-danger">Suspended</span>'}</td>
+            </tr>`).join('');
+        })
+        .catch(() => { document.getElementById('domains-tbody').innerHTML = '<tr><td colspan="5" class="text-muted text-center py-3 small">Failed to load.</td></tr>'; });
+}
+
+// ── Database ────────────────────────────────────────────────────────────────
+
+function loadDatabases() {
+    const tbody = document.getElementById('databases-tbody');
+    tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3 small">Loading...</td></tr>';
+    apiFetch('/api/account?action=list_databases&domain=' + encodeURIComponent(DOMAIN))
+        .then(data => {
+            if (!data.success || !data.databases || !data.databases.length) {
+                tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3 small">No databases found.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = data.databases.map(db => `<tr>
+                <td class="ps-3 small fw-medium"><i class="fas fa-database text-muted me-1"></i>${db.name}</td>
+                <td class="small">${db.size_h}</td>
+                <td class="text-end pe-3">
+                    <button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="new bootstrap.Modal(document.getElementById('deleteDbModal')).show()">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </td>
+            </tr>`).join('');
+        })
+        .catch(() => { tbody.innerHTML = '<tr><td colspan="3" class="text-muted text-center py-3 small">Failed to load databases.</td></tr>'; });
+}
+
+function createDatabase() {
+    const suffix = document.getElementById('new-db-suffix').value.trim();
+    if (!suffix || !/^[a-zA-Z0-9_]{1,32}$/.test(suffix)) {
+        showToast('Invalid name. Use letters, numbers, and underscores only.', 'warning');
+        return;
+    }
+    const fd = new FormData();
+    fd.append('action', 'create_database');
+    fd.append('domain', DOMAIN);
+    fd.append('suffix', suffix);
+    apiFetch('/api/account', { method: 'POST', body: fd })
+        .then(data => {
+            if (data.success) {
+                showToast('Database created: ' + data.database, 'success');
+                document.getElementById('new-db-suffix').value = '';
+                loadDatabases();
+            } else {
+                showToast(data.error || 'Failed to create database.', 'danger');
+            }
+        })
+        .catch(() => showToast('Request failed.', 'danger'));
+}
+
 // ── File Manager (.htaccess) ────────────────────────────────────────────────
 
 let currentDir = '';
+
+function switchFileDomain(d) {
+    DOMAIN = d;
+    DOC_ROOT = '/home/' + USERNAME + '/' + d + '/www';
+    loadDirs();
+}
 
 function loadDirs() {
     apiFetch('/api/account?action=list_dirs&domain=' + encodeURIComponent(DOMAIN))
@@ -835,6 +1029,131 @@ function loadBackups() {
         .catch(() => {
             tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-3 small">Failed to load backups.</td></tr>';
         });
+}
+
+// ── Optimize ────────────────────────────────────────────────────────────────
+
+let optimizeDomain = DOMAIN;
+
+function switchOptimizeDomain(d) {
+    optimizeDomain = d;
+    loadOptimizeDirs();
+}
+
+function loadOptimizeDirs() {
+    const sel = document.getElementById('optimize-dir');
+    const btn = document.getElementById('optimize-btn');
+    if (!sel) return;
+    apiFetch('/api/account?action=list_dirs&domain=' + encodeURIComponent(optimizeDomain))
+        .then(data => {
+            const dirs = data.dirs || [];
+            sel.innerHTML = '<option value="www/">/ (web root)</option>';
+            dirs.forEach(d => {
+                if (d.path) sel.innerHTML += `<option value="www/${d.path}/">${d.path}/</option>`;
+            });
+            btn.disabled = false;
+        })
+        .catch(() => { sel.innerHTML = '<option value="www/">/ (web root)</option>'; btn.disabled = false; });
+}
+
+document.getElementById('optimize-btn')?.addEventListener('click', function() {
+    const btn = this;
+    const dir = document.getElementById('optimize-dir').value;
+    const outWrap = document.getElementById('optimize-output-wrap');
+    const outPre = document.getElementById('optimize-output');
+    const resultDiv = document.getElementById('optimize-result');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Optimizing...';
+    outWrap.classList.remove('d-none');
+    outPre.textContent = 'Starting image optimization...\n';
+    resultDiv.classList.add('d-none');
+
+    const dryRun = document.getElementById('optimize-dryrun')?.checked ? '1' : '0';
+    const verbose = document.getElementById('optimize-verbose')?.checked ? '1' : '0';
+
+    const fd = new FormData();
+    fd.append('action', 'optimize_images');
+    fd.append('domain', optimizeDomain);
+    fd.append('dir', dir);
+    fd.append('dry_run', dryRun);
+    fd.append('verbose', verbose);
+
+    fetch('/api/account', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                // Stream output line by line for effect
+                const lines = (data.output || '').split('\n');
+                outPre.textContent = '';
+                let i = 0;
+                const interval = setInterval(() => {
+                    if (i < lines.length) {
+                        outPre.textContent += lines[i] + '\n';
+                        outPre.scrollTop = outPre.scrollHeight;
+                        i++;
+                    } else {
+                        clearInterval(interval);
+                    }
+                }, 30);
+                resultDiv.innerHTML = '<div class="alert alert-success small py-2"><i class="fas fa-check-circle me-1"></i>Optimization complete.</div>';
+            } else {
+                outPre.textContent += '\nError: ' + (data.error || 'Unknown error');
+                resultDiv.innerHTML = '<div class="alert alert-danger small py-2"><i class="fas fa-times-circle me-1"></i>' + (data.error || 'Optimization failed.') + '</div>';
+            }
+            resultDiv.classList.remove('d-none');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-bolt me-1"></i>Optimize Images';
+        })
+        .catch(() => {
+            outPre.textContent += '\nRequest failed.';
+            resultDiv.innerHTML = '<div class="alert alert-danger small py-2"><i class="fas fa-times-circle me-1"></i>Request failed.</div>';
+            resultDiv.classList.remove('d-none');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-bolt me-1"></i>Optimize Images';
+        });
+});
+
+// ── Multi-PHP ───────────────────────────────────────────────────────────────
+
+function loadMultiPhp() {
+    const tbody = document.getElementById('multiphp-tbody');
+    tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3 small">Loading...</td></tr>';
+    apiFetch('/api/account?action=list_php_versions&domain=' + encodeURIComponent(DOMAIN))
+        .then(data => {
+            if (!data.success) { tbody.innerHTML = '<tr><td colspan="3" class="text-muted text-center py-3 small">Failed to load.</td></tr>'; return; }
+            const versions = data.installed || [];
+            const defaultVer = data.default || '8.4';
+            tbody.innerHTML = (data.domains || []).map(d => {
+                const current = d.php_version === 'inherit' ? defaultVer : d.php_version;
+                const options = versions.map(v => `<option value="${v}" ${v === current ? 'selected' : ''}>${v}${v === defaultVer ? ' (default)' : ''}</option>`).join('');
+                return `<tr>
+                    <td class="ps-3 small fw-medium">${d.domain_name}</td>
+                    <td class="small"><span class="badge bg-primary">${current}</span></td>
+                    <td><select class="form-select form-select-sm w-auto" onchange="setPhpVersion('${d.domain_name}', this.value, this)">${options}</select></td>
+                </tr>`;
+            }).join('');
+        })
+        .catch(() => { tbody.innerHTML = '<tr><td colspan="3" class="text-muted text-center py-3 small">Failed to load.</td></tr>'; });
+}
+
+function setPhpVersion(domain, version, selectEl) {
+    selectEl.disabled = true;
+    const fd = new FormData();
+    fd.append('action', 'set_php_version');
+    fd.append('domain', domain);
+    fd.append('version', version);
+    apiFetch('/api/account', { method: 'POST', body: fd })
+        .then(data => {
+            selectEl.disabled = false;
+            if (data.success) {
+                showToast('PHP version updated to ' + version + ' for ' + domain, 'success');
+                loadMultiPhp();
+            } else {
+                showToast(data.error || 'Failed to change PHP version.', 'danger');
+            }
+        })
+        .catch(() => { selectEl.disabled = false; showToast('Request failed.', 'danger'); });
 }
 
 <?php if ($cfEnabled && !$isSubdomain): ?>
@@ -1121,9 +1440,13 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
+    loadDomains();
+    loadDatabases();
     loadKeys();
     loadDirs();
     loadBackups();
+    loadOptimizeDirs();
+    loadMultiPhp();
     <?php if ($cfEnabled && !$isSubdomain): ?>
     loadZoneSettings();
     loadDns();

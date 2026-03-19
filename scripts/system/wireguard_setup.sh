@@ -105,8 +105,14 @@ WGCONF
 chmod 600 "$WG_CONF"
 
 # Enable and start WireGuard
-systemctl enable wg-quick@wg0 >/dev/null 2>&1
-systemctl start  wg-quick@wg0 2>/dev/null
+if ! systemctl enable wg-quick@wg0 2>&1; then
+    echo -e "${RED}Failed to enable wg-quick@wg0 service.${NC}"
+    exit 1
+fi
+if ! systemctl start wg-quick@wg0 2>&1; then
+    echo -e "${RED}Failed to start wg-quick@wg0 service. Check: systemctl status wg-quick@wg0${NC}"
+    exit 1
+fi
 
 # ==============================================================================
 # Firewall: full server lockdown — only WireGuard port open publicly
@@ -129,17 +135,6 @@ lockdown_firewall() {
     # Ensure firewalld is running
     systemctl enable --now firewalld 2>/dev/null
 
-    # Set default zone to drop (deny all incoming)
-    firewall-cmd --set-default-zone=drop
-
-    # Clear any existing port/service rules from default zone
-    for p in $(firewall-cmd --permanent --list-ports 2>/dev/null); do
-        firewall-cmd --permanent --remove-port="$p" 2>/dev/null
-    done
-    for s in $(firewall-cmd --permanent --list-services 2>/dev/null); do
-        firewall-cmd --permanent --remove-service="$s" 2>/dev/null
-    done
-
     # Only allow WireGuard UDP port publicly (entry point for VPN)
     firewall-cmd --permanent --add-port=${WG_PORT}/udp
 
@@ -159,6 +154,9 @@ lockdown_firewall() {
     firewall-cmd --permanent --add-masquerade
 
     firewall-cmd --reload
+
+    # Set default zone to drop AFTER all rules are in place (prevents lockout)
+    firewall-cmd --set-default-zone=drop
 
     echo -e "${GREEN}Firewalld: Lockdown active — only port ${WG_PORT}/UDP public${NC}"
     echo -e "${GREEN}VPN zone created for subnet ${WG_NET}${NC}"
@@ -182,7 +180,10 @@ lockdown_firewall() {
         else
             echo "ListenAddress ${WG_SERVER_IP}" >> "$SSHD_CONF"
         fi
-        systemctl reload sshd 2>/dev/null
+        if ! systemctl reload sshd 2>&1; then
+            echo -e "${YELLOW}WARNING: Failed to reload sshd — SSH config change may not be active.${NC}"
+            echo -e "${YELLOW}Check: systemctl status sshd${NC}"
+        fi
     fi
 }
 lockdown_firewall

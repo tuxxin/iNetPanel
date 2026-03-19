@@ -44,6 +44,7 @@ function fetchLatestRelease(): array
         'tag'          => ltrim($data['tag_name'], 'v'),
         'download_url' => $downloadUrl ?: ($data['zipball_url'] ?? ''),
         'html_url'     => $data['html_url'] ?? '',
+        'changelog'    => $data['body'] ?? '',
     ];
 }
 
@@ -59,6 +60,7 @@ switch ($action) {
         DB::saveSetting('panel_latest_ver', $release['tag']);
         DB::saveSetting('panel_check_ts',   (string) time());
         DB::saveSetting('panel_download_url', $release['download_url'] ?? '');
+        DB::saveSetting('panel_latest_changelog', $release['changelog'] ?? '');
 
         $current = Version::get();
         echo json_encode([
@@ -68,6 +70,7 @@ switch ($action) {
             'update_available' => version_compare($release['tag'], $current, '>'),
             'download_url'     => $release['download_url'],
             'html_url'         => $release['html_url'],
+            'changelog'        => $release['changelog'] ?? '',
         ]);
         break;
 
@@ -88,6 +91,7 @@ switch ($action) {
                 DB::saveSetting('panel_latest_ver', $latestVer);
                 DB::saveSetting('panel_check_ts',   (string) time());
                 DB::saveSetting('panel_download_url', $downloadUrl);
+                DB::saveSetting('panel_latest_changelog', $release['changelog'] ?? '');
             }
         }
 
