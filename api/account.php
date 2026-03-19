@@ -116,7 +116,8 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => "Database '{$dbName}' already exists."]);
             break;
         }
-        $sql = "CREATE DATABASE " . escapeshellarg($dbName) . "; GRANT ALL PRIVILEGES ON \`" . addslashes($dbName) . "\`.* TO '" . addslashes($username) . "'@'localhost'; FLUSH PRIVILEGES;";
+        $safeName = preg_replace('/[^a-zA-Z0-9_]/', '', $dbName);
+        $sql = "CREATE DATABASE \`{$safeName}\`; GRANT ALL PRIVILEGES ON \`{$safeName}\`.* TO '" . addslashes($username) . "'@'localhost'; FLUSH PRIVILEGES;";
         $result = shell_exec("mysql -u root -p" . escapeshellarg($rootPass) . " -e " . escapeshellarg($sql) . " 2>&1");
         if (stripos($result, 'error') !== false) {
             echo json_encode(['success' => false, 'error' => 'Failed to create database: ' . trim($result)]);
