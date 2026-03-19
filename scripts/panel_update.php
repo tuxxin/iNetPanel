@@ -443,6 +443,76 @@ if (class_exists('DB')) {
     } catch (Throwable $e) { log_msg('WARNING: Failed to save version in DB - ' . $e->getMessage()); }
 }
 
+// ── FPM Pool Safety Check ─────────────────────────────────────────────────
+// Regenerate any missing PHP-FPM pool configs (prevents 503 after update)
+$dbFile = PANEL_PATH . '/db/inetpanel.db';
+if (file_exists($dbFile)) {
+    try {
+        $pdb = new SQLite3($dbFile);
+        $rows = $pdb->query("SELECT d.domain_name, h.username,
+            COALESCE(NULLIF(d.php_version,'inherit'),
+            (SELECT value FROM settings WHERE key='php_default_version'),'8.4') AS php_ver
+            FROM domains d JOIN hosting_users h ON d.hosting_user_id = h.id");
+        $regenerated = 0;
+        $fpmReload = [];
+        while ($r = $rows->fetchArray(SQLITE3_ASSOC)) {
+            $domain   = $r['domain_name'];
+            $username = $r['username'];
+            $phpVer   = $r['php_ver'];
+            $poolName = $username . '_' . str_replace(['.', '-'], '_', $domain);
+            $poolConf = "/etc/php/{$phpVer}/fpm/pool.d/{$poolName}.conf";
+            $fpmSock  = "/run/php/php{$phpVer}-fpm-{$poolName}.sock";
+            $logDir   = "/home/{$username}/{$domain}/logs";
+            $tmpDir   = "/home/{$username}/tmp";
+
+            if (file_exists($poolConf)) continue;
+
+            @mkdir($tmpDir, 0750, true);
+            @mkdir($logDir, 0750, true);
+            exec("chown {$username}:www-data " . escapeshellarg($tmpDir) . " " . escapeshellarg($logDir) . " 2>/dev/null");
+
+            $pool = <<<POOL
+[{$poolName}]
+user  = {$username}
+group = www-data
+
+listen       = {$fpmSock}
+listen.owner = www-data
+listen.group = www-data
+listen.mode  = 0660
+
+pm                   = dynamic
+pm.max_children      = 5
+pm.start_servers     = 2
+pm.min_spare_servers = 1
+pm.max_spare_servers = 3
+
+php_admin_value[error_log]           = {$logDir}/php_error.log
+php_admin_flag[log_errors]           = on
+php_admin_value[upload_tmp_dir]      = {$tmpDir}
+php_value[session.save_path]         = {$tmpDir}
+php_admin_value[open_basedir]        = /home/{$username}/:/tmp/
+php_admin_value[upload_max_filesize] = 100M
+php_admin_value[post_max_size]       = 100M
+POOL;
+            file_put_contents($poolConf, $pool);
+            $fpmReload[$phpVer] = true;
+            $regenerated++;
+        }
+        $pdb->close();
+
+        if ($regenerated > 0) {
+            log_msg("Regenerated {$regenerated} missing FPM pool config(s).");
+            foreach (array_keys($fpmReload) as $ver) {
+                exec("systemctl reload php{$ver}-fpm 2>/dev/null");
+            }
+            exec("systemctl reload apache2 2>/dev/null");
+        }
+    } catch (Throwable $e) {
+        log_msg('WARNING: FPM pool check failed - ' . $e->getMessage());
+    }
+}
+
 // Clean up temp files
 @unlink(TMP_ZIP);
 shell_exec('rm -rf ' . escapeshellarg(TMP_DIR));

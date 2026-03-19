@@ -20,7 +20,7 @@ switch ($action) {
         $portsRaw = trim(Shell::exec('sudo firewall-cmd --permanent --zone=' . escapeshellarg($defaultZone) . ' --list-ports 2>/dev/null', 'firewall-list-ports')['output']);
         $servicesRaw = trim(Shell::exec('sudo firewall-cmd --permanent --zone=' . escapeshellarg($defaultZone) . ' --list-services 2>/dev/null', 'firewall-list-services')['output']);
         // Filter out any non-port entries (firewalld warnings)
-        $ports = array_values(array_filter(explode(' ', $portsRaw), fn($p) => preg_match('#^\d+/(tcp|udp)$#', $p)));
+        $ports = array_values(array_filter(explode(' ', $portsRaw), fn($p) => preg_match('#^\d+(-\d+)?/(tcp|udp)$#', $p)));
         $services = array_values(array_filter(explode(' ', $servicesRaw), fn($s) => $s && !str_contains($s, ' ') && !str_contains($s, "'")));
         $fw['firewalld'] = [
             'running'      => $fwState === 'running',
