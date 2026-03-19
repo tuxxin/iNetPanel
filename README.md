@@ -29,9 +29,10 @@ Then open `http://<YOUR_SERVER_IP>/install.php` to complete setup.
 - **Multi-Domain Users** — One hosting user can own multiple domains, each with its own vhost, database, and SSL certificate
 - **One-Click Account Creation** — Creates Linux user, Apache vhost, PHP-FPM pool, FTP access, Cloudflare tunnel route, DNS CNAME, and SSL certificate in one step
 - **Account Suspension** — Suspend/resume accounts (blocks HTTP, FTP, SSH, and WireGuard simultaneously)
-- **Client Portal** — Hosting users log in at `/user/` with tabbed dashboard: account overview, database management, FTP/SSH + SSH key management, .htaccess file manager with directory password protection, backups, DNS records, and email routing
-- **phpMyAdmin Auto-Login** — One-click phpMyAdmin access from both admin panel (root) and client portal (user-scoped)
+- **Client Portal** — Hosting users log in at `/user/` with tabbed dashboard: all-domains overview with FTP/SSH info, database management (list, create, delete), .htaccess file manager with directory password protection, backup downloads, image optimization, Multi-PHP version switching, DNS records, and email routing
+- **phpMyAdmin Auto-Login** — Token-based signon authentication from both admin panel (root) and client portal (user-scoped) with fallback login form
 - **Hook Scripts** — Custom post-execution bash hooks for domain add/delete with syntax validation, toggle on/off, and one-click TiCore PHP Framework auto-deploy template
+- **SSH Key Manager** — Import, generate, and manage SSH keys per hosting account from both admin panel and client portal
 
 ### SSL & Security
 - **Automatic SSL** — Let's Encrypt certificates issued via DNS-01 challenge (Cloudflare API) for every domain
@@ -49,19 +50,18 @@ Then open `http://<YOUR_SERVER_IP>/install.php` to complete setup.
 - **DDNS** — Automatically updates your DNS A record when your server IP changes
 
 ### Server Management
-- **Multi-PHP** — Install and switch between PHP 5.6–8.5 per domain using sury.org packages
+- **Multi-PHP** — Install and switch between PHP 5.6–8.5 per domain from admin panel or client portal using sury.org packages
 - **PHP Package Manager** — Install/remove PHP extensions per version from the panel
 - **Service Manager** — Start, stop, restart Apache, PHP-FPM, MariaDB, vsftpd, lighttpd, WireGuard, etc.
 - **Service Monitor** — Automatic service health checks with auto-restart and panel logging (configurable cron)
 - **System Logs** — View Apache error/access logs, PHP-FPM logs, auth logs from the panel
-- **Image Optimizer** — Bulk optimize JPEG/PNG/GIF images with WebP generation (per-user, per-domain, or per-directory)
+- **Image Optimizer** — Bulk optimize JPEG/PNG/GIF/WebP images with AVIF generation, ICC profile stripping, and resize options (per-user, per-domain, or per-directory) — accessible from admin panel and client portal
 - **Backups** — Per-user automated backups (all domains in one archive) plus system config backups (Apache, PHP, MariaDB, lighttpd, fail2ban, SSH, cron, and panel database) with configurable retention and scheduling
 - **MySQL Timezone Sync** — Timezone changes in Settings or installer automatically update MariaDB global timezone and persist to config
 
 ### VPN & Remote Access
 - **WireGuard VPN** — Optional full server lockdown; only the WireGuard port (1443/UDP) is publicly open
 - **Auto-Provisioned Peers** — One VPN peer per hosting user, auto-generated with QR code
-- **SSH Key Manager** — Import, generate, and manage SSH keys per hosting account
 
 ### Panel Administration
 - **Role-Based Access** — Superadmin, full admin, and sub-admin (domain-restricted) roles
@@ -70,8 +70,9 @@ Then open `http://<YOUR_SERVER_IP>/install.php` to complete setup.
 - **Scheduled Jobs** — Configurable cron for system updates, backups, and panel auto-update
 - **Settings Deep Links** — Direct URL access to settings tabs (e.g., `/admin/settings#general`)
 - **Reserved Usernames** — Prevents creation of accounts with system-reserved names (root, admin, www-data, etc.)
+- **Dashboard** — Real-time resource monitoring graph (CPU, RAM, disk, network) with configurable polling interval and time-range display
 - **Dark Mode** — Toggle between light and dark themes
-- **CLI Tool** — `inetp` command for all operations from the terminal
+- **CLI Tool** — `inetp` command with 30+ subcommands for all operations from the terminal
 
 > Complete feature list with screenshots: [inetpanel.tuxxin.com](https://inetpanel.tuxxin.com)
 
@@ -121,34 +122,43 @@ inetp --help
 
 | Command | Description |
 |---|---|
+| **Account Management** | |
+| `create_account` | Create user + first domain in one step |
+| `delete_account` | Remove all domains + delete user |
 | `create_user` | Create a new hosting user (Linux + MariaDB + FTP) |
 | `delete_user` | Delete a hosting user (must have no domains) |
 | `add_domain` | Add a domain to an existing user |
 | `remove_domain` | Remove a domain from a user |
-| `create_account` | Create user + first domain in one step |
-| `delete_account` | Remove all domains + delete user |
 | `suspend_account` | Suspend or resume an account/user |
-| `ssl_manage` | SSL certificate management (issue, revoke, renew, status) |
-| `optimize_images` | Optimize images (per-user, per-domain, or directory) |
-| `backup_accounts` | Backup all accounts to /backup |
-| `firewall` | Firewall management (status, flush, ban, unban) |
-| `wireguard_setup` | Set up WireGuard VPN with full server lockdown |
-| `wg_peer` | Manage WireGuard VPN peers |
-| `update` | Run system package update |
-| `panel_update` | Update iNetPanel from GitHub |
-| `service_monitor` | Enable/disable/run automatic service health checks |
+| `change_password` | Change FTP/SSH password for a hosting user |
+| `reset_password` | Reset FTP/SSH/MySQL password for a hosting user |
+| `fix_permissions` | Fix file ownership and permissions for user accounts |
+| `list` | List all hosting users and their domains |
+| **Server & Services** | |
 | `status` | Server health summary (CPU, RAM, disk, services, SSL, backups) |
 | `benchmark` | Quick server benchmark (disk I/O, network, PHP, MySQL) |
 | `speedtest` | Network bandwidth test with latency checks |
-| `dns_check` | DNS, SSL, and connectivity diagnostics for a domain |
-| `disk_report` | Disk usage breakdown by user/domain with top files |
+| `service_monitor` | Enable/disable/run automatic service health checks |
+| `update` | Run system package update |
+| `panel_update` | Update iNetPanel from GitHub releases |
+| **Security & Diagnostics** | |
 | `audit` | Security audit (permissions, ports, SSH, SSL, PHP, firewall) |
 | `malware_scan` | Scan PHP files for backdoors and webshells |
-| `reset_password` | Reset FTP/SSH/MySQL password for a hosting user |
+| `dns_check` | DNS, SSL, and connectivity diagnostics for a domain |
+| `firewall` | Firewall management (status, flush, ban, unban) |
+| `ssl_manage` | SSL certificate management (issue, revoke, renew, status) |
+| `panel_ssl` | Panel SSL certificate management |
+| **Backup & Maintenance** | |
+| `backup_accounts` | Backup all accounts + system configs to /backup |
+| `optimize_images` | Optimize images with AVIF/WebP generation |
 | `cleanup` | Remove temp files, old logs, orphaned FPM pools |
 | `rotate_logs` | Force log rotation for system and user logs |
 | `db_repair` | Check and repair MariaDB tables + SQLite vacuum |
-| `list` | List all hosting users and their domains |
+| `disk_report` | Disk usage breakdown by user/domain with top files |
+| **VPN** | |
+| `wireguard_setup` | Set up WireGuard VPN with full server lockdown |
+| `wireguard_uninstall` | Remove WireGuard and restore firewall rules |
+| `wg_peer` | Manage WireGuard VPN peers |
 
 ---
 
@@ -156,7 +166,7 @@ inetp --help
 
 - **Debian 12** (Bookworm) — clean install recommended
 - **Root access**
-- **Cloudflare account** — required for tunnel, DNS management, email routing, DDNS, and SSL (DNS-01 challenge)
+- **Cloudflare account** — recommended for tunnel, DNS management, email routing, DDNS, and SSL (DNS-01 challenge). Manual port-based mode available without Cloudflare
 
 ---
 
@@ -168,11 +178,18 @@ inetp --help
 bash <(curl -s https://inetpanel.tuxxin.com/latest)
 ```
 
-This installs and configures: lighttpd, Apache2, PHP 8.4-FPM, MariaDB, phpMyAdmin, vsftpd, Node.js 22, certbot, WireGuard (optional), all system scripts, sudoers rules, and cron jobs. **SSH is moved to port 1022** — reconnect with `ssh -p 1022` after install.
+This installs and configures: lighttpd, Apache2, PHP 8.5-FPM, MariaDB, phpMyAdmin, vsftpd, Node.js 22, certbot, WireGuard (optional), all system scripts, sudoers rules, and cron jobs. **SSH is moved to port 1022** — reconnect with `ssh -p 1022` after install.
 
 ### 2. Complete setup in the browser
 
-Open `http://<YOUR_SERVER_IP>/install.php` — the wizard walks through admin account creation, Cloudflare connection, timezone, WireGuard setup, and database initialization.
+Open `http://<YOUR_SERVER_IP>/install.php` — the 6-step wizard walks through:
+
+1. **Admin Account** — Create admin username and password (with confirmation)
+2. **Timezone** — Select server timezone
+3. **Cloudflare** — Connect and verify Cloudflare API credentials (or choose manual port-based mode)
+4. **DDNS & VPN** — Configure dynamic DNS and WireGuard VPN (optional, Cloudflare required)
+5. **Server Hostname** — Set hostname with Cloudflare DNS verification and automatic A record creation
+6. **Complete** — Finalize installation
 
 ### 3. Log in
 
