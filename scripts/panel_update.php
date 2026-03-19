@@ -146,9 +146,10 @@ log_msg("Applying update from: {$srcDir}");
 
 // rsync panel files, excluding protected paths
 $rsyncCmd = sprintf(
-    'rsync -a --delete --exclude=%s --exclude=%s %s %s',
-    escapeshellarg('db/'),
-    escapeshellarg('.installed'),
+    'rsync -a --delete --exclude=%s --exclude=%s --exclude=%s %s %s',
+    escapeshellarg('db/inetpanel.db'),
+    escapeshellarg('db/.installed'),
+    escapeshellarg('db/.admin_pass'),
     escapeshellarg(rtrim($srcDir, '/') . '/'),
     escapeshellarg(PANEL_PATH . '/')
 );
@@ -379,15 +380,15 @@ SIGNON;
     // Patch config for signon auth if still using cookie
     $pmaConfig = '/etc/phpmyadmin/config.inc.php';
     if (file_exists($pmaConfig)) {
-        $cfg = file_get_contents($pmaConfig);
-        if (strpos($cfg, "'signon'") === false && strpos($cfg, "'cookie'") !== false) {
-            $cfg = preg_replace(
-                "/\\$cfg\\['Servers'\\]\\[\\$i\\]\\['auth_type'\\]\\s*=\\s*'cookie'/",
+        $cfgContent = file_get_contents($pmaConfig);
+        if (strpos($cfgContent, "'signon'") === false && strpos($cfgContent, "'cookie'") !== false) {
+            $cfgContent = preg_replace(
+                '#\$cfg\[.Servers.\]\[\$i\]\[.auth_type.\]\s*=\s*.cookie.#',
                 "\$cfg['Servers'][\$i]['auth_type'] = 'signon';\n\$cfg['Servers'][\$i]['SignonSession'] = 'SignonSession';\n\$cfg['Servers'][\$i]['SignonURL'] = '/signon.php';\n// Original: \$cfg['Servers'][\$i]['auth_type'] = 'cookie'",
-                $cfg,
+                $cfgContent,
                 1
             );
-            file_put_contents($pmaConfig, $cfg);
+            file_put_contents($pmaConfig, $cfgContent);
             log_msg('Patched phpMyAdmin config for signon auth');
         }
     }
@@ -396,9 +397,9 @@ SIGNON;
     $pmaSecure = '/etc/phpmyadmin/conf.d/pma_secure.php';
     if (file_exists($pmaSecure)) {
         $sec = file_get_contents($pmaSecure);
-        if (preg_match("/\\['auth_type'\\].*=.*'cookie'/", $sec)) {
+        if (strpos($sec, "'cookie'") !== false) {
             $sec = preg_replace(
-                "/\\$cfg\\['Servers'\\]\\[1\\]\\['auth_type'\\]\\s*=\\s*'cookie';/",
+                '#\$cfg\[.Servers.\]\[1\]\[.auth_type.\]\s*=\s*.cookie.;#',
                 "\$cfg['Servers'][1]['auth_type']         = 'signon';\n\$cfg['Servers'][1]['SignonSession']     = 'SignonSession';\n\$cfg['Servers'][1]['SignonURL']         = '/signon.php';",
                 $sec,
                 1
