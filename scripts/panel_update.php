@@ -159,6 +159,10 @@ if ($rsyncCode !== 0) {
     abort('rsync failed with code ' . $rsyncCode . ': ' . implode("\n", $rsyncOut));
 }
 
+// Restore ownership after rsync (runs as root, files need www-data for lighttpd/FPM)
+exec('chown -R www-data:www-data ' . escapeshellarg(PANEL_PATH));
+log_msg('Restored file ownership to www-data');
+
 // Run pending DB migrations
 $migrationsDir = PANEL_PATH . '/db/migrations';
 if (is_dir($migrationsDir) && class_exists('DB')) {
