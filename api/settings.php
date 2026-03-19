@@ -32,7 +32,7 @@ switch ($action) {
             $result[$r['key']] = $r['value'];
         }
         if (!Auth::hasFullAccess()) {
-            unset($result['cf_api_key'], $result['cf_email'], $result['github_token']);
+            unset($result['cf_api_key'], $result['cf_email']);
         }
         echo json_encode(['success' => true, 'data' => $result]);
         break;
@@ -49,13 +49,12 @@ switch ($action) {
             'update_cron_enabled', 'update_cron_time',
             'backup_cron_time',
             'auto_update_enabled', 'auto_update_time',
-            'github_token',
         ];
         $saved = [];
         foreach ($allowed as $key) {
             if (isset($_POST[$key])) {
                 // Don't overwrite sensitive keys with the masked placeholder value
-                if (in_array($key, ['cf_api_key', 'github_token']) && preg_match('/^\*+$/', trim($_POST[$key]))) {
+                if ($key === 'cf_api_key' && preg_match('/^\*+$/', trim($_POST[$key]))) {
                     continue;
                 }
                 DB::saveSetting($key, $_POST[$key]);
@@ -299,6 +298,7 @@ switch ($action) {
         }
         $cf = new CloudflareAPI();
         $serverIp = trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: '');
+        $isPrivateIp = filter_var($serverIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false;
         try {
             $zoneId = $cf->findZoneForHostname($hostname);
             if (!$zoneId) {
@@ -306,7 +306,7 @@ switch ($action) {
                 break;
             }
             $result = $cf->createDNSRecord($zoneId, [
-                'type' => 'A', 'name' => $hostname, 'content' => $serverIp, 'proxied' => true, 'ttl' => 1,
+                'type' => 'A', 'name' => $hostname, 'content' => $serverIp, 'proxied' => !$isPrivateIp, 'ttl' => $isPrivateIp ? 300 : 1,
             ]);
             echo json_encode(['success' => $result['success'] ?? false, 'message' => $result['errors'][0]['message'] ?? '']);
         } catch (Throwable $e) {

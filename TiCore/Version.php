@@ -8,7 +8,7 @@
 
 class Version
 {
-    const APP_VERSION = '1.20.4';
+    const APP_VERSION = '1.21';
 
     /**
      * Return current version string.
@@ -27,21 +27,14 @@ class Version
     }
 
     /**
-     * Build standard GitHub API request headers, including auth token if configured.
+     * Build standard GitHub API request headers.
      */
     public static function githubHeaders(): array
     {
-        $headers = [
+        return [
             'User-Agent: iNetPanel/' . self::APP_VERSION,
             'Accept: application/vnd.github+json',
         ];
-        if (class_exists('DB')) {
-            $token = DB::setting('github_token', '');
-            if ($token !== '') {
-                $headers[] = 'Authorization: token ' . $token;
-            }
-        }
-        return $headers;
     }
 
     /**

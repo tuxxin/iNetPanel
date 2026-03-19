@@ -199,21 +199,6 @@ function s(string $key, string $default = ''): string {
                             </div>
                         </div>
 
-                        <!-- GitHub Token -->
-                        <?php $ghToken = s('github_token', ''); ?>
-                        <div class="col-12">
-                            <div class="p-3 border rounded">
-                                <div class="fw-semibold">GitHub Access Token</div>
-                                <div class="text-muted small mb-2">Required while the repository is private. Create a Personal Access Token with <code>repo</code> scope.</div>
-                                <div class="input-group" style="max-width:500px">
-                                    <input type="password" class="form-control form-control-sm" name="github_token" id="github-token"
-                                           value="<?= $ghToken ? str_repeat('*', 20) : '' ?>" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" autocomplete="off">
-                                    <button class="btn btn-outline-secondary btn-sm" type="button" id="toggle-gh-token" title="Show/hide">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
 
                     </div>
                     <div class="mt-3">
@@ -878,16 +863,6 @@ if (updateNowBtn) {
     });
 }
 
-// GitHub token show/hide toggle
-const ghToggle = document.getElementById('toggle-gh-token');
-if (ghToggle) {
-    ghToggle.addEventListener('click', function () {
-        const inp = document.getElementById('github-token');
-        const icon = this.querySelector('i');
-        if (inp.type === 'password') { inp.type = 'text'; icon.classList.replace('fa-eye', 'fa-eye-slash'); }
-        else { inp.type = 'password'; icon.classList.replace('fa-eye-slash', 'fa-eye'); }
-    });
-}
 
 // ── Hostname change ──────────────────────────────────────────────────────────
 document.getElementById('save-hostname-btn').addEventListener('click', function () {

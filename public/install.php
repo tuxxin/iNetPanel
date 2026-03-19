@@ -149,13 +149,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         $cfHeaders = ["X-Auth-Email: {$email}", "X-Auth-Key: {$apiKey}", "Content-Type: application/json"];
 
-        // Detect server IP (public-facing for DNS record)
+        // Detect server IP for DNS record
         $serverIp = trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: '');
         if (!$serverIp) $serverIp = trim(shell_exec("hostname -I 2>/dev/null | awk '{print \$1}'") ?: '');
         if (!$serverIp) {
             echo json_encode(['success' => false, 'message' => 'Could not detect server IP.']);
             exit;
         }
+        // Private IPs can't be proxied by Cloudflare
+        $isPrivateIp = filter_var($serverIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false;
 
         // Find zone ID
         $parts = explode('.', $hostname);
@@ -184,8 +186,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 'type' => 'A',
                 'name' => $hostname,
                 'content' => $serverIp,
-                'proxied' => true,
-                'ttl' => 1,
+                'proxied' => !$isPrivateIp,
+                'ttl' => $isPrivateIp ? 300 : 1,
             ]),
         ]);
         $resp = json_decode(curl_exec($ch), true);
