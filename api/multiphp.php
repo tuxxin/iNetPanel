@@ -45,12 +45,18 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => "PHP {$ver} is the panel default and cannot be removed. Set a different default version first."]); break;
         }
         if ($action === 'remove') {
-            $cmd = "sudo /usr/bin/apt-get purge -y php{$ver}-fpm php{$ver}-cli php{$ver}-common php{$ver}-mysql php{$ver}-xml php{$ver}-mbstring php{$ver}-curl php{$ver}-zip 2>&1";
+            $cmd = "sudo /usr/bin/apt-get purge -y 'php{$ver}-*' 2>&1 && sudo /usr/bin/apt-get autoremove -y 2>&1";
         } else {
             $cmd = "sudo /usr/bin/apt-get install -y php{$ver}-fpm php{$ver}-cli php{$ver}-common php{$ver}-mysql php{$ver}-xml php{$ver}-mbstring php{$ver}-curl php{$ver}-zip 2>&1";
         }
-        // Ensure dpkg is in a clean state before running apt (a previous interrupted
-        // operation would cause apt to fail immediately with a dpkg error otherwise).
+        // Send response BEFORE running apt — apt may restart php-fpm which
+        // kills the socket and causes a 500 if the response hasn't been sent.
+        echo json_encode(['success' => true, 'output' => "PHP {$ver} {$action} started..."]);
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        }
+
+        // Ensure dpkg is in a clean state before running apt
         Shell::exec("sudo /usr/bin/dpkg --configure -a", 'multiphp-dpkg');
         exec($cmd, $outArr, $exitCode);
         $out = implode("\n", $outArr);
@@ -60,22 +66,6 @@ switch ($action) {
         if ($action === 'install') {
             Shell::exec("sudo /bin/systemctl enable php{$ver}-fpm", 'multiphp-fpm-enable');
             Shell::exec("sudo /bin/systemctl start  php{$ver}-fpm", 'multiphp-fpm-start');
-        }
-        // Verify the operation actually took effect before doing anything disruptive
-        $nowInstalled = phpIsInstalled($ver);
-        $wantInstalled = ($action === 'install');
-        if ($nowInstalled !== $wantInstalled) {
-            $errMsg = trim($out) ?: "apt-get exited with code {$exitCode}.";
-            echo json_encode(['success' => false, 'error' => $errMsg]);
-            break;
-        }
-
-        // Send the success response to the browser NOW, before restarting FPM.
-        // fastcgi_finish_request() flushes and closes the HTTP response while
-        // PHP continues executing — prevents the FPM restart from killing the reply.
-        echo json_encode(['success' => true, 'output' => trim($out)]);
-        if (function_exists('fastcgi_finish_request')) {
-            fastcgi_finish_request();
         }
 
         // Configure upload limits for the newly installed PHP version

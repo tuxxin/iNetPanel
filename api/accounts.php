@@ -332,10 +332,14 @@ switch ($action) {
             break;
         }
 
-        // Capture port before deletion (account_ports row is deleted after Shell::run)
+        // Capture domain info before deletion (rows are deleted after Shell::run)
         $hookPort = '';
-        $hookDomainRow = DB::fetchOne('SELECT port FROM domains WHERE domain_name = ?', [$domain]);
-        if ($hookDomainRow) $hookPort = $hookDomainRow['port'] ?? '';
+        $hookPhpVer = '';
+        $hookDomainRow = DB::fetchOne('SELECT port, php_version FROM domains WHERE domain_name = ?', [$domain]);
+        if ($hookDomainRow) {
+            $hookPort = $hookDomainRow['port'] ?? '';
+            $hookPhpVer = $hookDomainRow['php_version'] ?? '';
+        }
 
         $args = ['--username' => $username, '--domain' => $domain];
         if ($noBackup) $args[] = '--no-backup';
@@ -367,6 +371,10 @@ switch ($action) {
                 'DOC_ROOT'  => "/home/{$username}/{$domain}/www",
                 'SERVER_IP' => trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: ''),
             ]);
+            // Reload FPM to drop the removed pool's workers
+            $delPhpVer = $hookPhpVer ?: DB::setting('php_default_version', '8.4');
+            $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $delPhpVer) . '-fpm';
+            Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
         }
         break;
 

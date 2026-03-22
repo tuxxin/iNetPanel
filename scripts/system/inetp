@@ -110,6 +110,7 @@ case "$COMMAND" in
     firewall)          bash "$SCRIPTS_DIR/firewall_manage.sh"   "$@" ;;
     ssl_manage)        bash "$SCRIPTS_DIR/ssl_manage.sh"       "$@" ;;
     fix_permissions)   bash "$SCRIPTS_DIR/fix_permissions.sh"   "$@" ;;
+    rebuild_pools)     bash "$SCRIPTS_DIR/rebuild_pools.sh"     "$@" ;;
     panel_ssl)         bash "$SCRIPTS_DIR/panel_ssl.sh"         "$@" ;;
     service_monitor)   bash "$SCRIPTS_DIR/service_monitor.sh"   "$@" ;;
     db_size)           bash "$SCRIPTS_DIR/db_size.sh"           "$@" ;;
@@ -185,6 +186,7 @@ case "$COMMAND" in
         echo -e "    ${GREEN}wg_peer${NC}           Manage WireGuard peers"
         echo -e "    ${GREEN}firewall${NC}          Firewall management (status, flush, ban, unban)"
         echo -e "    ${GREEN}fix_permissions${NC}   Reset file/directory permissions for a user"
+        echo -e "    ${GREEN}rebuild_pools${NC}    Regenerate missing PHP-FPM pool configs"
         echo -e "    ${GREEN}ssl_manage${NC}        SSL certificate management (issue, revoke, renew, status)"
         echo -e "    ${GREEN}list${NC}              List all active accounts and ports"
         echo ""

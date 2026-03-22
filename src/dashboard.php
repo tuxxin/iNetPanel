@@ -29,9 +29,12 @@ $diskUsed  = $diskTotal - $diskFree;
 $diskPct   = $diskTotal > 0 ? round(($diskUsed / $diskTotal) * 100) : 0;
 $diskUsedG = round($diskUsed / 1024 / 1024 / 1024, 1);
 
-// Domain count
+// Account & domain counts
+$accountCount = 0;
 $domainCount = 0;
 try {
+    $row = DB::fetchOne('SELECT COUNT(*) as cnt FROM hosting_users');
+    $accountCount = $row ? (int)$row['cnt'] : 0;
     $row = DB::fetchOne('SELECT COUNT(*) as cnt FROM domains WHERE status = ?', ['active']);
     $domainCount = $row ? (int)$row['cnt'] : 0;
 } catch (\Throwable $e) {}
@@ -50,8 +53,8 @@ $cpuClass = $cpuLoad > 2 ? 'danger' : ($cpuLoad > 1 ? 'warning' : 'success');
         <div class="card card-stat p-3 h-100" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-center">
                 <div>
-                    <h6 class="text-muted mb-1">Active Accounts</h6>
-                    <h3 class="fw-bold mb-0"><?= $domainCount ?></h3>
+                    <h6 class="text-muted mb-1">Accounts &amp; Domains</h6>
+                    <h3 class="fw-bold mb-0"><?= $accountCount ?> <small class="text-muted fs-6">/ <?= $domainCount ?></small></h3>
                 </div>
                 <div class="icon-shape bg-primary-subtle text-primary rounded-circle p-3">
                     <i class="fas fa-users fa-2x"></i>

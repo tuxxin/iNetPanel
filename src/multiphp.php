@@ -199,11 +199,35 @@ function toggleVersion(ver, action) {
     fetch('/api/multiphp', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
-            modal.hide();
             if (data.success) {
-                showAlert(`PHP ${ver} ${action}ed successfully. Reloading…`);
-                setTimeout(() => location.reload(), 1200);
+                document.getElementById('php-modal-msg').textContent =
+                    `PHP ${ver} ${action} in progress. This may take a minute…`;
+                // Poll until the version state changes (installed/removed), then reload
+                const wantInstalled = (action === 'install');
+                let attempts = 0;
+                const poll = setInterval(() => {
+                    attempts++;
+                    fetch('/api/multiphp', { method: 'POST', body: (() => { const f = new FormData(); f.append('action','list'); return f; })() })
+                        .then(r => r.ok ? r.json() : null)
+                        .then(d => {
+                            if (!d || !d.success) return;
+                            const found = (d.versions || []).find(v => v.version === ver);
+                            if (found && found.installed === wantInstalled) {
+                                clearInterval(poll);
+                                modal.hide();
+                                showAlert(`PHP ${ver} ${action}ed successfully.`);
+                                setTimeout(() => location.reload(), 500);
+                            }
+                        })
+                        .catch(() => {});
+                    if (attempts > 60) {
+                        clearInterval(poll);
+                        modal.hide();
+                        showAlert(`PHP ${ver} ${action} may still be running. Reload the page.`, 'warning');
+                    }
+                }, 3000);
             } else {
+                modal.hide();
                 showAlert(data.error || `${action} failed.`, 'danger');
             }
         })
