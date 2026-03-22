@@ -29,7 +29,7 @@ switch ($action) {
             ];
             // Check for background operation status
             foreach (['install', 'remove'] as $op) {
-                $sf = "/tmp/inetp_multiphp_{$op}_{$ver}";
+                $sf = "/var/www/inetpanel/storage/multiphp_{$op}_{$ver}";
                 if (file_exists($sf)) {
                     $st = trim(file_get_contents($sf));
                     if ($st === 'running') {
@@ -53,7 +53,6 @@ switch ($action) {
     case 'install':
     case 'remove':
         Auth::requireAdmin();
-        set_time_limit(0);
         $ver = trim($_POST['version'] ?? '');
         if (!in_array($ver, $supportedVersions)) {
             echo json_encode(['success' => false, 'error' => 'Invalid PHP version.']); break;
@@ -62,50 +61,30 @@ switch ($action) {
         if ($action === 'remove' && $ver === $panelDefault) {
             echo json_encode(['success' => false, 'error' => "PHP {$ver} is the panel default and cannot be removed. Set a different default version first."]); break;
         }
-        if ($action === 'remove') {
-            $cmd = "sudo /usr/bin/apt-get purge -y 'php{$ver}-*' 2>&1 && sudo /usr/bin/apt-get autoremove -y 2>&1";
-        } else {
-            $cmd = "sudo /usr/bin/apt-get install -y php{$ver}-fpm php{$ver}-cli php{$ver}-common php{$ver}-mysql php{$ver}-xml php{$ver}-mbstring php{$ver}-curl php{$ver}-zip 2>&1";
+
+        // Block concurrent operations — apt/dpkg can only run one at a time
+        $storageDir = '/var/www/inetpanel/storage';
+        $busy = false;
+        foreach ($supportedVersions as $v) {
+            foreach (['install', 'remove'] as $op) {
+                $sf = "{$storageDir}/multiphp_{$op}_{$v}";
+                if (file_exists($sf) && trim(file_get_contents($sf)) === 'running') {
+                    $busy = true; break 2;
+                }
+            }
         }
-        // Build a wrapper script that runs apt detached from PHP-FPM.
-        // This survives FPM restarts triggered by dpkg hooks.
-        $statusFile = "/tmp/inetp_multiphp_{$action}_{$ver}";
-        $wrapper = "/tmp/inetp_multiphp_run_{$ver}.sh";
-        $panelDefaultEsc = escapeshellarg($panelDefault);
-        $verEsc = escapeshellarg($ver);
-
-        $script = "#!/bin/bash\n";
-        $script .= "echo 'running' > " . escapeshellarg($statusFile) . "\n";
-        $script .= "dpkg --configure -a 2>/dev/null\n";
-        $script .= "{$cmd}\n";
-        $script .= "if [ \$? -ne 0 ]; then\n";
-        $script .= "  echo 'error' > " . escapeshellarg($statusFile) . "\n";
-        $script .= "  exit 1\n";
-        $script .= "fi\n";
-
-        if ($action === 'install') {
-            $script .= "systemctl enable php{$ver}-fpm 2>/dev/null\n";
-            $script .= "systemctl start php{$ver}-fpm 2>/dev/null\n";
-            $script .= "sed -i 's/^upload_max_filesize[[:space:]]*=.*/upload_max_filesize = 100M/' /etc/php/{$ver}/fpm/php.ini 2>/dev/null\n";
-            $script .= "sed -i 's/^post_max_size[[:space:]]*=.*/post_max_size = 100M/' /etc/php/{$ver}/fpm/php.ini 2>/dev/null\n";
-            $script .= "systemctl reload php{$ver}-fpm 2>/dev/null\n";
+        if ($busy) {
+            echo json_encode(['success' => false, 'error' => "Another operation is in progress. Please wait."]); break;
         }
 
-        if ($action === 'remove') {
-            $script .= "apt-get install --reinstall -y php{$panelDefault}-mysql php{$panelDefault}-sqlite3 php{$panelDefault}-common phpmyadmin 2>/dev/null\n";
-            $script .= "phpenmod -v {$panelDefault} -s fpm calendar ctype curl dom exif fileinfo ftp gd gettext gmp iconv intl mbstring mysqli pdo_mysql pdo_sqlite phar posix readline shmop simplexml sockets sqlite3 sysvmsg sysvsem sysvshm tokenizer xmlreader xmlwriter xsl zip 2>/dev/null\n";
-        }
-
-        $script .= "systemctl restart php{$panelDefault}-fpm 2>/dev/null\n";
-        $script .= "rm -f " . escapeshellarg($statusFile) . "\n";
-        $script .= "rm -f " . escapeshellarg($wrapper) . "\n";
-
-        file_put_contents($wrapper, $script);
-        chmod($wrapper, 0755);
-        file_put_contents($statusFile, 'running');
-
-        // Launch detached — nohup + & ensures it survives FPM death
-        exec("sudo /bin/bash " . escapeshellarg($wrapper) . " > /tmp/inetp_multiphp.log 2>&1 &");
+        // Launch via inetp as a detached background process.
+        // This runs entirely outside PHP-FPM and survives FPM restarts.
+        $logFile = '/var/www/inetpanel/storage/multiphp.log';
+        $cmd = 'nohup sudo /usr/local/bin/inetp multiphp_manage'
+             . ' --action ' . escapeshellarg($action)
+             . ' --version ' . escapeshellarg($ver)
+             . ' > ' . escapeshellarg($logFile) . ' 2>&1 &';
+        exec($cmd);
 
         echo json_encode(['success' => true, 'output' => "PHP {$ver} {$action} started..."]);
         break;

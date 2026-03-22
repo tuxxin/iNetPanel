@@ -28,6 +28,7 @@ class Shell
         'panel_ssl',
         'service_monitor',
         'db_size',
+        'multiphp_manage',
         'list',
     ];
 

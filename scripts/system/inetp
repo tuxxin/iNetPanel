@@ -111,6 +111,7 @@ case "$COMMAND" in
     ssl_manage)        bash "$SCRIPTS_DIR/ssl_manage.sh"       "$@" ;;
     fix_permissions)   bash "$SCRIPTS_DIR/fix_permissions.sh"   "$@" ;;
     rebuild_pools)     bash "$SCRIPTS_DIR/rebuild_pools.sh"     "$@" ;;
+    multiphp_manage)   bash "$SCRIPTS_DIR/multiphp_manage.sh"   "$@" ;;
     panel_ssl)         bash "$SCRIPTS_DIR/panel_ssl.sh"         "$@" ;;
     service_monitor)   bash "$SCRIPTS_DIR/service_monitor.sh"   "$@" ;;
     db_size)           bash "$SCRIPTS_DIR/db_size.sh"           "$@" ;;

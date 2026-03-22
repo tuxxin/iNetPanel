@@ -189,10 +189,6 @@ function toggleVersion(ver, action) {
             `may cause instability or break the system entirely.\n\nProceed with caution — continue?`;
         if (!confirm(msg)) return;
     }
-    const modal = new bootstrap.Modal(document.getElementById('phpModal'));
-    document.getElementById('php-modal-title').textContent = action === 'install' ? `Installing PHP ${ver}…` : `Removing PHP ${ver}…`;
-    document.getElementById('php-modal-msg').textContent = 'This may take a minute. Please wait.';
-    modal.show();
     const fd = new FormData();
     fd.append('action', action);
     fd.append('version', ver);
@@ -200,8 +196,11 @@ function toggleVersion(ver, action) {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
+                const modal = new bootstrap.Modal(document.getElementById('phpModal'));
+                document.getElementById('php-modal-title').textContent = action === 'install' ? `Installing PHP ${ver}…` : `Removing PHP ${ver}…`;
                 document.getElementById('php-modal-msg').textContent =
                     `PHP ${ver} ${action} in progress. This may take a minute…`;
+                modal.show();
                 // Poll until: version state changes, background error, or no bg_status (done)
                 const wantInstalled = (action === 'install');
                 let attempts = 0;
@@ -240,11 +239,10 @@ function toggleVersion(ver, action) {
                     }
                 }, 3000);
             } else {
-                modal.hide();
                 showAlert(data.error || `${action} failed.`, 'danger');
             }
         })
-        .catch(() => { modal.hide(); showAlert('Request failed.', 'danger'); });
+        .catch(() => { showAlert('Request failed.', 'danger'); });
 }
 
 function saveSystemDefault() {
