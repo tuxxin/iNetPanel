@@ -100,18 +100,21 @@ switch ($action) {
 
         $pkg  = "php{$ver}-{$ext}";
         $flag = ($action === 'install') ? 'install' : 'remove';
-        $cmd  = "DEBIAN_FRONTEND=noninteractive sudo /usr/bin/apt-get {$flag} -y " . escapeshellarg($pkg) . " 2>&1";
-        exec($cmd, $lines, $rc);
-        $output = implode("\n", $lines);
-
-        if ($rc !== 0) {
-            echo json_encode(['success' => false, 'error' => "apt-get failed (exit {$rc})", 'output' => $output]); break;
-        }
-
-        echo json_encode(['success' => true, 'output' => $output]);
-        // Flush response before restarting FPM — restart kills the panel worker
-        if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
-        Shell::systemctl('restart', "php{$ver}-fpm");
+        $statusFile = "/var/www/inetpanel/storage/pkg_{$flag}_{$ver}_{$ext}";
+        // Run in a systemd scope so dpkg triggers restarting php-fpm won't kill this
+        $aptCmd = "DEBIAN_FRONTEND=noninteractive apt-get {$flag} -y " . escapeshellarg($pkg);
+        $wrapper = "echo running > " . escapeshellarg($statusFile)
+            . " && chown www-data:www-data " . escapeshellarg($statusFile)
+            . " && chmod 0666 " . escapeshellarg($statusFile)
+            . " && RESULT=\$({$aptCmd} 2>&1); RC=\$?;"
+            . " dpkg --configure -a < /dev/null 2>/dev/null || true;"
+            . " if [ \$RC -ne 0 ]; then echo \"error\" > " . escapeshellarg($statusFile)
+            . "; echo \"\$RESULT\" >> " . escapeshellarg($statusFile) . "; exit 1; fi;"
+            . " rm -f " . escapeshellarg($statusFile) . ";"
+            . " systemctl restart php{$ver}-fpm 2>/dev/null";
+        $cmd = "sudo systemd-run --scope --quiet bash -c " . escapeshellarg($wrapper) . " >> /var/www/inetpanel/storage/pkg.log 2>&1 &";
+        exec($cmd);
+        echo json_encode(['success' => true, 'output' => 'started', 'status_file' => basename($statusFile)]);
         break;
 
     case 'installed_versions':
@@ -124,6 +127,26 @@ switch ($action) {
             }
         }
         echo json_encode(['success' => true, 'data' => $result]);
+        break;
+
+    case 'pkg_status':
+        $file = basename(trim($_GET['file'] ?? ''));
+        if (!$file || !preg_match('/^pkg_(install|remove)_[\d.]+_\w+$/', $file)) {
+            echo json_encode(['status' => 'done']); break;
+        }
+        $path = "/var/www/inetpanel/storage/{$file}";
+        if (!file_exists($path)) {
+            echo json_encode(['status' => 'done']); break;
+        }
+        $st = trim(file_get_contents($path));
+        if ($st === 'running') {
+            echo json_encode(['status' => 'running']);
+        } elseif (str_starts_with($st, 'error')) {
+            echo json_encode(['status' => 'error', 'message' => substr($st, 6)]);
+            @unlink($path);
+        } else {
+            echo json_encode(['status' => 'done']);
+        }
         break;
 
     default:

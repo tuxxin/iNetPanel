@@ -142,10 +142,6 @@ function renderPackages(packages, ver) {
 }
 
 function togglePkg(ver, ext, action) {
-    const modal = new bootstrap.Modal(document.getElementById('pkgModal'));
-    document.getElementById('pkg-modal-title').textContent = `${action === 'install' ? 'Installing' : 'Removing'} php${ver}-${ext}…`;
-    document.getElementById('pkg-modal-msg').textContent = 'Please wait…';
-    modal.show();
     const fd = new FormData();
     fd.append('action', action);
     fd.append('version', ver);
@@ -153,15 +149,50 @@ function togglePkg(ver, ext, action) {
     fetch('/api/packages', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
-            modal.hide();
-            if (data.success) {
+            if (!data.success) {
+                showAlert(data.error || `${action} failed.`, 'danger');
+                return;
+            }
+            // If API returned synchronously (e.g. opcache already loaded)
+            if (!data.status_file) {
                 showAlert(`php${ver}-${ext} ${action}ed successfully.`);
                 loadPackages(ver);
-            } else {
-                showAlert(data.error || `${action} failed.`, 'danger');
+                return;
             }
+            // Async operation — show modal and poll status file via list action
+            const modal = new bootstrap.Modal(document.getElementById('pkgModal'));
+            document.getElementById('pkg-modal-title').textContent = `${action === 'install' ? 'Installing' : 'Removing'} php${ver}-${ext}…`;
+            document.getElementById('pkg-modal-msg').textContent = 'This may take a moment…';
+            modal.show();
+            let attempts = 0;
+            const poll = setInterval(() => {
+                attempts++;
+                fetch(`/api/packages?action=pkg_status&file=${encodeURIComponent(data.status_file)}`)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(d => {
+                        if (!d) return;
+                        if (d.status === 'error') {
+                            clearInterval(poll);
+                            modal.hide();
+                            showAlert(`php${ver}-${ext} ${action} failed: ${d.message || 'Unknown error'}`, 'danger');
+                            return;
+                        }
+                        if (d.status === 'done') {
+                            clearInterval(poll);
+                            modal.hide();
+                            showAlert(`php${ver}-${ext} ${action}ed successfully.`);
+                            loadPackages(ver);
+                        }
+                    })
+                    .catch(() => {});
+                if (attempts > 40) {
+                    clearInterval(poll);
+                    modal.hide();
+                    showAlert(`php${ver}-${ext} ${action} timed out. Check logs and reload.`, 'warning');
+                }
+            }, 2000);
         })
-        .catch(() => { modal.hide(); showAlert('Request failed.', 'danger'); });
+        .catch(() => { showAlert('Request failed.', 'danger'); });
 }
 
 document.getElementById('load-pkgs-btn').addEventListener('click', function () {
