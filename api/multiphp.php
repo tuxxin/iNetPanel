@@ -18,6 +18,7 @@ switch ($action) {
     case 'list':
         $defaultVer = DB::setting('php_default_version', '8.4');
         $data = [];
+        $bgStatus = null;
         foreach ($supportedVersions as $ver) {
             $installed = phpIsInstalled($ver);
             $data[] = [
@@ -26,10 +27,27 @@ switch ($action) {
                 'is_default' => ($ver === $defaultVer),
                 'socket'     => "/run/php/php{$ver}-fpm.sock",
             ];
+            // Check for background operation status
+            foreach (['install', 'remove'] as $op) {
+                $sf = "/tmp/inetp_multiphp_{$op}_{$ver}";
+                if (file_exists($sf)) {
+                    $st = trim(file_get_contents($sf));
+                    if ($st === 'running') {
+                        $bgStatus = ['version' => $ver, 'action' => $op, 'status' => 'running'];
+                    } elseif (str_starts_with($st, 'error')) {
+                        $bgStatus = ['version' => $ver, 'action' => $op, 'status' => 'error', 'message' => substr($st, 6)];
+                        @unlink($sf);
+                    } elseif ($st === 'done') {
+                        @unlink($sf);
+                    }
+                }
+            }
         }
         // Per-domain overrides
         $domains = DB::fetchAll('SELECT domain_name, php_version FROM domains ORDER BY domain_name');
-        echo json_encode(['success' => true, 'versions' => $data, 'domains' => $domains, 'default' => $defaultVer]);
+        $result = ['success' => true, 'versions' => $data, 'domains' => $domains, 'default' => $defaultVer];
+        if ($bgStatus) $result['bg_status'] = $bgStatus;
+        echo json_encode($result);
         break;
 
     case 'install':
@@ -51,6 +69,8 @@ switch ($action) {
         }
         // Send response BEFORE running apt — apt may restart php-fpm which
         // kills the socket and causes a 500 if the response hasn't been sent.
+        $statusFile = "/tmp/inetp_multiphp_{$action}_{$ver}";
+        file_put_contents($statusFile, 'running');
         echo json_encode(['success' => true, 'output' => "PHP {$ver} {$action} started..."]);
         if (function_exists('fastcgi_finish_request')) {
             fastcgi_finish_request();
@@ -62,6 +82,9 @@ switch ($action) {
         $out = implode("\n", $outArr);
         if ($exitCode !== 0) {
             error_log("[multiphp-apt-error] exit={$exitCode} output=" . implode(' ', $outArr));
+            file_put_contents($statusFile, "error\n" . $out);
+        } else {
+            file_put_contents($statusFile, 'done');
         }
         if ($action === 'install') {
             Shell::exec("sudo /bin/systemctl enable php{$ver}-fpm", 'multiphp-fpm-enable');
@@ -84,6 +107,7 @@ switch ($action) {
             Shell::exec("sudo /usr/sbin/phpenmod -v {$panelDefault} -s fpm calendar ctype curl dom exif fileinfo ftp gd gettext gmp iconv intl mbstring mysqli pdo_mysql pdo_sqlite phar posix readline shmop simplexml sockets sqlite3 sysvmsg sysvsem sysvshm tokenizer xmlreader xmlwriter xsl zip", 'multiphp-phpenmod');
         }
         Shell::exec("sudo /bin/systemctl restart php{$panelDefault}-fpm", 'multiphp-fpm-reload');
+        @unlink($statusFile);
         break;
 
     case 'set_default':

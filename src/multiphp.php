@@ -202,7 +202,7 @@ function toggleVersion(ver, action) {
             if (data.success) {
                 document.getElementById('php-modal-msg').textContent =
                     `PHP ${ver} ${action} in progress. This may take a minute…`;
-                // Poll until the version state changes (installed/removed), then reload
+                // Poll until the version state changes or background error detected
                 const wantInstalled = (action === 'install');
                 let attempts = 0;
                 const poll = setInterval(() => {
@@ -211,6 +211,13 @@ function toggleVersion(ver, action) {
                         .then(r => r.ok ? r.json() : null)
                         .then(d => {
                             if (!d || !d.success) return;
+                            // Check for background error
+                            if (d.bg_status && d.bg_status.version === ver && d.bg_status.status === 'error') {
+                                clearInterval(poll);
+                                modal.hide();
+                                showAlert(`PHP ${ver} ${action} failed: ${d.bg_status.message || 'Unknown error'}`, 'danger');
+                                return;
+                            }
                             const found = (d.versions || []).find(v => v.version === ver);
                             if (found && found.installed === wantInstalled) {
                                 clearInterval(poll);
@@ -220,10 +227,10 @@ function toggleVersion(ver, action) {
                             }
                         })
                         .catch(() => {});
-                    if (attempts > 60) {
+                    if (attempts > 40) {
                         clearInterval(poll);
                         modal.hide();
-                        showAlert(`PHP ${ver} ${action} may still be running. Reload the page.`, 'warning');
+                        showAlert(`PHP ${ver} ${action} timed out. Check logs and reload the page.`, 'warning');
                     }
                 }, 3000);
             } else {
