@@ -213,6 +213,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
     // ── Resource chart — history from DB + live polling ────────────────
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     let currentRange = 'hour';
     const labels = [], cpuData = [], memData = [], netData = [];
 
@@ -233,20 +234,20 @@ document.addEventListener('DOMContentLoaded', function () {
             scales: {
                 x: {
                     display: true,
-                    ticks: { maxTicksLimit: 10, font: { size: 10 }, color: '#aaa' },
+                    ticks: { maxTicksLimit: 10, font: { size: 10 }, color: isDark ? '#94a3b8' : '#aaa' },
                     grid: { display: false }
                 },
                 y: {
                     beginAtZero: true,
                     suggestedMax: 100,
                     position: 'left',
-                    ticks: { callback: v => v + '%', font: { size: 10 }, color: '#aaa' },
-                    grid: { color: 'rgba(0,0,0,.04)' }
+                    ticks: { callback: v => v + '%', font: { size: 10 }, color: isDark ? '#94a3b8' : '#aaa' },
+                    grid: { color: isDark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.04)' }
                 },
                 y1: {
                     beginAtZero: true,
                     position: 'right',
-                    ticks: { callback: v => v + ' KB/s', font: { size: 10 }, color: '#aaa' },
+                    ticks: { callback: v => v + ' KB/s', font: { size: 10 }, color: isDark ? '#94a3b8' : '#aaa' },
                     grid: { drawOnChartArea: false }
                 }
             },

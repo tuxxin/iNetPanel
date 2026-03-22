@@ -390,7 +390,7 @@ function s(string $key, string $default = ''): string {
                     <div>
                         <div class="fw-semibold">WireGuard is not installed</div>
                         <div class="small mt-1">WireGuard was not selected during installation. To install it, run the setup script on your server:</div>
-                        <code class="d-block mt-2 p-2 bg-white rounded border small">sudo /root/scripts/wireguard_setup.sh --port 1443 --subnet 10.10.0.0/24</code>
+                        <code class="d-block mt-2 p-2 bg-light rounded border small">sudo /root/scripts/wireguard_setup.sh --port 1443 --subnet 10.10.0.0/24</code>
                         <div class="small text-muted mt-2">After installation, reload this page to manage WireGuard from the panel.</div>
                     </div>
                 </div>
@@ -398,7 +398,7 @@ function s(string $key, string $default = ''): string {
                 <?php else: ?>
 
                 <!-- Lockdown notice -->
-                <div class="alert alert-info border-0 mb-4" style="background: #e8f4f8;">
+                <div class="alert alert-info border-0 mb-4">
                     <div class="d-flex align-items-start gap-2">
                         <i class="fas fa-lock mt-1 text-primary"></i>
                         <div>

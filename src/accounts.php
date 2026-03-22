@@ -410,9 +410,10 @@ function showWgConfig(domain) {
             wgConfigContent = data.config;
             document.getElementById('wg-config-text').textContent = data.config;
             document.getElementById('wg-qr-container').innerHTML = '';
+            const qrIsDark = document.documentElement.getAttribute('data-theme') === 'dark';
             new QRCode(document.getElementById('wg-qr-container'), {
                 text: data.config, width: 220, height: 220,
-                colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L
+                colorDark: qrIsDark ? '#e2e8f0' : '#000000', colorLight: qrIsDark ? '#1e293b' : '#ffffff', correctLevel: QRCode.CorrectLevel.L
             });
         });
 }
