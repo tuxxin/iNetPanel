@@ -67,47 +67,47 @@ switch ($action) {
         } else {
             $cmd = "sudo /usr/bin/apt-get install -y php{$ver}-fpm php{$ver}-cli php{$ver}-common php{$ver}-mysql php{$ver}-xml php{$ver}-mbstring php{$ver}-curl php{$ver}-zip 2>&1";
         }
-        // Send response BEFORE running apt — apt may restart php-fpm which
-        // kills the socket and causes a 500 if the response hasn't been sent.
+        // Build a wrapper script that runs apt detached from PHP-FPM.
+        // This survives FPM restarts triggered by dpkg hooks.
         $statusFile = "/tmp/inetp_multiphp_{$action}_{$ver}";
-        file_put_contents($statusFile, 'running');
-        echo json_encode(['success' => true, 'output' => "PHP {$ver} {$action} started..."]);
-        if (function_exists('fastcgi_finish_request')) {
-            fastcgi_finish_request();
-        }
+        $wrapper = "/tmp/inetp_multiphp_run_{$ver}.sh";
+        $panelDefaultEsc = escapeshellarg($panelDefault);
+        $verEsc = escapeshellarg($ver);
 
-        // Ensure dpkg is in a clean state before running apt
-        Shell::exec("sudo /usr/bin/dpkg --configure -a", 'multiphp-dpkg');
-        exec($cmd, $outArr, $exitCode);
-        $out = implode("\n", $outArr);
-        if ($exitCode !== 0) {
-            error_log("[multiphp-apt-error] exit={$exitCode} output=" . implode(' ', $outArr));
-            file_put_contents($statusFile, "error\n" . $out);
-            break;
-        }
-        // Mark done immediately — subsequent FPM restarts may kill this worker
-        @unlink($statusFile);
+        $script = "#!/bin/bash\n";
+        $script .= "echo 'running' > " . escapeshellarg($statusFile) . "\n";
+        $script .= "dpkg --configure -a 2>/dev/null\n";
+        $script .= "{$cmd}\n";
+        $script .= "if [ \$? -ne 0 ]; then\n";
+        $script .= "  echo 'error' > " . escapeshellarg($statusFile) . "\n";
+        $script .= "  exit 1\n";
+        $script .= "fi\n";
+
         if ($action === 'install') {
-            Shell::exec("sudo /bin/systemctl enable php{$ver}-fpm", 'multiphp-fpm-enable');
-            Shell::exec("sudo /bin/systemctl start  php{$ver}-fpm", 'multiphp-fpm-start');
+            $script .= "systemctl enable php{$ver}-fpm 2>/dev/null\n";
+            $script .= "systemctl start php{$ver}-fpm 2>/dev/null\n";
+            $script .= "sed -i 's/^upload_max_filesize[[:space:]]*=.*/upload_max_filesize = 100M/' /etc/php/{$ver}/fpm/php.ini 2>/dev/null\n";
+            $script .= "sed -i 's/^post_max_size[[:space:]]*=.*/post_max_size = 100M/' /etc/php/{$ver}/fpm/php.ini 2>/dev/null\n";
+            $script .= "systemctl reload php{$ver}-fpm 2>/dev/null\n";
         }
 
-        // Configure upload limits for the newly installed PHP version
-        if ($action === 'install') {
-            $ini = "/etc/php/{$ver}/fpm/php.ini";
-            Shell::exec("sudo /bin/sed -i 's/^upload_max_filesize[[:space:]]*=.*/upload_max_filesize = 100M/' " . escapeshellarg($ini), 'multiphp-sed');
-            Shell::exec("sudo /bin/sed -i 's/^post_max_size[[:space:]]*=.*/post_max_size = 100M/' " . escapeshellarg($ini), 'multiphp-sed');
-            Shell::exec("sudo /bin/systemctl reload php{$ver}-fpm", 'multiphp-fpm-reload');
-        }
-
-        // After any purge, apt prerm hooks may disable modules for other PHP versions
-        // and can corrupt shared library symbols. Reinstall core packages and
-        // re-enable all FPM modules for the panel default to restore a clean state.
         if ($action === 'remove') {
-            Shell::exec("sudo /usr/bin/apt-get install --reinstall -y php{$panelDefault}-mysql php{$panelDefault}-sqlite3 php{$panelDefault}-common phpmyadmin", 'multiphp-reinstall');
-            Shell::exec("sudo /usr/sbin/phpenmod -v {$panelDefault} -s fpm calendar ctype curl dom exif fileinfo ftp gd gettext gmp iconv intl mbstring mysqli pdo_mysql pdo_sqlite phar posix readline shmop simplexml sockets sqlite3 sysvmsg sysvsem sysvshm tokenizer xmlreader xmlwriter xsl zip", 'multiphp-phpenmod');
+            $script .= "apt-get install --reinstall -y php{$panelDefault}-mysql php{$panelDefault}-sqlite3 php{$panelDefault}-common phpmyadmin 2>/dev/null\n";
+            $script .= "phpenmod -v {$panelDefault} -s fpm calendar ctype curl dom exif fileinfo ftp gd gettext gmp iconv intl mbstring mysqli pdo_mysql pdo_sqlite phar posix readline shmop simplexml sockets sqlite3 sysvmsg sysvsem sysvshm tokenizer xmlreader xmlwriter xsl zip 2>/dev/null\n";
         }
-        Shell::exec("sudo /bin/systemctl restart php{$panelDefault}-fpm", 'multiphp-fpm-reload');
+
+        $script .= "systemctl restart php{$panelDefault}-fpm 2>/dev/null\n";
+        $script .= "rm -f " . escapeshellarg($statusFile) . "\n";
+        $script .= "rm -f " . escapeshellarg($wrapper) . "\n";
+
+        file_put_contents($wrapper, $script);
+        chmod($wrapper, 0755);
+        file_put_contents($statusFile, 'running');
+
+        // Launch detached — nohup + & ensures it survives FPM death
+        exec("sudo /bin/bash " . escapeshellarg($wrapper) . " > /tmp/inetp_multiphp.log 2>&1 &");
+
+        echo json_encode(['success' => true, 'output' => "PHP {$ver} {$action} started..."]);
         break;
 
     case 'set_default':

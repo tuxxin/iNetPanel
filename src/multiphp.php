@@ -202,9 +202,10 @@ function toggleVersion(ver, action) {
             if (data.success) {
                 document.getElementById('php-modal-msg').textContent =
                     `PHP ${ver} ${action} in progress. This may take a minute…`;
-                // Poll until the version state changes or background error detected
+                // Poll until: version state changes, background error, or no bg_status (done)
                 const wantInstalled = (action === 'install');
                 let attempts = 0;
+                let seenRunning = false;
                 const poll = setInterval(() => {
                     attempts++;
                     fetch('/api/multiphp', { method: 'POST', body: (() => { const f = new FormData(); f.append('action','list'); return f; })() })
@@ -218,8 +219,13 @@ function toggleVersion(ver, action) {
                                 showAlert(`PHP ${ver} ${action} failed: ${d.bg_status.message || 'Unknown error'}`, 'danger');
                                 return;
                             }
+                            if (d.bg_status && d.bg_status.version === ver && d.bg_status.status === 'running') {
+                                seenRunning = true;
+                            }
+                            // Status file removed (done) or version state matches
+                            const bgDone = seenRunning && (!d.bg_status || d.bg_status.version !== ver);
                             const found = (d.versions || []).find(v => v.version === ver);
-                            if (found && found.installed === wantInstalled) {
+                            if (bgDone || (found && found.installed === wantInstalled)) {
                                 clearInterval(poll);
                                 modal.hide();
                                 showAlert(`PHP ${ver} ${action}ed successfully.`);
