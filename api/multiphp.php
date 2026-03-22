@@ -83,9 +83,10 @@ switch ($action) {
         if ($exitCode !== 0) {
             error_log("[multiphp-apt-error] exit={$exitCode} output=" . implode(' ', $outArr));
             file_put_contents($statusFile, "error\n" . $out);
-        } else {
-            file_put_contents($statusFile, 'done');
+            break;
         }
+        // Mark done immediately — subsequent FPM restarts may kill this worker
+        @unlink($statusFile);
         if ($action === 'install') {
             Shell::exec("sudo /bin/systemctl enable php{$ver}-fpm", 'multiphp-fpm-enable');
             Shell::exec("sudo /bin/systemctl start  php{$ver}-fpm", 'multiphp-fpm-start');
@@ -107,7 +108,6 @@ switch ($action) {
             Shell::exec("sudo /usr/sbin/phpenmod -v {$panelDefault} -s fpm calendar ctype curl dom exif fileinfo ftp gd gettext gmp iconv intl mbstring mysqli pdo_mysql pdo_sqlite phar posix readline shmop simplexml sockets sqlite3 sysvmsg sysvsem sysvshm tokenizer xmlreader xmlwriter xsl zip", 'multiphp-phpenmod');
         }
         Shell::exec("sudo /bin/systemctl restart php{$panelDefault}-fpm", 'multiphp-fpm-reload');
-        @unlink($statusFile);
         break;
 
     case 'set_default':
