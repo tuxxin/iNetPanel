@@ -296,6 +296,24 @@ body {
     --text-main:  #e2e8f0;
     --text-muted: #94a3b8;
     --sidebar-bg: #1e293b;
+
+    /* Override Bootstrap 5.3 internal CSS variables */
+    --bs-body-color:       #e2e8f0;
+    --bs-body-bg:          #0f172a;
+    --bs-table-color:      #e2e8f0;
+    --bs-table-bg:         transparent;
+    --bs-table-hover-color: #e2e8f0;
+    --bs-table-hover-bg:   rgba(255,255,255,0.04);
+    --bs-table-striped-color: #e2e8f0;
+    --bs-tertiary-bg:      #1e293b;
+    --bs-secondary-bg:     #1e293b;
+    --bs-border-color:     rgba(255,255,255,0.08);
+    --bs-heading-color:    #e2e8f0;
+    --bs-link-color:       #60a5fa;
+    --bs-link-hover-color: #93bbfc;
+    --bs-emphasis-color:   #f1f5f9;
+    --bs-card-bg:          #1e293b;
+    --bs-card-border-color: rgba(255,255,255,0.08);
 }
 
 [data-theme="dark"] body {
@@ -324,8 +342,11 @@ body {
 [data-theme="dark"] .bg-white    { background: #1e293b !important; }
 
 /* Tables */
-[data-theme="dark"] .table                  { color: var(--text-main); --bs-table-bg: transparent; }
-[data-theme="dark"] .table-light            { --bs-table-bg: rgba(255,255,255,0.04); color: var(--text-main); }
+[data-theme="dark"] .table                  { color: var(--text-main); --bs-table-bg: transparent; --bs-table-color: #e2e8f0; }
+[data-theme="dark"] .table-light            { --bs-table-bg: rgba(255,255,255,0.04); --bs-table-color: #e2e8f0; color: #e2e8f0 !important; }
+[data-theme="dark"] .table-light th,
+[data-theme="dark"] .table-light td         { color: #e2e8f0 !important; }
+[data-theme="dark"] thead                   { color: #e2e8f0; }
 [data-theme="dark"] .table-hover > tbody > tr:hover > * { background-color: rgba(255,255,255,0.04); }
 [data-theme="dark"] .table > :not(caption) > * > * { border-bottom-color: rgba(255,255,255,0.08); }
 
@@ -430,5 +451,32 @@ body {
 /* Toast */
 [data-theme="dark"] .toast                   { background: #1e293b; color: var(--text-main); border-color: rgba(255,255,255,0.08); }
 
-/* Logo inversion for dark mode */
-[data-theme="dark"] .sidebar-brand-logo      { filter: brightness(0) invert(1) brightness(0.9); }
+/* Bootstrap 5.3 subtle utilities */
+[data-theme="dark"] .bg-success-subtle       { background: rgba(34,197,94,0.15) !important; }
+[data-theme="dark"] .border-success-subtle   { border-color: rgba(34,197,94,0.3) !important; }
+[data-theme="dark"] .bg-primary-subtle       { background: rgba(0,80,213,0.15) !important; }
+[data-theme="dark"] .border-primary-subtle   { border-color: rgba(0,80,213,0.3) !important; }
+[data-theme="dark"] .text-primary-emphasis    { color: #60a5fa !important; }
+[data-theme="dark"] .bg-warning-subtle       { background: rgba(234,179,8,0.15) !important; }
+[data-theme="dark"] .bg-danger-subtle        { background: rgba(239,68,68,0.15) !important; }
+
+/* Table borders */
+[data-theme="dark"] .table-bordered > :not(caption) > * > * { border-color: rgba(255,255,255,0.08); }
+
+/* Nav tabs */
+[data-theme="dark"] .nav-tabs                { border-bottom-color: rgba(255,255,255,0.1); }
+[data-theme="dark"] .nav-tabs .nav-link      { color: #94a3b8; }
+[data-theme="dark"] .nav-tabs .nav-link:hover { border-color: rgba(255,255,255,0.1) rgba(255,255,255,0.1) transparent; color: var(--text-main); }
+[data-theme="dark"] .nav-tabs .nav-link.active { background: #1e293b; border-color: rgba(255,255,255,0.1) rgba(255,255,255,0.1) #1e293b; color: var(--text-main); }
+
+/* Tab content */
+[data-theme="dark"] .tab-content             { color: var(--text-main); }
+
+/* Badges in alerts (warning badges with text-dark) */
+[data-theme="dark"] .badge.bg-warning        { color: #000 !important; }
+
+/* Close button */
+[data-theme="dark"] .btn-close               { filter: invert(1) grayscale(100%) brightness(200%); }
+
+/* Logo — white overlay in dark mode */
+[data-theme="dark"] .sidebar-brand-logo      { filter: brightness(0) invert(1); }

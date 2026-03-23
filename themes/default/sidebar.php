@@ -1,6 +1,6 @@
 <div class="sidebar">
     <div class="sidebar-header">
-        <img src="/assets/img/iNetPanel-Logo.webp" alt="iNetPanel" class="sidebar-brand-logo">
+        <img src="/assets/img/iNetPanel-Logo.png" alt="iNetPanel" class="sidebar-brand-logo">
     </div>
     
     <?php

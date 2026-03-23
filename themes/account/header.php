@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
     <title><?= htmlspecialchars($GLOBALS['_page_title'] ?? 'My Account') ?> — iNetPanel</title>
+    <link rel="icon" type="image/webp" href="/assets/img/Logo-Icon.webp">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="/assets/css/style.css?v=<?= @filemtime(__DIR__ . '/../../public/assets/css/style.css') ?: time() ?>" rel="stylesheet">
@@ -12,7 +13,7 @@
     <style>
         body { background-color: var(--body-bg); font-family: 'Segoe UI', system-ui, sans-serif; color: var(--text-main); margin: 0; }
         .account-nav { background: var(--header-gradient); position: sticky; top: 0; z-index: 900; box-shadow: 0 2px 10px rgba(0,0,0,0.15); }
-        .account-nav .nav-brand img { height: 36px; }
+        .account-nav .nav-brand img { height: 28px; filter: brightness(0) invert(1); }
         .account-nav .nav-domain { color: rgba(255,255,255,0.85); font-weight: 600; font-size: 0.9rem; }
         .account-main { max-width: 1100px; margin: 0 auto; padding: 30px 20px 80px; }
         [data-theme="dark"] .card { background: #1e293b; border-color: rgba(255,255,255,0.08) !important; }
@@ -30,7 +31,7 @@
 
 <nav class="account-nav py-2 px-4 d-flex align-items-center justify-content-between">
     <div class="d-flex align-items-center gap-3">
-        <a href="/user/dashboard" class="nav-brand"><img src="/assets/img/iNetPanel-Logo.webp" alt="iNetPanel"></a>
+        <a href="/user/dashboard" class="nav-brand"><img src="/assets/img/iNetPanel-Logo.png" alt="iNetPanel"></a>
         <span class="text-white-50 d-none d-md-inline">|</span>
         <span class="nav-domain d-none d-md-inline">
             <i class="fas fa-user me-1" style="color: var(--brand-cyan);"></i>
