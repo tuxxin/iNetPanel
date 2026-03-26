@@ -118,6 +118,23 @@ function s(string $key, string $default = ''): string {
                     </div>
                 </div>
 
+                <!-- Release Channel -->
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <div class="p-3 border rounded bg-light">
+                            <div class="fw-semibold mb-2"><i class="fas fa-code-branch me-1"></i>Release Channel</div>
+                            <div class="text-muted small mb-2">
+                                <strong>Stable</strong> pulls from tagged GitHub releases.
+                                <strong>Beta</strong> pulls the latest code from the main branch.
+                            </div>
+                            <select class="form-select form-select-sm w-auto" id="update-channel-select">
+                                <option value="stable" <?= s('update_channel', 'stable') === 'stable' ? 'selected' : '' ?>>Stable (Recommended)</option>
+                                <option value="beta" <?= s('update_channel', 'stable') === 'beta' ? 'selected' : '' ?>>Beta</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 <hr class="my-4">
                 <h6 class="text-muted text-uppercase small fw-bold mb-3">Scheduled Jobs</h6>
 
@@ -782,6 +799,23 @@ function refreshUpdateStatus() {
 }
 // Auto-load on page ready
 document.addEventListener('DOMContentLoaded', refreshUpdateStatus);
+
+// Release channel selector
+const channelSelect = document.getElementById('update-channel-select');
+if (channelSelect) {
+    channelSelect.addEventListener('change', function() {
+        const fd = new FormData();
+        fd.append('action', 'set_update_channel');
+        fd.append('channel', this.value);
+        fetch('/api/settings', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) showAlert(`Release channel set to ${data.channel}.`, 'success');
+                else showAlert(data.error || 'Failed.', 'danger');
+            })
+            .catch(() => showAlert('Request failed.', 'danger'));
+    });
+}
 
 const checkNowBtn  = document.getElementById('check-now-btn');
 const updateNowBtn = document.getElementById('update-now-btn');

@@ -20,6 +20,19 @@ Requires a **clean Debian 12** server with root access. The guided installer han
 
 > **[Full installation guide →](https://inetpanel.tuxxin.com/install)**
 
+### Release Channels
+
+| Channel | Installer | Updates | Use case |
+|---|---|---|---|
+| **Stable** | `inetpanel.tuxxin.com/latest` | Tagged GitHub releases | Production servers (default) |
+| **Beta** | `inetpanel.tuxxin.com/latest-beta` | Latest code from `main` branch | Testing new features before release |
+
+The **stable** installer downloads the latest tagged release. Updates are pulled from GitHub Releases only when a new version is published.
+
+The **beta** installer clones the `main` branch directly. Updates pull the latest commit from `main`, which may include untested changes.
+
+You can switch between channels at any time in **Settings → Updates → Release Channel** without reinstalling.
+
 ---
 
 ## Why iNetPanel?

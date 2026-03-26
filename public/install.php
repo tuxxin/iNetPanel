@@ -424,6 +424,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 'auto_update_time'    => '02:00',
                 // PHP
                 'php_default_version' => $detectedPhpVer,
+                // Updates
+                'update_channel' => 'stable',
                 // SSH
                 'ssh_port' => '1022',
             ];

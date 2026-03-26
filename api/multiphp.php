@@ -80,10 +80,10 @@ switch ($action) {
         // Launch via inetp as a detached background process.
         // This runs entirely outside PHP-FPM and survives FPM restarts.
         $logFile = '/var/www/inetpanel/storage/multiphp.log';
-        $cmd = 'nohup sudo /usr/local/bin/inetp multiphp_manage'
+        $cmd = 'sudo /usr/local/bin/inetp multiphp_manage'
              . ' --action ' . escapeshellarg($action)
              . ' --version ' . escapeshellarg($ver)
-             . ' > ' . escapeshellarg($logFile) . ' 2>&1 &';
+             . ' </dev/null >> ' . escapeshellarg($logFile) . ' 2>&1 &';
         exec($cmd);
 
         echo json_encode(['success' => true, 'output' => "PHP {$ver} {$action} started..."]);

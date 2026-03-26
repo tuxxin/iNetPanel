@@ -63,9 +63,17 @@ if [[ -z "$RUN_DETACHED" ]]; then
     chmod 0666 "$STATUS_FILE"
     echo '{"success":true,"output":"started"}'
 
-    systemd-run --scope --quiet bash "$0" \
+    # Try systemd-run scope (isolates from FPM restarts).
+    # Falls back to direct execution if systemd-run fails (LXC containers).
+    if systemd-run --scope --quiet bash "$0" \
         --action "$ACTION" --version "$VERSION" --run-detached \
         >> "$STATUS_DIR/multiphp.log" 2>&1 &
+    then
+        :
+    else
+        bash "$0" --action "$ACTION" --version "$VERSION" --run-detached \
+            >> "$STATUS_DIR/multiphp.log" 2>&1 &
+    fi
     exit 0
 fi
 

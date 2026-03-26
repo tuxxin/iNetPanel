@@ -137,6 +137,17 @@ switch ($action) {
         echo json_encode(['success' => true, 'saved' => $saved]);
         break;
 
+    case 'set_update_channel':
+        Auth::requireAdmin();
+        $channel = trim($_POST['channel'] ?? '');
+        if (!in_array($channel, ['stable', 'beta'])) {
+            echo json_encode(['success' => false, 'error' => 'Invalid channel.']);
+            break;
+        }
+        DB::saveSetting('update_channel', $channel);
+        echo json_encode(['success' => true, 'channel' => $channel]);
+        break;
+
     case 'update_now':
         Auth::requireAdmin();
         $phpBin = 'php' . DB::setting('php_default_version', '8.4');

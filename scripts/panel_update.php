@@ -44,31 +44,66 @@ if (!defined('SRC_PATH'))    define('SRC_PATH',    PANEL_PATH . '/src');
 if (!defined('API_PATH'))    define('API_PATH',    PANEL_PATH . '/api');
 
 $currentVersion = class_exists('Version') ? Version::get() : '0.000';
-log_msg("iNetPanel update check — current version: {$currentVersion}");
+$updateChannel  = class_exists('DB') ? (DB::setting('update_channel', 'stable') ?? 'stable') : 'stable';
+log_msg("iNetPanel update check — current version: {$currentVersion}, channel: {$updateChannel}");
 
 // Fetch latest release info from GitHub
 $ghHeaders = class_exists('Version') ? Version::githubHeaders() : ['User-Agent: iNetPanel/' . $currentVersion];
-$ch = curl_init(GH_API_URL);
-curl_setopt_array($ch, [
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_TIMEOUT        => 15,
-    CURLOPT_HTTPHEADER     => $ghHeaders,
-]);
-$raw  = curl_exec($ch);
-$code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-curl_close($ch);
 
-if ($raw === false || $code !== 200) {
-    abort('Failed to reach GitHub API (HTTP ' . $code . ').');
+if ($updateChannel === 'beta') {
+    // Beta channel: fetch main branch info via commits API
+    $ch = curl_init('https://api.github.com/repos/tuxxin/iNetPanel/commits/main');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_HTTPHEADER     => $ghHeaders,
+    ]);
+    $raw  = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($raw === false || $code !== 200) {
+        abort('Failed to reach GitHub API (HTTP ' . $code . ').');
+    }
+
+    $commitData = json_decode($raw, true);
+    $latestSha  = substr($commitData['sha'] ?? '', 0, 7);
+    $latestTag  = $currentVersion . '-beta.' . $latestSha;
+
+    // For beta, always update (can't reliably compare versions)
+    log_msg("Beta channel — latest commit: {$latestSha}");
+
+    // Build a fake $release structure for the download step
+    $release = [
+        'tag_name'   => $latestTag,
+        'zipball_url' => 'https://api.github.com/repos/tuxxin/iNetPanel/zipball/main',
+        'assets'     => [],
+        'body'       => 'Beta update from main branch (commit ' . $latestSha . ')',
+    ];
+} else {
+    // Stable channel: fetch latest tagged release
+    $ch = curl_init(GH_API_URL);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_HTTPHEADER     => $ghHeaders,
+    ]);
+    $raw  = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($raw === false || $code !== 200) {
+        abort('Failed to reach GitHub API (HTTP ' . $code . ').');
+    }
+
+    $release = json_decode($raw, true);
+    if (!is_array($release) || empty($release['tag_name'])) {
+        abort('Invalid response from GitHub API.');
+    }
+
+    $latestTag = ltrim($release['tag_name'], 'v');
+    log_msg("Stable channel — latest release: {$latestTag}");
 }
-
-$release = json_decode($raw, true);
-if (!is_array($release) || empty($release['tag_name'])) {
-    abort('Invalid response from GitHub API.');
-}
-
-$latestTag = ltrim($release['tag_name'], 'v');
-log_msg("Latest release on GitHub: {$latestTag}");
 
 // Update SQLite cache
 if (class_exists('DB')) {
@@ -78,8 +113,8 @@ if (class_exists('DB')) {
     } catch (Throwable $e) { log_msg('WARNING: Failed to cache version in DB - ' . $e->getMessage()); }
 }
 
-// Check if update is needed
-if (!$force && version_compare($latestTag, $currentVersion, '<=')) {
+// Check if update is needed (beta channel always updates when forced or on schedule)
+if (!$force && $updateChannel !== 'beta' && version_compare($latestTag, $currentVersion, '<=')) {
     log_msg('Already up to date. No update needed.');
     exit(0);
 }
