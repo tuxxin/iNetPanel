@@ -62,8 +62,19 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => "PHP {$ver} is the panel default and cannot be removed. Set a different default version first."]); break;
         }
 
-        // Block concurrent operations — apt/dpkg can only run one at a time
+        // Ensure storage directory exists for status files and logs
         $storageDir = '/var/www/inetpanel/storage';
+        if (!is_dir($storageDir)) {
+            @mkdir($storageDir, 0775, true);
+            @chown($storageDir, 'www-data');
+            @chgrp($storageDir, 'www-data');
+        }
+        if (!is_dir($storageDir) || !is_writable($storageDir)) {
+            echo json_encode(['success' => false, 'error' => 'Storage directory missing and could not be created. Run: mkdir -p /var/www/inetpanel/storage && chown www-data:www-data /var/www/inetpanel/storage']);
+            break;
+        }
+
+        // Block concurrent operations — apt/dpkg can only run one at a time
         $busy = false;
         foreach ($supportedVersions as $v) {
             foreach (['install', 'remove'] as $op) {
