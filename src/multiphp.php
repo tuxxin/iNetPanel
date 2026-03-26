@@ -232,7 +232,7 @@ function toggleVersion(ver, action) {
                             }
                         })
                         .catch(() => {});
-                    if (attempts > 40) {
+                    if (attempts > 120) {
                         clearInterval(poll);
                         modal.hide();
                         showAlert(`PHP ${ver} ${action} timed out. Check logs and reload the page.`, 'warning');

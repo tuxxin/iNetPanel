@@ -22,10 +22,19 @@ $memPct     = $memTotal > 0 ? round(($memUsed / $memTotal) * 100) : 0;
 $memUsedGB  = round($memUsed / 1024 / 1024, 2);
 $memTotalGB = round($memTotal / 1024 / 1024, 1);
 
-// Disk
-$diskTotal = disk_total_space('/');
-$diskFree  = disk_free_space('/');
-$diskUsed  = $diskTotal - $diskFree;
+// Disk — use df to get accurate used/total (PHP's disk_free_space excludes
+// ext4 reserved blocks, inflating "used" by ~5% of the partition)
+$diskTotal = $diskUsed = $diskFree = 0;
+$dfLine = @shell_exec("df -B1 --output=size,used,avail / 2>/dev/null | tail -1");
+if ($dfLine && preg_match('/(\d+)\s+(\d+)\s+(\d+)/', $dfLine, $m)) {
+    $diskTotal = (float)$m[1];
+    $diskUsed  = (float)$m[2];
+    $diskFree  = (float)$m[3];
+} else {
+    $diskTotal = disk_total_space('/');
+    $diskFree  = disk_free_space('/');
+    $diskUsed  = $diskTotal - $diskFree;
+}
 $diskPct   = $diskTotal > 0 ? round(($diskUsed / $diskTotal) * 100) : 0;
 $diskUsedG = round($diskUsed / 1024 / 1024 / 1024, 1);
 
