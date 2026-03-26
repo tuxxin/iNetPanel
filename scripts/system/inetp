@@ -118,6 +118,8 @@ case "$COMMAND" in
     get_account_hash)  bash "$SCRIPTS_DIR/get_account_hash.sh"  "$@" ;;
     verify_account)    python3 "$SCRIPTS_DIR/verify_account_credentials.py" "$@" ;;
 
+    optimize_server)   bash "$SCRIPTS_DIR/optimize_server.sh"  "$@" ;;
+
     # Server health & diagnostics
     status)            bash "$SCRIPTS_DIR/status.sh"           "$@" ;;
     benchmark)         bash "$SCRIPTS_DIR/benchmark.sh"        "$@" ;;
@@ -201,6 +203,9 @@ case "$COMMAND" in
         echo -e "  ${BOLD}Security:${NC}"
         echo -e "    ${GREEN}audit${NC}             Security audit (permissions, ports, SSL, SSH, PHP)"
         echo -e "    ${GREEN}malware_scan${NC}      Scan PHP files for backdoors and webshells"
+        echo ""
+        echo -e "  ${BOLD}Performance:${NC}"
+        echo -e "    ${GREEN}optimize_server${NC}   Auto-tune Apache2 & MariaDB for this server's specs"
         echo ""
         echo -e "  ${BOLD}Maintenance:${NC}"
         echo -e "    ${GREEN}reset_password${NC}    Reset FTP/SSH/MySQL password for a user"

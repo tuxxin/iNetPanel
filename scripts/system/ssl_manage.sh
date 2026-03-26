@@ -99,6 +99,17 @@ case "$COMMAND" in
         ensure_credentials
         EMAIL=$(get_admin_email)
 
+        # If a self-signed cert previously failed into LE's live dir, clean it
+        # so certbot can manage the directory properly
+        if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
+            ISSUER=$(openssl x509 -issuer -noout -in "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" 2>/dev/null)
+            if ! echo "$ISSUER" | grep -qi "Let's Encrypt"; then
+                rm -rf "/etc/letsencrypt/live/${DOMAIN}"
+                rm -rf "/etc/letsencrypt/archive/${DOMAIN}"
+                rm -f "/etc/letsencrypt/renewal/${DOMAIN}.conf"
+            fi
+        fi
+
         echo -e "${BOLD}Issuing SSL certificate for ${DOMAIN}...${NC}"
         certbot certonly \
             --dns-cloudflare \
@@ -108,6 +119,7 @@ case "$COMMAND" in
             --agree-tos \
             --email "$EMAIL" \
             --preferred-challenges dns-01 \
+            --dns-cloudflare-propagation-seconds 30 \
             2>&1
 
         if [ $? -eq 0 ] && [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
