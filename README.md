@@ -4,21 +4,21 @@
 
 iNetPanel is a free, open-source hosting control panel designed for **home servers**. It uses **Cloudflare Zero Trust Tunnels** to bypass ISP limitations — no port forwarding, no exposed IP, no static IP required. Your server stays completely hidden while your sites are publicly accessible.
 
-[![Take the Tour](https://inetpanel.tuxxin.com/assets/images/screenshots/dashboard.webp)](https://inetpanel.tuxxin.com/tour)
+[![Take the Tour](https://inetpanel.info/assets/images/screenshots/dashboard.webp)](https://inetpanel.info/tour)
 
-> **[Website](https://inetpanel.tuxxin.com)** · **[Features](https://inetpanel.tuxxin.com/features)** · **[Screenshots](https://inetpanel.tuxxin.com/tour)** · **[Documentation](https://inetpanel.tuxxin.com/docs)** · **[Compare](https://inetpanel.tuxxin.com/compare)**
+> **[Website](https://inetpanel.info)** · **[Features](https://inetpanel.info/features)** · **[Screenshots](https://inetpanel.info/tour)** · **[Documentation](https://inetpanel.info/docs)** · **[Compare](https://inetpanel.info/compare)**
 
 ---
 
 ## Quick Install
 
 ```bash
-bash <(curl -s https://inetpanel.tuxxin.com/latest)
+bash <(curl -s https://inetpanel.info/latest)
 ```
 
 Requires a **clean Debian 12** server with root access. The guided installer handles everything.
 
-> **[Full installation guide →](https://inetpanel.tuxxin.com/install)**
+> **[Full installation guide →](https://inetpanel.info/install)**
 
 ### Release Channels
 
@@ -48,7 +48,7 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 ### Hosting Management
 - One-click account creation with Apache, PHP-FPM, FTP, SSL, and tunnel routing
 - Multi-domain users — each domain gets its own vhost, document root and SSL certificate
-- [Client portal](https://inetpanel.tuxxin.com/features) for hosting users with database management, SSH keys, file manager, and backups
+- [Client portal](https://inetpanel.info/features) for hosting users with database management, SSH keys, file manager, and backups
 - Multi-PHP version switching (5.6–8.5) per domain
 - Hook scripts for custom post-deploy automation
 
@@ -57,7 +57,7 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 - Automatic Let's Encrypt SSL via DNS-01 challenge
 - WireGuard VPN with auto-provisioned peers and full server lockdown option
 - Firewall management (firewalld + fail2ban) from the panel
-- [Security details →](https://inetpanel.tuxxin.com/features)
+- [Security details →](https://inetpanel.info/features)
 
 ### Cloudflare Integration
 - Full DNS record management (A, AAAA, CNAME, MX, TXT, SRV)
@@ -71,7 +71,7 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 - Image optimizer with AVIF generation
 - phpMyAdmin auto-login from admin and client portals
 - 35+ CLI commands for server management, security audits, and diagnostics
-- [Full feature list →](https://inetpanel.tuxxin.com/features)
+- [Full feature list →](https://inetpanel.info/features)
 
 ---
 
@@ -87,12 +87,12 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 
 | | |
 |---|---|
-| **Website** | [inetpanel.tuxxin.com](https://inetpanel.tuxxin.com) |
-| **Product Tour** | [Screenshots & walkthrough](https://inetpanel.tuxxin.com/tour) |
-| **Features** | [Full feature list](https://inetpanel.tuxxin.com/features) |
-| **Compare** | [vs cPanel, Plesk, CloudPanel](https://inetpanel.tuxxin.com/compare) |
-| **Documentation** | [Install guide & docs](https://inetpanel.tuxxin.com/docs) |
-| **Install** | [Install guide](https://inetpanel.tuxxin.com/install) |
+| **Website** | [inetpanel.tuxxin.com](https://inetpanel.info) |
+| **Product Tour** | [Screenshots & walkthrough](https://inetpanel.info/tour) |
+| **Features** | [Full feature list](https://inetpanel.info/features) |
+| **Compare** | [vs cPanel, Plesk, CloudPanel](https://inetpanel.info/compare) |
+| **Documentation** | [Install guide & docs](https://inetpanel.info/docs) |
+| **Install** | [Install guide](https://inetpanel.info/install) |
 | **Issues** | [Report a bug](https://github.com/tuxxin/iNetPanel/issues) |
 
 ---
@@ -141,4 +141,4 @@ MIT — see [LICENSE](LICENSE)
 
 ---
 
-Created by [Tuxxin](https://tuxxin.com) · [inetpanel.tuxxin.com](https://inetpanel.tuxxin.com)
+Created by [Tuxxin](https://tuxxin.com) · [inetpanel.tuxxin.com](https://inetpanel.info)
