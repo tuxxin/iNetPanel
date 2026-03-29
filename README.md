@@ -6,6 +6,15 @@ iNetPanel is a free, open-source hosting control panel designed for **home serve
 
 [![Take the Tour](https://inetpanel.info/assets/images/screenshots/dashboard.webp)](https://inetpanel.info/tour)
 
+<hr>
+<p align="center">
+  <h3>Full automated installation process, up and running in minutes</h3>
+  <a href="https://inetpanel.info" target="_blank">
+  <img src="https://inetpanel.info/assets/images/inetpanel-install-preview.webp" alt="iNetPanel Installation Demo" width="480"></a>
+  <br>
+  <em>Full video: <a href="https://inetpanel.info/install">inetpanel.info/install</a></em>
+</p>
+
 > **[Website](https://inetpanel.info)** · **[Features](https://inetpanel.info/features)** · **[Screenshots](https://inetpanel.info/tour)** · **[Documentation](https://inetpanel.info/docs)** · **[Compare](https://inetpanel.info/compare)**
 
 ---
