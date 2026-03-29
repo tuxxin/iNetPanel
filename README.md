@@ -24,8 +24,8 @@ Requires a **clean Debian 12** server with root access. The guided installer han
 
 | Channel | Installer | Updates | Use case |
 |---|---|---|---|
-| **Stable** | `inetpanel.tuxxin.com/latest` | Tagged GitHub releases | Production servers (default) |
-| **Beta** | `inetpanel.tuxxin.com/latest-beta` | Latest code from `main` branch | Testing new features before release |
+| **Stable** | `inetpanel.info/latest` | Tagged GitHub releases | Production servers (default) |
+| **Beta** | `inetpanel.info/latest-beta` | Latest code from `main` branch | Testing new features before release |
 
 The **stable** installer downloads the latest tagged release. Updates are pulled from GitHub Releases only when a new version is published.
 
@@ -87,7 +87,7 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 
 | | |
 |---|---|
-| **Website** | [inetpanel.tuxxin.com](https://inetpanel.info) |
+| **Website** | [inetpanel.info](https://inetpanel.info) |
 | **Product Tour** | [Screenshots & walkthrough](https://inetpanel.info/tour) |
 | **Features** | [Full feature list](https://inetpanel.info/features) |
 | **Compare** | [vs cPanel, Plesk, CloudPanel](https://inetpanel.info/compare) |
@@ -141,4 +141,4 @@ MIT — see [LICENSE](LICENSE)
 
 ---
 
-Created by [Tuxxin](https://tuxxin.com) · [inetpanel.tuxxin.com](https://inetpanel.info)
+Created by [Tuxxin](https://tuxxin.com) · [inetpanel.info](https://inetpanel.info)
