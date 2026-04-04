@@ -93,8 +93,8 @@ case 'ftp_info':
     // Ensure restore user exists with root password
     // Shell must be in /etc/shells for vsftpd to allow login — use /bin/bash
     // (user is chrooted to staging dir by vsftpd anyway)
-    $userExists = (trim(shell_exec("id restore 2>/dev/null && echo yes || echo no")) === 'yes');
-    if (!$userExists) {
+    exec('id restore 2>/dev/null', $ftpIdOut, $ftpIdCode);
+    if ($ftpIdCode !== 0) {
         shell_exec("useradd -d " . escapeshellarg($stagingDir) . " -s /bin/bash -g www-data restore 2>/dev/null");
     } else {
         // Fix shell if previously created with nologin
@@ -231,7 +231,8 @@ case 'parse':
     }
 
     // Check if username exists on system
-    $userExists = (trim(shell_exec('id ' . escapeshellarg($archiveUser) . ' 2>/dev/null && echo yes || echo no')) === 'yes');
+    exec('id ' . escapeshellarg($archiveUser) . ' 2>/dev/null', $idOut, $idCode);
+    $userExists = ($idCode === 0);
 
     // Get installed PHP versions for dropdown
     $phpVersions = [];
