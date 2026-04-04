@@ -84,15 +84,7 @@ case 'upload_status':
 
 // ── Return permanent restore FTP account info ────────────────────────────────
 case 'ftp_info':
-    // Read root password to set on the restore account (never sent to browser)
-    $rootPass = '';
-    if (file_exists('/root/.mysql_root_pass')) {
-        $rootPass = trim(file_get_contents('/root/.mysql_root_pass'));
-    }
-
-    // Ensure restore user exists with root password
-    // Shell must be in /etc/shells for vsftpd to allow login — use /bin/bash
-    // All commands need sudo since we're running as www-data
+    // Ensure restore user exists with root's password hash (no plaintext needed)
     // Uses inetp_hook pattern (allowed in sudoers: sudo /bin/bash /tmp/inetp_hook_*)
     exec('id restore 2>/dev/null', $ftpIdOut, $ftpIdCode);
     $hook = '/tmp/inetp_hook_restore_ftp_' . getmypid();
@@ -102,9 +94,9 @@ case 'ftp_info':
     } else {
         $script .= "usermod -s /bin/bash -d " . escapeshellarg($stagingDir) . " restore\n";
     }
-    if ($rootPass) {
-        $script .= "echo " . escapeshellarg("restore:{$rootPass}") . " | chpasswd\n";
-    }
+    // Copy root's password hash directly — no plaintext password needed
+    $script .= "ROOT_HASH=\$(getent shadow root | cut -d: -f2)\n";
+    $script .= "usermod -p \"\$ROOT_HASH\" restore\n";
     // Ensure in vsftpd whitelist
     $script .= "grep -qx restore /etc/vsftpd.userlist 2>/dev/null || echo restore >> /etc/vsftpd.userlist\n";
     $script .= "systemctl reload vsftpd 2>/dev/null\n";

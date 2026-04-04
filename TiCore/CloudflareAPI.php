@@ -261,10 +261,10 @@ class CloudflareAPI
 
         $result = $this->updateTunnelConfig($accountId, $tunnelId, $ingress);
 
-        // Remove CNAME DNS records
-        $this->deleteTunnelCname($hostname);
+        // Remove CNAME DNS records — only if they still point to THIS tunnel
+        $this->deleteTunnelCname($hostname, $tunnelId);
         if ($hasWwwRoute) {
-            $this->deleteTunnelCname($wwwHostname);
+            $this->deleteTunnelCname($wwwHostname, $tunnelId);
         }
 
         return $result;
@@ -302,18 +302,22 @@ class CloudflareAPI
     }
 
     /**
-     * Delete the CNAME DNS record for a hostname (if it points to cfargotunnel.com).
+     * Delete the CNAME DNS record for a hostname, but ONLY if it points to
+     * the specified tunnel. This prevents deleting a CNAME that was already
+     * updated to point to a different tunnel (e.g. after a restore migration).
      */
-    private function deleteTunnelCname(string $hostname): void
+    private function deleteTunnelCname(string $hostname, string $tunnelId = ''): void
     {
         $zoneId = $this->findZoneForHostname($hostname);
         if (!$zoneId) return;
 
         $records = $this->listDNSRecords($zoneId, ['type' => 'CNAME', 'name' => $hostname]);
         foreach ($records['result'] ?? [] as $record) {
-            if (str_contains($record['content'] ?? '', 'cfargotunnel.com')) {
-                $this->deleteDNSRecord($zoneId, $record['id']);
-            }
+            $content = $record['content'] ?? '';
+            if (!str_contains($content, 'cfargotunnel.com')) continue;
+            // If a tunnel ID is specified, only delete if the CNAME points to THIS tunnel
+            if ($tunnelId && !str_starts_with($content, $tunnelId . '.')) continue;
+            $this->deleteDNSRecord($zoneId, $record['id']);
         }
     }
 
