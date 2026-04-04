@@ -697,9 +697,17 @@ function executeRestore() {
         };
     });
 
-    // CF overrides
+    // CF overrides + old tunnel IDs for cleanup
     const cfOverride = [];
-    document.querySelectorAll('.cf-override:checked').forEach(cb => cfOverride.push(cb.value));
+    const cfOldTunnels = {};
+    document.querySelectorAll('.cf-override:checked').forEach(cb => {
+        const domain = cb.value;
+        cfOverride.push(domain);
+        // If this domain was routed on another tunnel, include the old tunnel ID
+        if (cfData[domain] && cfData[domain].other_tunnel_id) {
+            cfOldTunnels[domain] = cfData[domain].other_tunnel_id;
+        }
+    });
 
     // Has any DB checked for import?
     const hasDbImport = document.querySelectorAll('.db-check:checked').length > 0;
@@ -711,6 +719,7 @@ function executeRestore() {
     fd.append('password', document.getElementById('restore-password').value);
     fd.append('domains', JSON.stringify(domainData));
     fd.append('cf_override', JSON.stringify(cfOverride));
+    fd.append('cf_old_tunnels', JSON.stringify(cfOldTunnels));
     fd.append('php_version', document.getElementById('restore-php-version').value);
     fd.append('import_db', hasDbImport ? '1' : '0');
 

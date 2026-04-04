@@ -340,7 +340,8 @@ case 'execute':
     $username    = trim($_POST['username'] ?? '');
     $password    = $_POST['password'] ?? '';
     $domainsJson = $_POST['domains'] ?? '[]';
-    $cfOverJson  = $_POST['cf_override'] ?? '[]';
+    $cfOverJson      = $_POST['cf_override'] ?? '[]';
+    $cfOldTunnelJson = $_POST['cf_old_tunnels'] ?? '{}';
     $phpVersion  = trim($_POST['php_version'] ?? '');
     $importDb    = ($_POST['import_db'] ?? '1') === '1';
 
@@ -363,8 +364,9 @@ case 'execute':
         break;
     }
 
-    $domainData  = json_decode($domainsJson, true) ?: [];
-    $cfOverride  = json_decode($cfOverJson, true) ?: [];
+    $domainData    = json_decode($domainsJson, true) ?: [];
+    $cfOverride    = json_decode($cfOverJson, true) ?: [];
+    $cfOldTunnels  = json_decode($cfOldTunnelJson, true) ?: [];
 
     if (empty($domainData)) {
         echo json_encode(['success' => false, 'error' => 'No domains specified.']);
@@ -474,6 +476,17 @@ case 'execute':
                     $cfResult = $cf->addTunnelHostname($accountId, $tunnelId, $domain, "https://localhost:{$port}");
                     $cfResults[$domain] = ['success' => true, 'dns_skipped' => !empty($cfResult['dns_skipped'])];
                     $logRestore("CF route added: {$domain} → localhost:{$port}");
+
+                    // Remove the route from the old tunnel (if migrating from another server)
+                    $oldTunnelId = $cfOldTunnels[$domain] ?? '';
+                    if ($oldTunnelId && $oldTunnelId !== $tunnelId) {
+                        try {
+                            $cf->removeTunnelHostname($accountId, $oldTunnelId, $domain);
+                            $logRestore("CF old route removed: {$domain} from tunnel {$oldTunnelId}");
+                        } catch (Throwable $e2) {
+                            $logRestore("CF old route removal failed for {$domain}: " . $e2->getMessage());
+                        }
+                    }
                 } catch (Throwable $e) {
                     $cfResults[$domain] = ['success' => false, 'error' => $e->getMessage()];
                     $logRestore("CF route FAILED for {$domain}: " . $e->getMessage());
