@@ -1,0 +1,495 @@
+<?php
+// FILE: api/restore.php
+// iNetPanel — Backup Restore API
+// Actions: upload, upload_status, ftp_info, parse, cf_check, execute
+
+Auth::requireAdmin();
+header('Content-Type: application/json');
+
+$action = $_POST['action'] ?? $_GET['action'] ?? '';
+$stagingDir = '/backup/restore_staging';
+
+// Ensure staging directory exists
+if (!is_dir($stagingDir)) {
+    @mkdir($stagingDir, 0700, true);
+}
+
+switch ($action) {
+
+// ── Upload a .tgz backup via web form ────────────────────────────────────────
+case 'upload':
+    if (empty($_FILES['backup']) || $_FILES['backup']['error'] !== UPLOAD_ERR_OK) {
+        $errMap = [
+            UPLOAD_ERR_INI_SIZE   => 'File exceeds server upload limit (' . ini_get('upload_max_filesize') . ').',
+            UPLOAD_ERR_FORM_SIZE  => 'File exceeds form limit.',
+            UPLOAD_ERR_PARTIAL    => 'Upload was interrupted.',
+            UPLOAD_ERR_NO_FILE    => 'No file selected.',
+            UPLOAD_ERR_NO_TMP_DIR => 'Server temp directory missing.',
+            UPLOAD_ERR_CANT_WRITE => 'Server cannot write to disk.',
+        ];
+        $code = $_FILES['backup']['error'] ?? UPLOAD_ERR_NO_FILE;
+        echo json_encode(['success' => false, 'error' => $errMap[$code] ?? 'Upload failed (code ' . $code . ').']);
+        break;
+    }
+
+    $file = $_FILES['backup'];
+    $name = basename($file['name']);
+
+    if (!preg_match('/\.tgz$/', $name)) {
+        echo json_encode(['success' => false, 'error' => 'Only .tgz backup files are accepted.']);
+        break;
+    }
+
+    $dest = $stagingDir . '/' . $name;
+    if (!move_uploaded_file($file['tmp_name'], $dest)) {
+        echo json_encode(['success' => false, 'error' => 'Failed to save uploaded file.']);
+        break;
+    }
+
+    $cfProxy = !empty($_SERVER['HTTP_CF_CONNECTING_IP']);
+    echo json_encode([
+        'success'  => true,
+        'filename' => $name,
+        'size'     => filesize($dest),
+        'size_hr'  => formatBytes(filesize($dest)),
+        'cf_proxy' => $cfProxy,
+    ]);
+    break;
+
+// ── Poll staging directory for FTP/SCP uploads ───────────────────────────────
+case 'upload_status':
+    $files = [];
+    foreach (glob($stagingDir . '/*.tgz') as $f) {
+        $files[] = [
+            'filename' => basename($f),
+            'size'     => filesize($f),
+            'size_hr'  => formatBytes(filesize($f)),
+            'mtime'    => filemtime($f),
+            'age'      => time() - filemtime($f),
+        ];
+    }
+    usort($files, fn($a, $b) => $b['mtime'] - $a['mtime']);
+    echo json_encode(['success' => true, 'files' => $files]);
+    break;
+
+// ── Return permanent restore FTP account info ────────────────────────────────
+case 'ftp_info':
+    // Read root password to use for the restore account
+    $rootPass = '';
+    if (file_exists('/root/.mysql_root_pass')) {
+        $rootPass = trim(file_get_contents('/root/.mysql_root_pass'));
+    }
+
+    // Ensure restore user exists
+    $userExists = (trim(shell_exec("id restore 2>/dev/null && echo yes || echo no")) === 'yes');
+    if (!$userExists) {
+        shell_exec("useradd -d " . escapeshellarg($stagingDir) . " -s /usr/sbin/nologin -g www-data restore 2>/dev/null");
+        shell_exec("echo 'restore:" . escapeshellarg($rootPass) . "' | chpasswd 2>/dev/null");
+        // Add to vsftpd whitelist
+        $list = file_get_contents('/etc/vsftpd.userlist') ?: '';
+        if (strpos($list, "\nrestore\n") === false && strpos($list, "restore\n") !== 0) {
+            file_put_contents('/etc/vsftpd.userlist', $list . "restore\n");
+            shell_exec('systemctl reload vsftpd 2>/dev/null');
+        }
+    }
+
+    // Detect server IP
+    $serverIp = trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: '');
+    if (!$serverIp) $serverIp = trim(shell_exec("hostname -I 2>/dev/null | awk '{print \$1}'") ?: 'YOUR_SERVER_IP');
+
+    echo json_encode([
+        'success'   => true,
+        'host'      => $serverIp,
+        'port'      => 21,
+        'username'  => 'restore',
+        'password'  => $rootPass,
+        'directory' => $stagingDir,
+    ]);
+    break;
+
+// ── Parse a staged backup file ───────────────────────────────────────────────
+case 'parse':
+    $filename = basename($_POST['filename'] ?? '');
+    if (!$filename || !preg_match('/^[\w.\-]+\.tgz$/', $filename)) {
+        echo json_encode(['success' => false, 'error' => 'Invalid filename.']);
+        break;
+    }
+    $filepath = $stagingDir . '/' . $filename;
+    if (!file_exists($filepath)) {
+        echo json_encode(['success' => false, 'error' => 'File not found in staging directory.']);
+        break;
+    }
+
+    // Get tar listing
+    $listing = shell_exec('tar -tzf ' . escapeshellarg($filepath) . ' 2>/dev/null') ?: '';
+    $lines   = array_filter(explode("\n", $listing));
+
+    // Detect username from home/USER/ paths
+    $archiveUser = '';
+    foreach ($lines as $line) {
+        if (preg_match('#^home/([^/]+)/#', $line, $m)) {
+            $archiveUser = $m[1];
+            break;
+        }
+    }
+
+    // Detect domains from home/USER/DOMAIN/www/ directories
+    $domains = [];
+    foreach ($lines as $line) {
+        if (preg_match('#^home/[^/]+/([^/]+)/www/#', $line, $m)) {
+            $domain = $m[1];
+            if (!in_array($domain, $domains) && $domain !== 'tmp') {
+                $domains[] = $domain;
+            }
+        }
+    }
+
+    // Detect SQL files at tar root
+    $sqlFiles = [];
+    $detailedListing = shell_exec('tar -tvzf ' . escapeshellarg($filepath) . ' 2>/dev/null') ?: '';
+    foreach (explode("\n", $detailedListing) as $dline) {
+        // Match SQL files — could be at root or ./filename.sql
+        if (preg_match('/(\d+)\s+[\d-]+\s+[\d:]+\s+\.?\/?([^\/]+\.sql)$/', $dline, $m)) {
+            $sqlFiles[] = [
+                'name'    => $m[2],
+                'db_name' => preg_replace('/\.sql$/', '', $m[2]),
+                'size'    => (int)$m[1],
+                'size_hr' => formatBytes((int)$m[1]),
+            ];
+        }
+    }
+
+    // Count files under home/
+    $fileCount = 0;
+    foreach ($lines as $line) {
+        if (str_starts_with($line, 'home/') && !str_ends_with($line, '/')) {
+            $fileCount++;
+        }
+    }
+
+    // Auto-assign ports for each domain
+    $portsConf = file_get_contents('/etc/apache2/ports_domains.conf') ?: '';
+    preg_match_all('/^Listen\s+(\d+)/m', $portsConf, $portMatches);
+    $usedPorts = array_map('intval', $portMatches[1] ?? []);
+    $nextPort  = $usedPorts ? max($usedPorts) + 1 : 1080;
+    if ($nextPort === 1443) $nextPort = 1444;
+
+    $domainDetails = [];
+    foreach ($domains as $domain) {
+        // Check conflicts
+        $vhostExists = file_exists("/etc/apache2/sites-available/{$domain}.conf");
+        $dbExists    = false;
+        try {
+            $pdo = DB::get();
+            $stmt = $pdo->prepare('SELECT id FROM domains WHERE domain_name = ?');
+            $stmt->execute([$domain]);
+            $dbExists = (bool) $stmt->fetch();
+        } catch (Throwable $e) {}
+
+        // Find old port if vhost exists
+        $oldPort = null;
+        if ($vhostExists) {
+            $vhostContent = file_get_contents("/etc/apache2/sites-available/{$domain}.conf") ?: '';
+            if (preg_match('/<VirtualHost\s+\*:(\d+)>/', $vhostContent, $pm)) {
+                $oldPort = (int)$pm[1];
+            }
+        }
+
+        $domainDetails[] = [
+            'domain'       => $domain,
+            'port'         => $nextPort,
+            'old_port'     => $oldPort,
+            'vhost_exists' => $vhostExists,
+            'db_exists'    => $dbExists,
+            'conflict'     => $vhostExists || $dbExists,
+        ];
+
+        // Advance port for next domain
+        $usedPorts[] = $nextPort;
+        $nextPort++;
+        if ($nextPort === 1443) $nextPort = 1444;
+    }
+
+    // Check if username exists on system
+    $userExists = (trim(shell_exec('id ' . escapeshellarg($archiveUser) . ' 2>/dev/null && echo yes || echo no')) === 'yes');
+
+    // Get installed PHP versions for dropdown
+    $phpVersions = [];
+    foreach (glob('/usr/sbin/php-fpm*') as $fpm) {
+        if (preg_match('/(\d+\.\d+)/', basename($fpm), $vm)) {
+            $phpVersions[] = $vm[1];
+        }
+    }
+    sort($phpVersions);
+
+    echo json_encode([
+        'success'      => true,
+        'archive_user' => $archiveUser,
+        'user_exists'  => $userExists,
+        'domains'      => $domainDetails,
+        'databases'    => $sqlFiles,
+        'file_count'   => $fileCount,
+        'archive_size' => filesize($filepath),
+        'archive_size_hr' => formatBytes(filesize($filepath)),
+        'php_versions' => $phpVersions,
+    ]);
+    break;
+
+// ── Check Cloudflare routing for domains ─────────────────────────────────────
+case 'cf_check':
+    $domainsJson = $_POST['domains'] ?? '[]';
+    $domainList  = json_decode($domainsJson, true) ?: [];
+
+    if (empty($domainList)) {
+        echo json_encode(['success' => false, 'error' => 'No domains provided.']);
+        break;
+    }
+
+    $cfEnabled = DB::setting('cf_enabled', '0') === '1';
+    if (!$cfEnabled) {
+        echo json_encode(['success' => true, 'cf_enabled' => false, 'domains' => []]);
+        break;
+    }
+
+    $accountId = DB::setting('cf_account_id', '');
+    $tunnelId  = DB::setting('cf_tunnel_id', '');
+    $cf        = new CloudflareAPI();
+
+    // Get all currently routed hostnames on our tunnel
+    $routed = ($accountId && $tunnelId) ? $cf->getRoutedHostnames($accountId, $tunnelId) : [];
+
+    $results = [];
+    foreach ($domainList as $domain) {
+        $info = [
+            'domain'           => $domain,
+            'zone_found'       => false,
+            'zone_id'          => null,
+            'currently_routed' => false,
+            'current_service'  => null,
+            'dns_records'      => [],
+        ];
+
+        // Check zone
+        $zoneId = $cf->findZoneForHostname($domain);
+        if ($zoneId) {
+            $info['zone_found'] = true;
+            $info['zone_id']    = $zoneId;
+
+            // Check DNS records
+            $records = $cf->listDNSRecords($zoneId, ['name' => $domain]);
+            foreach ($records['result'] ?? [] as $rec) {
+                $info['dns_records'][] = [
+                    'type'    => $rec['type'],
+                    'content' => $rec['content'],
+                    'proxied' => $rec['proxied'] ?? false,
+                ];
+            }
+        }
+
+        // Check tunnel routing
+        if (isset($routed[$domain])) {
+            $info['currently_routed'] = true;
+            $info['current_service']  = $routed[$domain];
+        }
+
+        $results[$domain] = $info;
+    }
+
+    echo json_encode(['success' => true, 'cf_enabled' => true, 'domains' => $results]);
+    break;
+
+// ── Execute the restore ──────────────────────────────────────────────────────
+case 'execute':
+    $filename    = basename($_POST['filename'] ?? '');
+    $username    = trim($_POST['username'] ?? '');
+    $password    = $_POST['password'] ?? '';
+    $domainsJson = $_POST['domains'] ?? '[]';
+    $cfOverJson  = $_POST['cf_override'] ?? '[]';
+    $phpVersion  = trim($_POST['php_version'] ?? '');
+    $importDb    = ($_POST['import_db'] ?? '1') === '1';
+
+    // Validate
+    if (!$filename || !preg_match('/^[\w.\-]+\.tgz$/', $filename)) {
+        echo json_encode(['success' => false, 'error' => 'Invalid filename.']);
+        break;
+    }
+    $filepath = $stagingDir . '/' . $filename;
+    if (!file_exists($filepath)) {
+        echo json_encode(['success' => false, 'error' => 'Backup file not found.']);
+        break;
+    }
+    if (!$username || !preg_match('/^[a-z][a-z0-9\-]{0,31}$/', $username)) {
+        echo json_encode(['success' => false, 'error' => 'Invalid username.']);
+        break;
+    }
+    if (!$password) {
+        echo json_encode(['success' => false, 'error' => 'Password is required.']);
+        break;
+    }
+
+    $domainData  = json_decode($domainsJson, true) ?: [];
+    $cfOverride  = json_decode($cfOverJson, true) ?: [];
+
+    if (empty($domainData)) {
+        echo json_encode(['success' => false, 'error' => 'No domains specified.']);
+        break;
+    }
+
+    // Build domain and port lists
+    $domainList = [];
+    $portList   = [];
+    foreach ($domainData as $d) {
+        $domainList[] = $d['domain'];
+        $portList[]   = (int) $d['port'];
+    }
+
+    // Build shell args
+    $args = [
+        '--backup-file' => $filepath,
+        '--username'    => $username,
+        '--password'    => $password,
+        '--domains'     => implode(',', $domainList),
+        '--ports'       => implode(',', $portList),
+    ];
+    if ($phpVersion) $args['--php-version'] = $phpVersion;
+    if ($importDb)   $args[] = '--import-db';
+
+    $cfEnabled = DB::setting('cf_enabled', '0') === '1';
+    if (!$cfEnabled || empty($cfOverride)) {
+        $args[] = '--no-cf';
+    }
+
+    // Run the restore script
+    $result = Shell::run('restore_account', $args);
+
+    if (!$result['success']) {
+        echo json_encode(['success' => false, 'error' => 'Restore failed: ' . ($result['error'] ?: $result['output'])]);
+        break;
+    }
+
+    // Insert panel DB records
+    $pdo = DB::get();
+    try {
+        // hosting_users
+        $stmt = $pdo->prepare('SELECT id FROM hosting_users WHERE username = ?');
+        $stmt->execute([$username]);
+        $hostingUser = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($hostingUser) {
+            $hostingUserId = $hostingUser['id'];
+        } else {
+            $stmt = $pdo->prepare('INSERT INTO hosting_users (username, shell) VALUES (?, ?)');
+            $stmt->execute([$username, '/bin/bash']);
+            $hostingUserId = $pdo->lastInsertId();
+        }
+
+        // domains + account_ports
+        foreach ($domainData as $d) {
+            $domain = $d['domain'];
+            $port   = (int) $d['port'];
+            $phpVer = $d['php_version'] ?? $phpVersion ?: 'inherit';
+
+            // Upsert domain
+            $stmt = $pdo->prepare('SELECT id FROM domains WHERE domain_name = ?');
+            $stmt->execute([$domain]);
+            if ($stmt->fetch()) {
+                $stmt = $pdo->prepare('UPDATE domains SET hosting_user_id = ?, port = ?, php_version = ?, document_root = ?, status = ? WHERE domain_name = ?');
+                $stmt->execute([$hostingUserId, $port, $phpVer, "/home/{$username}/{$domain}/www", 'active', $domain]);
+            } else {
+                $stmt = $pdo->prepare('INSERT INTO domains (hosting_user_id, domain_name, document_root, php_version, port, status) VALUES (?, ?, ?, ?, ?, ?)');
+                $stmt->execute([$hostingUserId, $domain, "/home/{$username}/{$domain}/www", $phpVer, $port, 'active']);
+            }
+
+            // Upsert account_ports
+            $stmt = $pdo->prepare('INSERT OR REPLACE INTO account_ports (domain_name, port) VALUES (?, ?)');
+            $stmt->execute([$domain, $port]);
+        }
+    } catch (Throwable $e) {
+        // Log but don't fail — the account is functional even if DB records fail
+        error_log('Restore DB insert error: ' . $e->getMessage());
+    }
+
+    // Cloudflare tunnel override
+    $cfResults = [];
+    if ($cfEnabled && !empty($cfOverride)) {
+        $accountId = DB::setting('cf_account_id', '');
+        $tunnelId  = DB::setting('cf_tunnel_id', '');
+        if ($accountId && $tunnelId) {
+            $cf = new CloudflareAPI();
+            foreach ($cfOverride as $domain) {
+                // Find the port for this domain
+                $port = null;
+                foreach ($domainData as $d) {
+                    if ($d['domain'] === $domain) {
+                        $port = (int) $d['port'];
+                        break;
+                    }
+                }
+                if (!$port) continue;
+
+                try {
+                    $cfResult = $cf->addTunnelHostname($accountId, $tunnelId, $domain, "https://localhost:{$port}");
+                    $cfResults[$domain] = ['success' => true, 'dns_skipped' => !empty($cfResult['dns_skipped'])];
+                } catch (Throwable $e) {
+                    $cfResults[$domain] = ['success' => false, 'error' => $e->getMessage()];
+                }
+            }
+        }
+    }
+
+    // Clean up staging file
+    @unlink($filepath);
+
+    // Schedule FPM reload after response (same pattern as accounts.php)
+    if (function_exists('fastcgi_finish_request')) {
+        echo json_encode([
+            'success'    => true,
+            'username'   => $username,
+            'password'   => $password,
+            'domains'    => $domainData,
+            'cf_results' => $cfResults,
+            'output'     => $result['output'],
+        ]);
+        fastcgi_finish_request();
+        // Reload FPM after response sent
+        foreach (glob('/usr/sbin/php-fpm*') as $fpm) {
+            if (preg_match('/(\d+\.\d+)/', basename($fpm), $vm)) {
+                exec("systemctl reload php{$vm[1]}-fpm 2>/dev/null");
+            }
+        }
+    } else {
+        echo json_encode([
+            'success'    => true,
+            'username'   => $username,
+            'password'   => $password,
+            'domains'    => $domainData,
+            'cf_results' => $cfResults,
+            'output'     => $result['output'],
+        ]);
+    }
+    break;
+
+// ── Max upload size info ─────────────────────────────────────────────────────
+case 'upload_limits':
+    $cfProxy  = !empty($_SERVER['HTTP_CF_CONNECTING_IP']);
+    $phpLimit = ini_get('upload_max_filesize') ?: '100M';
+    echo json_encode([
+        'success'    => true,
+        'php_limit'  => $phpLimit,
+        'cf_proxy'   => $cfProxy,
+        'effective'  => $cfProxy ? '100M' : $phpLimit,
+    ]);
+    break;
+
+default:
+    echo json_encode(['success' => false, 'error' => 'Unknown action.']);
+    break;
+}
+
+// ── Helper ───────────────────────────────────────────────────────────────────
+function formatBytes(int $bytes, int $precision = 1): string
+{
+    $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    $pow   = $bytes > 0 ? floor(log($bytes, 1024)) : 0;
+    return round($bytes / pow(1024, $pow), $precision) . ' ' . $units[$pow];
+}

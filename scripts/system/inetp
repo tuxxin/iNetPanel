@@ -102,6 +102,7 @@ case "$COMMAND" in
     suspend_account)  bash "$SCRIPTS_DIR/suspend_account.sh"  "$@" ;;
     optimize_images)  bash "$SCRIPTS_DIR/optimize_images.sh"  "$@" ;;
     backup_accounts)  bash "$SCRIPTS_DIR/backup_accounts.sh"  "$@" ;;
+    restore_account)  bash "$SCRIPTS_DIR/restore_account.sh" "$@" ;;
     update)           bash "$SCRIPTS_DIR/inetp-update.sh"     "$@" ;;
     panel_update)     php /var/www/inetpanel/scripts/panel_update.php "$@" ;;
     wireguard_setup)     bash "$SCRIPTS_DIR/wireguard_setup.sh"     "$@" ;;
@@ -184,6 +185,7 @@ case "$COMMAND" in
         echo -e "    ${GREEN}suspend_account${NC}   Suspend or resume an account/user"
         echo -e "    ${GREEN}optimize_images${NC}   Optimize images in a target directory"
         echo -e "    ${GREEN}backup_accounts${NC}   Backup all accounts to /backup"
+        echo -e "    ${GREEN}restore_account${NC}   Restore an account from a backup archive"
         echo -e "    ${GREEN}update${NC}            Run system package update"
         echo -e "    ${GREEN}panel_update${NC}      Update iNetPanel from GitHub"
         echo -e "    ${GREEN}wireguard_setup${NC}   Set up WireGuard VPN (full server lockdown)"

@@ -206,6 +206,13 @@ $router->add('/admin/backups', function () use ($view) {
     $view->renderAdmin('System Backups', SRC_PATH . '/backups.php');
 });
 
+// Restore
+$router->add('/admin/restore', function () use ($view) {
+    Auth::check();
+    Auth::requireAdmin();
+    $view->renderAdmin('Restore Backup', SRC_PATH . '/restore.php');
+});
+
 // Logs
 $router->add('/admin/logs', function () use ($view) {
     Auth::check();
@@ -318,6 +325,7 @@ foreach ([
     '/api/dns'         => 'dns.php',
     '/api/email'       => 'email.php',
     '/api/backups'     => 'backups.php',
+    '/api/restore'     => 'restore.php',
     '/api/settings'    => 'settings.php',
     '/api/panel-users' => 'panel_users.php',
     '/api/wireguard'      => 'wireguard.php',

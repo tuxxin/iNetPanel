@@ -29,6 +29,7 @@ class Shell
         'service_monitor',
         'db_size',
         'multiphp_manage',
+        'restore_account',
         'list',
     ];
 

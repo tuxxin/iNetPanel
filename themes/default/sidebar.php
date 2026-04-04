@@ -78,6 +78,9 @@
         <a href="/admin/backups" class="<?= sidebarActive('backups') ?>">
             <i class="fas fa-history"></i> <span>Backups</span>
         </a>
+        <a href="/admin/restore" class="<?= sidebarActive('restore') ?>">
+            <i class="fas fa-upload"></i> <span>Restore</span>
+        </a>
         <a href="/admin/logs" class="<?= sidebarActive('logs') ?>">
             <i class="fas fa-file-lines"></i> <span>Logs</span>
         </a>

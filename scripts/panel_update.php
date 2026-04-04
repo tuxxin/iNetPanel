@@ -471,6 +471,40 @@ if (file_exists($vsftpConf)) {
     }
 }
 
+// Ensure lighttpd allows large uploads (for backup restore feature)
+$lightyConf = '/etc/lighttpd/lighttpd.conf';
+if (file_exists($lightyConf)) {
+    $lightyContent = file_get_contents($lightyConf);
+    if (strpos($lightyContent, 'server.max-request-body-size') === false) {
+        $lightyContent = str_replace(
+            'server.max-request-field-size = 65536',
+            "server.max-request-field-size = 65536\nserver.max-request-body-size  = 2147483648",
+            $lightyContent
+        );
+        file_put_contents($lightyConf, $lightyContent);
+        shell_exec('systemctl reload lighttpd 2>/dev/null');
+        log_msg('Added lighttpd max-request-body-size for backup restore uploads');
+    }
+}
+
+// Ensure panel FPM pool allows large uploads
+foreach (glob('/etc/php/*/fpm/pool.d/www.conf') as $wwwPool) {
+    $poolContent = file_get_contents($wwwPool);
+    if (strpos($poolContent, 'upload_max_filesize] = 2G') === false) {
+        $poolContent .= "\n; iNetPanel — increased limits for backup restore uploads\nphp_admin_value[upload_max_filesize] = 2G\nphp_admin_value[post_max_size] = 2G\n";
+        file_put_contents($wwwPool, $poolContent);
+        $ver = preg_match('#/php/([0-9.]+)/#', $wwwPool, $vm) ? $vm[1] : '';
+        if ($ver) shell_exec("systemctl reload php{$ver}-fpm 2>/dev/null");
+        log_msg("Updated {$wwwPool} with 2G upload limits");
+    }
+}
+
+// Ensure restore staging directory exists
+if (!is_dir('/backup/restore_staging')) {
+    mkdir('/backup/restore_staging', 0700, true);
+    log_msg('Created /backup/restore_staging/ directory');
+}
+
 // Update SQLite record
 if (class_exists('DB')) {
     try {
