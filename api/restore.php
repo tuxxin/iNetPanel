@@ -9,9 +9,16 @@ header('Content-Type: application/json');
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 $stagingDir = '/backup/restore_staging';
 
-// Ensure staging directory exists
+// Ensure staging directory exists and is writable by www-data
 if (!is_dir($stagingDir)) {
-    @mkdir($stagingDir, 0700, true);
+    // www-data may not be able to create under /backup/ — use sudo
+    exec('sudo mkdir -p ' . escapeshellarg($stagingDir) . ' 2>/dev/null');
+    exec('sudo chown www-data:www-data ' . escapeshellarg($stagingDir) . ' 2>/dev/null');
+    exec('sudo chmod 0770 ' . escapeshellarg($stagingDir) . ' 2>/dev/null');
+}
+if (is_dir($stagingDir) && !is_writable($stagingDir)) {
+    exec('sudo chown www-data:www-data ' . escapeshellarg($stagingDir) . ' 2>/dev/null');
+    exec('sudo chmod 0770 ' . escapeshellarg($stagingDir) . ' 2>/dev/null');
 }
 
 switch ($action) {
@@ -42,7 +49,12 @@ case 'upload':
 
     $dest = $stagingDir . '/' . $name;
     if (!move_uploaded_file($file['tmp_name'], $dest)) {
-        echo json_encode(['success' => false, 'error' => 'Failed to save uploaded file.']);
+        $reason = '';
+        if (!is_dir($stagingDir))          $reason = 'Staging directory does not exist: ' . $stagingDir;
+        elseif (!is_writable($stagingDir)) $reason = 'Staging directory not writable by web server: ' . $stagingDir;
+        elseif (!is_uploaded_file($file['tmp_name'])) $reason = 'Temp file missing — upload may have been interrupted.';
+        else $reason = 'move_uploaded_file() failed. tmp=' . $file['tmp_name'] . ', dest=' . $dest;
+        echo json_encode(['success' => false, 'error' => 'Failed to save uploaded file. ' . $reason]);
         break;
     }
 
