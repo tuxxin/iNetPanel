@@ -120,6 +120,8 @@ case "$COMMAND" in
 
     optimize_server)   bash "$SCRIPTS_DIR/optimize_server.sh"  "$@" ;;
 
+    check_domains)     bash "$SCRIPTS_DIR/check_domains.sh"    "$@" ;;
+
     # Server health & diagnostics
     status)            bash "$SCRIPTS_DIR/status.sh"           "$@" ;;
     benchmark)         bash "$SCRIPTS_DIR/benchmark.sh"        "$@" ;;
@@ -203,6 +205,9 @@ case "$COMMAND" in
         echo -e "  ${BOLD}Security:${NC}"
         echo -e "    ${GREEN}audit${NC}             Security audit (permissions, ports, SSL, SSH, PHP)"
         echo -e "    ${GREEN}malware_scan${NC}      Scan PHP files for backdoors and webshells"
+        echo ""
+        echo -e "  ${BOLD}Tools:${NC}"
+        echo -e "    ${GREEN}check_domains${NC}     Check domain availability via RDAP (free, no API key)"
         echo ""
         echo -e "  ${BOLD}Performance:${NC}"
         echo -e "    ${GREEN}optimize_server${NC}   Auto-tune Apache2 & MariaDB for this server's specs"

@@ -134,9 +134,8 @@ class CloudflareAPI
     public function createTunnel(string $accountId, string $name): array
     {
         return $this->request('POST', "/accounts/{$accountId}/cfd_tunnel", [
-            'name'         => $name,
-            'tunnel_secret' => base64_encode(random_bytes(32)),
-            'config_src'   => 'cloudflare',
+            'name'       => $name,
+            'config_src' => 'cloudflare',
         ]);
     }
 
