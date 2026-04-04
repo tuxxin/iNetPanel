@@ -617,8 +617,11 @@ function renderCfResults(domains) {
         let statusHtml = '';
         if (!zoneOk) {
             statusHtml = '<span class="badge bg-secondary">Zone not in Cloudflare</span>';
+        } else if (routed && info.routed_here) {
+            statusHtml = `<span class="badge bg-info text-dark">Routed here</span>
+                <span class="text-muted small ms-2">→ ${info.current_service}</span>`;
         } else if (routed) {
-            statusHtml = `<span class="badge bg-warning text-dark">Currently routed</span>
+            statusHtml = `<span class="badge bg-warning text-dark">Routed on another server</span>
                 <span class="text-muted small ms-2">→ ${info.current_service}</span>`;
         } else {
             statusHtml = '<span class="badge bg-success">Not routed — available</span>';
@@ -629,7 +632,12 @@ function renderCfResults(domains) {
             : '<span class="text-muted small">No DNS records</span>';
 
         const checked = zoneOk ? 'checked' : '';
-        const warn = routed ? `<div class="small text-warning mt-1"><i class="fas fa-exclamation-triangle me-1"></i>This will redirect traffic from the current server to this one.</div>` : '';
+        let warn = '';
+        if (routed && !info.routed_here) {
+            warn = `<div class="small text-warning mt-1"><i class="fas fa-exclamation-triangle me-1"></i>This domain is currently routed to another server. Checking "Route here" will redirect all traffic to this server.</div>`;
+        } else if (routed && info.routed_here) {
+            warn = `<div class="small text-success mt-1"><i class="fas fa-check-circle me-1"></i>Already routed to this server. Will update the port if changed.</div>`;
+        }
 
         html += `<div class="border rounded p-3 mb-2">
             <div class="d-flex justify-content-between align-items-start">
