@@ -131,6 +131,17 @@ $phpLimit   = ini_get('upload_max_filesize') ?: '100M';
 <!-- STEP 2: Review & Confirm                                                 -->
 <!-- ══════════════════════════════════════════════════════════════════════════ -->
 <div id="step-2" class="restore-step d-none">
+    <!-- Loading indicator while parsing archive -->
+    <div id="parse-loading" class="card border-0 shadow-sm mb-3">
+        <div class="card-body p-5 text-center">
+            <div class="spinner-border text-primary mb-3" style="width:2.5rem;height:2.5rem"></div>
+            <h6 class="mb-1">Analyzing Backup</h6>
+            <p class="small text-muted mb-0">Reading archive contents — this may take a moment for large files...</p>
+        </div>
+    </div>
+
+    <!-- Actual content (hidden until parse completes) -->
+    <div id="parse-content" class="d-none">
     <div class="card border-0 shadow-sm mb-3">
         <div class="card-body p-4">
             <h6 class="fw-semibold mb-3"><i class="fas fa-user me-1"></i>Account Details</h6>
@@ -196,6 +207,7 @@ $phpLimit   = ini_get('upload_max_filesize') ?: '100M';
         <button class="btn btn-outline-secondary" onclick="goToStep(1)"><i class="fas fa-arrow-left me-1"></i>Back</button>
         <button class="btn btn-primary" id="step2-next"><?= $cfEnabled ? 'Next: Cloudflare Check' : 'Start Restore' ?></button>
     </div>
+    </div><!-- /parse-content -->
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════════════ -->
@@ -362,7 +374,7 @@ fetch('/api/restore?action=ftp_info')
                     <div class="col-md-3"><span class="text-muted">Host:</span><br><strong>${data.host}</strong></div>
                     <div class="col-md-2"><span class="text-muted">Port:</span><br><strong>${data.port}</strong></div>
                     <div class="col-md-3"><span class="text-muted">Username:</span><br><strong>${data.username}</strong></div>
-                    <div class="col-md-4"><span class="text-muted">Password:</span><br><code>${data.password}</code></div>
+                    <div class="col-md-4"><span class="text-muted">Password:</span><br><em class="text-info">${data.password_hint}</em></div>
                 </div>
                 <div class="form-text mt-2">Upload your <code>.tgz</code> file to: <code>${data.directory}/</code></div>`;
         } else {
@@ -445,6 +457,10 @@ refreshStagedFiles();
 // ── Step 2: Parse backup ─────────────────────────────────────────────────────
 function parseBackup(filename) {
     goToStep(2);
+    // Show loading, hide content
+    document.getElementById('parse-loading').classList.remove('d-none');
+    document.getElementById('parse-content').classList.add('d-none');
+
     const fd = new FormData();
     fd.append('action', 'parse');
     fd.append('filename', filename);
@@ -459,8 +475,14 @@ function parseBackup(filename) {
             }
             parsedData = data;
             renderStep2(data);
+            // Hide loading, show content
+            document.getElementById('parse-loading').classList.add('d-none');
+            document.getElementById('parse-content').classList.remove('d-none');
         })
-        .catch(() => { showAlert('Failed to parse backup.', 'danger'); goToStep(1); });
+        .catch(() => {
+            showAlert('Failed to parse backup.', 'danger');
+            goToStep(1);
+        });
 }
 
 function renderStep2(data) {

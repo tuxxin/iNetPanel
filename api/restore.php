@@ -74,23 +74,32 @@ case 'upload_status':
 
 // ── Return permanent restore FTP account info ────────────────────────────────
 case 'ftp_info':
-    // Read root password to use for the restore account
+    // Read root password to set on the restore account (never sent to browser)
     $rootPass = '';
     if (file_exists('/root/.mysql_root_pass')) {
         $rootPass = trim(file_get_contents('/root/.mysql_root_pass'));
     }
 
-    // Ensure restore user exists
+    // Ensure restore user exists with root password
+    // Shell must be in /etc/shells for vsftpd to allow login — use /bin/bash
+    // (user is chrooted to staging dir by vsftpd anyway)
     $userExists = (trim(shell_exec("id restore 2>/dev/null && echo yes || echo no")) === 'yes');
     if (!$userExists) {
-        shell_exec("useradd -d " . escapeshellarg($stagingDir) . " -s /usr/sbin/nologin -g www-data restore 2>/dev/null");
-        shell_exec("echo 'restore:" . escapeshellarg($rootPass) . "' | chpasswd 2>/dev/null");
-        // Add to vsftpd whitelist
-        $list = file_get_contents('/etc/vsftpd.userlist') ?: '';
-        if (strpos($list, "\nrestore\n") === false && strpos($list, "restore\n") !== 0) {
-            file_put_contents('/etc/vsftpd.userlist', $list . "restore\n");
-            shell_exec('systemctl reload vsftpd 2>/dev/null');
-        }
+        shell_exec("useradd -d " . escapeshellarg($stagingDir) . " -s /bin/bash -g www-data restore 2>/dev/null");
+    } else {
+        // Fix shell if previously created with nologin
+        shell_exec("usermod -s /bin/bash restore 2>/dev/null");
+    }
+    // Always sync password with current root password
+    if ($rootPass) {
+        shell_exec("echo " . escapeshellarg("restore:{$rootPass}") . " | chpasswd 2>/dev/null");
+    }
+
+    // Add to vsftpd whitelist if not present
+    $list = file_get_contents('/etc/vsftpd.userlist') ?: '';
+    if (strpos($list, "\nrestore\n") === false && strpos($list, "restore\n") !== 0) {
+        file_put_contents('/etc/vsftpd.userlist', $list . "restore\n");
+        shell_exec('systemctl reload vsftpd 2>/dev/null');
     }
 
     // Detect server IP
@@ -102,7 +111,7 @@ case 'ftp_info':
         'host'      => $serverIp,
         'port'      => 21,
         'username'  => 'restore',
-        'password'  => $rootPass,
+        'password_hint' => 'ROOT PASSWORD',
         'directory' => $stagingDir,
     ]);
     break;
