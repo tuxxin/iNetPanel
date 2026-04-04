@@ -68,7 +68,9 @@ if ($updateChannel === 'beta') {
 
     $commitData = json_decode($raw, true);
     $latestSha  = substr($commitData['sha'] ?? '', 0, 7);
-    $latestTag  = $currentVersion . '-beta.' . $latestSha;
+    // Strip any existing -beta.* suffix to prevent stacking
+    $baseVersion = preg_replace('/-beta\..*$/', '', $currentVersion);
+    $latestTag   = $baseVersion . '-beta.' . $latestSha;
 
     // For beta, always update (can't reliably compare versions)
     log_msg("Beta channel — latest commit: {$latestSha}");
