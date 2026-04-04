@@ -300,23 +300,19 @@ case 'cf_check':
             }
         }
 
-        // Check tunnel routing — first our tunnel, then detect other tunnels via CNAME
+        // Check tunnel routing — first our tunnel, then search ALL account tunnels
         if (isset($routed[$domain])) {
             $info['currently_routed'] = true;
             $info['current_service']  = $routed[$domain];
             $info['routed_here']      = true;
         } else {
-            // Check if CNAME points to a different tunnel
-            foreach ($info['dns_records'] as $rec) {
-                if ($rec['type'] === 'CNAME' && str_contains($rec['content'], '.cfargotunnel.com')) {
-                    $cnameTarget = $rec['content'];
-                    $cnameTunnelId = str_replace('.cfargotunnel.com', '', $cnameTarget);
-                    $info['currently_routed'] = true;
-                    $info['routed_here']      = false;
-                    $info['current_service']  = 'Another tunnel (' . substr($cnameTunnelId, 0, 8) . '...)';
-                    $info['other_tunnel_id']  = $cnameTunnelId;
-                    break;
-                }
+            // Search all tunnels on the account for this domain's ingress rule
+            $found = $cf->findDomainInTunnels($accountId, $domain);
+            if ($found) {
+                $info['currently_routed'] = true;
+                $info['routed_here']      = false;
+                $info['current_service']  = $found['service'] . ' (' . $found['tunnel_name'] . ')';
+                $info['other_tunnel_id']  = $found['tunnel_id'];
             }
         }
 

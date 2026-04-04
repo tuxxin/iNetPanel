@@ -131,6 +131,46 @@ class CloudflareAPI
      * Create a named Cloudflare Zero Trust tunnel.
      * Returns the full API response; result.id is the tunnel UUID.
      */
+    /**
+     * List all tunnels on the account (active only by default).
+     */
+    public function listTunnels(string $accountId, bool $activeOnly = true): array
+    {
+        $query = $activeOnly ? '?is_deleted=false&status=active' : '?is_deleted=false';
+        return $this->request('GET', "/accounts/{$accountId}/cfd_tunnel{$query}");
+    }
+
+    /**
+     * Search all tunnels on the account for a hostname in their ingress rules.
+     * Returns ['tunnel_id' => string, 'tunnel_name' => string, 'service' => string] or null.
+     */
+    public function findDomainInTunnels(string $accountId, string $hostname): ?array
+    {
+        $tunnels = $this->listTunnels($accountId);
+        foreach ($tunnels['result'] ?? [] as $tunnel) {
+            $tunnelId   = $tunnel['id'] ?? '';
+            $tunnelName = $tunnel['name'] ?? '';
+            if (!$tunnelId) continue;
+
+            try {
+                $config  = $this->getTunnelConfig($accountId, $tunnelId);
+                $ingress = $config['result']['config']['ingress'] ?? [];
+                foreach ($ingress as $rule) {
+                    if (($rule['hostname'] ?? '') === $hostname) {
+                        return [
+                            'tunnel_id'   => $tunnelId,
+                            'tunnel_name' => $tunnelName,
+                            'service'     => $rule['service'] ?? '',
+                        ];
+                    }
+                }
+            } catch (Throwable $e) {
+                continue; // skip tunnels we can't read
+            }
+        }
+        return null;
+    }
+
     public function createTunnel(string $accountId, string $name): array
     {
         return $this->request('POST', "/accounts/{$accountId}/cfd_tunnel", [

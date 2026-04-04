@@ -220,21 +220,28 @@ switch ($action) {
             break;
         }
 
-        // Pre-flight: check tunnel route conflict
+        // Pre-flight: check tunnel route conflict (all tunnels on the account)
         if ($cfActive) {
             $tunnelId  = DB::setting('cf_tunnel_id',  '');
             $accountId = DB::setting('cf_account_id', '');
             if ($tunnelId && $accountId) {
                 try {
                     $cf = new CloudflareAPI();
+                    // Check this tunnel first (fast)
                     $routed = $cf->getRoutedHostnames($accountId, $tunnelId);
                     if (isset($routed[$domain])) {
-                        echo json_encode(['success' => false, 'error' => "Domain '{$domain}' is already routed on this Cloudflare tunnel."]);
+                        echo json_encode(['success' => false, 'error' => "Domain '{$domain}' is already routed on this server's tunnel."]);
+                        break;
+                    }
+                    // Check all other tunnels on the account
+                    $found = $cf->findDomainInTunnels($accountId, $domain);
+                    if ($found && $found['tunnel_id'] !== $tunnelId) {
+                        echo json_encode(['success' => false, 'error' => "Domain '{$domain}' is routed on tunnel '{$found['tunnel_name']}'. Remove it there first or use Restore with CF override."]);
                         break;
                     }
                 } catch (Throwable $e) {
-                        error_log('iNetPanel: CF API error in accounts.php - ' . $e->getMessage());
-                    }
+                    error_log('iNetPanel: CF API error in accounts.php - ' . $e->getMessage());
+                }
             }
         }
 
@@ -993,13 +1000,13 @@ switch ($action) {
             break;
         }
 
-        // Check CNAME records for tunnel conflicts
-        $cnames = $cf->listDNSRecords($zoneId, ['type' => 'CNAME', 'name' => $domain]);
-        foreach ($cnames['result'] ?? [] as $r) {
-            if (str_contains($r['content'] ?? '', 'cfargotunnel.com')) {
+        // Check ALL tunnels on the account for this domain (not just CNAMEs)
+        if ($accountId) {
+            $found = $cf->findDomainInTunnels($accountId, $domain);
+            if ($found) {
                 echo json_encode(['success' => true, 'available' => false,
-                    'reason' => 'A CNAME record for this domain already points to a Cloudflare tunnel.', 'cf_managed' => true]);
-                break 2;
+                    'reason' => "Domain is routed on tunnel '{$found['tunnel_name']}' → {$found['service']}.", 'cf_managed' => true]);
+                break;
             }
         }
 
