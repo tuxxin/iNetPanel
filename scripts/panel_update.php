@@ -475,6 +475,9 @@ if (file_exists($vsftpConf)) {
 if (class_exists('DB')) {
     try {
         DB::saveSetting('panel_latest_ver', $latestTag);
+        if ($updateChannel === 'beta' && !empty($latestSha)) {
+            DB::saveSetting('panel_installed_beta_sha', $latestSha);
+        }
     } catch (Throwable $e) { log_msg('WARNING: Failed to save version in DB - ' . $e->getMessage()); }
 }
 

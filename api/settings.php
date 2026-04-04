@@ -159,36 +159,75 @@ switch ($action) {
 
     case 'check_updates':
         Auth::requireAdmin();
-        // Force refresh version cache from GitHub
-        $ch = curl_init('https://api.github.com/repos/tuxxin/inetpanel/releases/latest');
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 10,
-            CURLOPT_HTTPHEADER     => Version::githubHeaders(),
-        ]);
-        $raw  = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        $channel = DB::setting('update_channel', 'stable');
 
-        if ($raw === false || $code !== 200) {
-            echo json_encode(['success' => false, 'error' => 'GitHub API unreachable.']);
-            break;
+        if ($channel === 'beta') {
+            // Beta: check latest commit on main branch
+            $ch = curl_init('https://api.github.com/repos/tuxxin/iNetPanel/commits/main');
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 10,
+                CURLOPT_HTTPHEADER     => Version::githubHeaders(),
+            ]);
+            $raw  = curl_exec($ch);
+            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($raw === false || $code !== 200) {
+                echo json_encode(['success' => false, 'error' => 'GitHub API unreachable.']);
+                break;
+            }
+            $data     = json_decode($raw, true);
+            $sha      = $data['sha'] ?? '';
+            $shortSha = substr($sha, 0, 7);
+            $latest   = 'beta-' . $shortSha;
+
+            DB::saveSetting('panel_latest_ver', $latest);
+            DB::saveSetting('panel_latest_beta_sha', $sha);
+            DB::saveSetting('panel_check_ts', (string) time());
+
+            $installedSha = DB::setting('panel_installed_beta_sha', '');
+            $current = Version::get();
+            echo json_encode([
+                'success'          => true,
+                'current'          => $current,
+                'latest'           => $latest,
+                'update_available' => $shortSha !== $installedSha,
+                'channel'          => 'beta',
+            ]);
+        } else {
+            // Stable: check latest tagged release
+            $ch = curl_init('https://api.github.com/repos/tuxxin/inetpanel/releases/latest');
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 10,
+                CURLOPT_HTTPHEADER     => Version::githubHeaders(),
+            ]);
+            $raw  = curl_exec($ch);
+            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($raw === false || $code !== 200) {
+                echo json_encode(['success' => false, 'error' => 'GitHub API unreachable.']);
+                break;
+            }
+            $release = json_decode($raw, true);
+            $latest  = ltrim($release['tag_name'] ?? '', 'v');
+            if (!$latest) {
+                echo json_encode(['success' => false, 'error' => 'Invalid GitHub response.']);
+                break;
+            }
+            DB::saveSetting('panel_latest_ver', $latest);
+            DB::saveSetting('panel_check_ts',   (string) time());
+            $current = Version::get();
+            echo json_encode([
+                'success'          => true,
+                'current'          => $current,
+                'latest'           => $latest,
+                'update_available' => version_compare($latest, $current, '>'),
+                'channel'          => 'stable',
+            ]);
         }
-        $release = json_decode($raw, true);
-        $latest  = ltrim($release['tag_name'] ?? '', 'v');
-        if (!$latest) {
-            echo json_encode(['success' => false, 'error' => 'Invalid GitHub response.']);
-            break;
-        }
-        DB::saveSetting('panel_latest_ver', $latest);
-        DB::saveSetting('panel_check_ts',   (string) time());
-        $current = Version::get();
-        echo json_encode([
-            'success'          => true,
-            'current'          => $current,
-            'latest'           => $latest,
-            'update_available' => version_compare($latest, $current, '>'),
-        ]);
         break;
 
     case 'setup_tunnel':
