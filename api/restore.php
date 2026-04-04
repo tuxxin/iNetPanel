@@ -133,35 +133,20 @@ case 'parse':
         break;
     }
 
-    // Get tar listing
-    $listing = shell_exec('tar -tzf ' . escapeshellarg($filepath) . ' 2>/dev/null') ?: '';
-    $lines   = array_filter(explode("\n", $listing));
+    // Stream tar listing through grep pipes — constant memory for any archive size
+    $esc = escapeshellarg($filepath);
 
-    // Detect username from home/USER/ paths
-    $archiveUser = '';
-    foreach ($lines as $line) {
-        if (preg_match('#^home/([^/]+)/#', $line, $m)) {
-            $archiveUser = $m[1];
-            break;
-        }
-    }
+    // Detect username from first home/USER/ path
+    $archiveUser = trim(shell_exec("tar -tzf {$esc} 2>/dev/null | grep -oP '^home/\\K[^/]+' | head -1") ?: '');
 
-    // Detect domains from home/USER/DOMAIN/www/ directories
-    $domains = [];
-    foreach ($lines as $line) {
-        if (preg_match('#^home/[^/]+/([^/]+)/www/#', $line, $m)) {
-            $domain = $m[1];
-            if (!in_array($domain, $domains) && $domain !== 'tmp') {
-                $domains[] = $domain;
-            }
-        }
-    }
+    // Detect domains: unique directories containing a www/ subdir
+    $domainLines = trim(shell_exec("tar -tzf {$esc} 2>/dev/null | grep -oP '^home/[^/]+/\\K[^/]+(?=/www/)' | sort -u") ?: '');
+    $domains = $domainLines ? array_filter(array_unique(explode("\n", $domainLines)), fn($d) => $d !== 'tmp') : [];
 
-    // Detect SQL files at tar root
+    // Detect SQL files with sizes at tar root (not inside home/)
     $sqlFiles = [];
-    $detailedListing = shell_exec('tar -tvzf ' . escapeshellarg($filepath) . ' 2>/dev/null') ?: '';
-    foreach (explode("\n", $detailedListing) as $dline) {
-        // Match SQL files — could be at root or ./filename.sql
+    $sqlLines = trim(shell_exec("tar -tvzf {$esc} 2>/dev/null | grep -E '^\\S+\\s+\\S+\\s+[0-9]+\\s+\\S+\\s+\\S+\\s+\\.?/?[^/]+\\.sql\$'") ?: '');
+    foreach (array_filter(explode("\n", $sqlLines)) as $dline) {
         if (preg_match('/(\d+)\s+[\d-]+\s+[\d:]+\s+\.?\/?([^\/]+\.sql)$/', $dline, $m)) {
             $sqlFiles[] = [
                 'name'    => $m[2],
@@ -172,13 +157,8 @@ case 'parse':
         }
     }
 
-    // Count files under home/
-    $fileCount = 0;
-    foreach ($lines as $line) {
-        if (str_starts_with($line, 'home/') && !str_ends_with($line, '/')) {
-            $fileCount++;
-        }
-    }
+    // Count files under home/ (non-directory entries)
+    $fileCount = (int) trim(shell_exec("tar -tzf {$esc} 2>/dev/null | grep -c '^home/.*[^/]\$'") ?: '0');
 
     // Auto-assign ports for each domain
     $portsConf = file_get_contents('/etc/apache2/ports_domains.conf') ?: '';
@@ -251,6 +231,7 @@ case 'parse':
 
 // ── Check Cloudflare routing for domains ─────────────────────────────────────
 case 'cf_check':
+    set_time_limit(120); // searching multiple tunnels makes many API calls
     $domainsJson = $_POST['domains'] ?? '[]';
     $domainList  = json_decode($domainsJson, true) ?: [];
 

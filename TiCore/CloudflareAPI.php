@@ -134,10 +134,9 @@ class CloudflareAPI
     /**
      * List all tunnels on the account (active only by default).
      */
-    public function listTunnels(string $accountId, bool $activeOnly = true): array
+    public function listTunnels(string $accountId): array
     {
-        $query = $activeOnly ? '?is_deleted=false&status=active' : '?is_deleted=false';
-        return $this->request('GET', "/accounts/{$accountId}/cfd_tunnel{$query}");
+        return $this->request('GET', "/accounts/{$accountId}/cfd_tunnel?is_deleted=false");
     }
 
     /**
