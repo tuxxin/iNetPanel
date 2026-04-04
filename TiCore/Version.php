@@ -11,11 +11,18 @@ class Version
     const APP_VERSION = '1.23.3';
 
     /**
-     * Return current version string.
+     * Return current version string (strips stacked beta suffixes if present).
      */
     public static function get(): string
     {
-        return self::APP_VERSION;
+        // Safety: clean up stacked -beta.x-beta.y strings to just base-beta.latest
+        $ver = self::APP_VERSION;
+        if (substr_count($ver, '-beta.') > 1) {
+            $base = preg_replace('/-beta\..*$/', '', $ver);
+            preg_match('/-beta\.([a-f0-9]+)$/', $ver, $m);
+            $ver = $base . '-beta.' . ($m[1] ?? 'unknown');
+        }
+        return $ver;
     }
 
     /**
