@@ -10,15 +10,13 @@ $action = $_POST['action'] ?? $_GET['action'] ?? '';
 $stagingDir = '/backup/restore_staging';
 
 // Ensure staging directory exists and is writable by www-data
-if (!is_dir($stagingDir)) {
-    // www-data may not be able to create under /backup/ — use sudo
-    exec('sudo mkdir -p ' . escapeshellarg($stagingDir) . ' 2>/dev/null');
-    exec('sudo chown www-data:www-data ' . escapeshellarg($stagingDir) . ' 2>/dev/null');
-    exec('sudo chmod 0770 ' . escapeshellarg($stagingDir) . ' 2>/dev/null');
-}
-if (is_dir($stagingDir) && !is_writable($stagingDir)) {
-    exec('sudo chown www-data:www-data ' . escapeshellarg($stagingDir) . ' 2>/dev/null');
-    exec('sudo chmod 0770 ' . escapeshellarg($stagingDir) . ' 2>/dev/null');
+if (!is_dir($stagingDir) || !is_writable($stagingDir)) {
+    // Use the inetp_hook sudoers rule (allows: sudo /bin/bash /tmp/inetp_hook_*)
+    $hook = '/tmp/inetp_hook_restore_staging_' . getmypid();
+    file_put_contents($hook, "#!/bin/bash\nmkdir -p {$stagingDir}\nchown www-data:www-data {$stagingDir}\nchmod 0770 {$stagingDir}\n");
+    chmod($hook, 0755);
+    exec('sudo /bin/bash ' . escapeshellarg($hook) . ' 2>/dev/null');
+    @unlink($hook);
 }
 
 switch ($action) {
