@@ -126,8 +126,9 @@ case 'ftp_info':
     ]);
     break;
 
-// ── Parse a staged backup file ───────────────────────────────────────────────
+// ── Parse a staged backup file (can be slow on large archives) ───────────────
 case 'parse':
+    set_time_limit(300); // large archives can take time to list
     $filename = basename($_POST['filename'] ?? '');
     if (!$filename || !preg_match('/^[\w.\-]+\.tgz$/', $filename)) {
         echo json_encode(['success' => false, 'error' => 'Invalid filename.']);
@@ -333,6 +334,14 @@ case 'cf_check':
 
 // ── Execute the restore ──────────────────────────────────────────────────────
 case 'execute':
+    set_time_limit(0); // restore can take minutes for large backups
+    $restoreLog = '/var/log/inetpanel_restore.log';
+    $logRestore = function(string $msg) use ($restoreLog) {
+        $line = '[' . date('Y-m-d H:i:s') . '] ' . $msg . PHP_EOL;
+        file_put_contents($restoreLog, $line, FILE_APPEND);
+    };
+    $logRestore('=== Restore started ===');
+
     $filename    = basename($_POST['filename'] ?? '');
     $username    = trim($_POST['username'] ?? '');
     $password    = $_POST['password'] ?? '';
@@ -393,9 +402,13 @@ case 'execute':
     }
 
     // Run the restore script
+    $logRestore("Running restore_account for user={$username} domains=" . implode(',', $domainList));
     $result = Shell::run('restore_account', $args);
+    $logRestore("Shell result: code={$result['code']} success=" . ($result['success'] ? 'yes' : 'no'));
+    $logRestore("Output: " . substr($result['output'], 0, 2000));
 
     if (!$result['success']) {
+        $logRestore("FAILED: " . ($result['error'] ?: $result['output']));
         echo json_encode(['success' => false, 'error' => 'Restore failed: ' . ($result['error'] ?: $result['output'])]);
         break;
     }
@@ -442,9 +455,12 @@ case 'execute':
         error_log('Restore DB insert error: ' . $e->getMessage());
     }
 
+    $logRestore("DB records inserted for user={$username}");
+
     // Cloudflare tunnel override
     $cfResults = [];
     if ($cfEnabled && !empty($cfOverride)) {
+        $logRestore("Updating CF tunnel for: " . implode(', ', $cfOverride));
         $accountId = DB::setting('cf_account_id', '');
         $tunnelId  = DB::setting('cf_tunnel_id', '');
         if ($accountId && $tunnelId) {
@@ -463,8 +479,10 @@ case 'execute':
                 try {
                     $cfResult = $cf->addTunnelHostname($accountId, $tunnelId, $domain, "https://localhost:{$port}");
                     $cfResults[$domain] = ['success' => true, 'dns_skipped' => !empty($cfResult['dns_skipped'])];
+                    $logRestore("CF route added: {$domain} → localhost:{$port}");
                 } catch (Throwable $e) {
                     $cfResults[$domain] = ['success' => false, 'error' => $e->getMessage()];
+                    $logRestore("CF route FAILED for {$domain}: " . $e->getMessage());
                 }
             }
         }
@@ -473,32 +491,31 @@ case 'execute':
     // Clean up staging file
     @unlink($filepath);
 
-    // Schedule FPM reload after response (same pattern as accounts.php)
+    $logRestore("Restore complete for {$username}. Sending response and deferring FPM reload.");
+
+    // Send response FIRST, then reload FPM (which kills this worker)
+    $responseData = [
+        'success'    => true,
+        'username'   => $username,
+        'password'   => $password,
+        'domains'    => $domainData,
+        'cf_results' => $cfResults,
+        'output'     => $result['output'],
+    ];
+
     if (function_exists('fastcgi_finish_request')) {
-        echo json_encode([
-            'success'    => true,
-            'username'   => $username,
-            'password'   => $password,
-            'domains'    => $domainData,
-            'cf_results' => $cfResults,
-            'output'     => $result['output'],
-        ]);
+        echo json_encode($responseData);
         fastcgi_finish_request();
-        // Reload FPM after response sent
+        // NOW safe to reload FPM — response already sent to client
+        sleep(1); // brief delay to ensure response is flushed
         foreach (glob('/usr/sbin/php-fpm*') as $fpm) {
             if (preg_match('/(\d+\.\d+)/', basename($fpm), $vm)) {
-                exec("systemctl reload php{$vm[1]}-fpm 2>/dev/null");
+                exec("sudo /bin/systemctl reload php{$vm[1]}-fpm 2>/dev/null");
             }
         }
+        $logRestore("FPM reloaded after response sent.");
     } else {
-        echo json_encode([
-            'success'    => true,
-            'username'   => $username,
-            'password'   => $password,
-            'domains'    => $domainData,
-            'cf_results' => $cfResults,
-            'output'     => $result['output'],
-        ]);
+        echo json_encode($responseData);
     }
     break;
 

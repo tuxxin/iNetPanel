@@ -275,11 +275,11 @@ if ! grep -qx "$USERNAME" /etc/vsftpd.userlist 2>/dev/null; then
 fi
 
 # ── Step 7: Reload Services ──────────────────────────────────────────────────
+# NOTE: Do NOT reload PHP-FPM here — it kills the panel's own FPM worker
+# that is waiting for this script to finish. FPM reload is handled by
+# the API after fastcgi_finish_request().
 echo "STAGE:reloading_services"
 systemctl reload apache2 2>/dev/null
-for ver in "${!FPM_RELOAD[@]}"; do
-    systemctl reload "php${ver}-fpm" 2>/dev/null
-done
 systemctl reload vsftpd 2>/dev/null || systemctl restart vsftpd 2>/dev/null
 
 # ── Done — output JSON summary ───────────────────────────────────────────────
