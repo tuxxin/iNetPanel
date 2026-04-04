@@ -92,25 +92,26 @@ case 'ftp_info':
 
     // Ensure restore user exists with root password
     // Shell must be in /etc/shells for vsftpd to allow login — use /bin/bash
-    // (user is chrooted to staging dir by vsftpd anyway)
+    // All commands need sudo since we're running as www-data
+    // Uses inetp_hook pattern (allowed in sudoers: sudo /bin/bash /tmp/inetp_hook_*)
     exec('id restore 2>/dev/null', $ftpIdOut, $ftpIdCode);
+    $hook = '/tmp/inetp_hook_restore_ftp_' . getmypid();
+    $script = "#!/bin/bash\n";
     if ($ftpIdCode !== 0) {
-        shell_exec("useradd -d " . escapeshellarg($stagingDir) . " -s /bin/bash -g www-data restore 2>/dev/null");
+        $script .= "useradd -d " . escapeshellarg($stagingDir) . " -s /bin/bash -g www-data restore\n";
     } else {
-        // Fix shell if previously created with nologin
-        shell_exec("usermod -s /bin/bash restore 2>/dev/null");
+        $script .= "usermod -s /bin/bash -d " . escapeshellarg($stagingDir) . " restore\n";
     }
-    // Always sync password with current root password
     if ($rootPass) {
-        shell_exec("echo " . escapeshellarg("restore:{$rootPass}") . " | chpasswd 2>/dev/null");
+        $script .= "echo " . escapeshellarg("restore:{$rootPass}") . " | chpasswd\n";
     }
-
-    // Add to vsftpd whitelist if not present
-    $list = file_get_contents('/etc/vsftpd.userlist') ?: '';
-    if (strpos($list, "\nrestore\n") === false && strpos($list, "restore\n") !== 0) {
-        file_put_contents('/etc/vsftpd.userlist', $list . "restore\n");
-        shell_exec('systemctl reload vsftpd 2>/dev/null');
-    }
+    // Ensure in vsftpd whitelist
+    $script .= "grep -qx restore /etc/vsftpd.userlist 2>/dev/null || echo restore >> /etc/vsftpd.userlist\n";
+    $script .= "systemctl reload vsftpd 2>/dev/null\n";
+    file_put_contents($hook, $script);
+    chmod($hook, 0755);
+    exec('sudo /bin/bash ' . escapeshellarg($hook) . ' 2>&1', $hookOut, $hookCode);
+    @unlink($hook);
 
     // Detect server IP
     $serverIp = trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: '');
