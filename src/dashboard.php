@@ -202,7 +202,8 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
     // ── Recent accounts ──────────────────────────────────────────────────
-    fetch('/api/accounts?action=list')
+    // limit=6 + skip_disk=1 — dashboard only needs domain, status, php_version
+    fetch('/api/accounts?action=list&limit=6&skip_disk=1')
         .then(r => r.json())
         .then(data => {
             const ul = document.getElementById('dash-accounts');

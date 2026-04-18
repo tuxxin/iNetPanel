@@ -847,19 +847,31 @@ switch ($action) {
     // =========================================================================
 
     case 'list':
-        $domains = DB::fetchAll(
-            'SELECT d.*, h.username as hosting_username FROM domains d LEFT JOIN hosting_users h ON d.hosting_user_id = h.id ORDER BY d.created_at DESC'
-        );
+        // Optional query params:
+        //   ?limit=N      — cap rows (used by dashboard for its 6-row preview)
+        //   ?skip_disk=1  — skip the per-user du/db_size calls (expensive with many domains)
+        $limit    = max(0, (int)($_GET['limit'] ?? 0));
+        $skipDisk = ($_GET['skip_disk'] ?? '0') === '1';
+
+        $sql = 'SELECT d.*, h.username as hosting_username FROM domains d LEFT JOIN hosting_users h ON d.hosting_user_id = h.id ORDER BY d.created_at DESC';
+        if ($limit > 0) {
+            $sql .= ' LIMIT ' . $limit;
+        }
+        $domains = DB::fetchAll($sql);
         $wgPeers = DB::fetchAll('SELECT hosting_user, peer_ip FROM wg_peers');
         $wgMap   = array_column($wgPeers, 'peer_ip', 'hosting_user');
 
         $diskCache = [];
         foreach ($domains as &$d) {
             $username = $d['hosting_username'] ?? $d['domain_name'];
-            if (!isset($diskCache[$username])) {
-                $diskCache[$username] = accountDisk($username);
+            if ($skipDisk) {
+                $d['disk'] = null;
+            } else {
+                if (!isset($diskCache[$username])) {
+                    $diskCache[$username] = accountDisk($username);
+                }
+                $d['disk'] = $diskCache[$username];
             }
-            $d['disk'] = $diskCache[$username];
             $d['wg_ip'] = $wgMap[$username] ?? null;
             $d['username'] = $username;
         }

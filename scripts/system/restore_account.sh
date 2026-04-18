@@ -232,10 +232,20 @@ POOL
     fi
 
     VHOST_CONF="/etc/apache2/sites-available/${DOMAIN}.conf"
+
+    # Add ServerAlias www.$DOMAIN for apex domains only (matches CF tunnel logic)
+    DOT_COUNT=$(echo "$DOMAIN" | tr -cd '.' | wc -c)
+    if [ "$DOT_COUNT" -eq 1 ] && [[ "$DOMAIN" != www.* ]]; then
+        SERVER_ALIAS="    ServerAlias www.${DOMAIN}"
+    else
+        SERVER_ALIAS=""
+    fi
+
     cat << VHOST > "$VHOST_CONF"
 <VirtualHost *:${PORT}>
     ServerAdmin webmaster@${DOMAIN}
     ServerName  ${DOMAIN}
+${SERVER_ALIAS}
     DocumentRoot ${DOC_ROOT}
 
     SSLEngine on
