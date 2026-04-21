@@ -30,6 +30,7 @@ class Shell
         'db_size',
         'multiphp_manage',
         'restore_account',
+        'disk_cache_scan',
         'list',
     ];
 

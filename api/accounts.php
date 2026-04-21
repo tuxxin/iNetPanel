@@ -29,18 +29,59 @@ function shellResult(array $r): array {
     return ['success' => false, 'error' => $r['output'] ?: $r['error'] ?: 'Script execution failed.'];
 }
 
-// Return total disk usage for a hosting user's home directory + MariaDB databases
-function accountDisk(string $username): string {
-    $path = '/home/' . $username;
-    if (!is_dir($path)) return '—';
-    $bytes = (int)trim(shell_exec('du -sb ' . escapeshellarg($path) . ' 2>/dev/null | cut -f1') ?: '0');
-    $dbResult = Shell::run('db_size', ['--username' => $username]);
-    $bytes += (int)trim($dbResult['output'] ?: '0');
+// Format a byte count as human-readable (e.g. "10.6 GB")
+function formatDiskBytes(int $bytes): string {
     if ($bytes <= 0) return '0 B';
     $units = ['B', 'KB', 'MB', 'GB', 'TB'];
     $i = 0;
     while ($bytes >= 1024 && $i < 4) { $bytes /= 1024; $i++; }
     return round($bytes, 1) . ' ' . $units[$i];
+}
+
+// Per-domain file disk usage (reads from disk_cache table populated by cron).
+// Returns ['bytes'=>int,'hr'=>string,'scanned'=>datetime] or null if not scanned yet.
+function accountDomainFiles(string $username, string $domain): ?array {
+    try {
+        $row = DB::fetchOne(
+            'SELECT files_bytes, scanned_at FROM disk_cache WHERE username = ? AND domain_name = ?',
+            [$username, $domain]
+        );
+    } catch (Throwable $e) { return null; }
+    if (!$row) return null;
+    $b = (int)$row['files_bytes'];
+    return ['bytes' => $b, 'hr' => formatDiskBytes($b), 'scanned' => $row['scanned_at']];
+}
+
+// Per-user total = sum of user's domain files + user's DB total (cached).
+// Returns ['bytes','hr','files_bytes','db_bytes'] or null if nothing cached yet.
+function accountUserTotal(string $username): ?array {
+    try {
+        $files = DB::fetchOne(
+            'SELECT COALESCE(SUM(files_bytes), 0) AS b FROM disk_cache WHERE username = ?',
+            [$username]
+        );
+        $dbRow = DB::fetchOne(
+            'SELECT db_bytes FROM disk_cache_user WHERE username = ?',
+            [$username]
+        );
+    } catch (Throwable $e) { return null; }
+    $filesBytes = (int)($files['b'] ?? 0);
+    $dbBytes    = (int)($dbRow['db_bytes'] ?? 0);
+    $total      = $filesBytes + $dbBytes;
+    if ($total === 0) return null;
+    return [
+        'bytes'       => $total,
+        'hr'          => formatDiskBytes($total),
+        'files_bytes' => $filesBytes,
+        'db_bytes'    => $dbBytes,
+    ];
+}
+
+// Backward-compat wrapper — used by list_users / get_user actions.
+// Returns the user total as a formatted string, or '—' if not cached.
+function accountDisk(string $username): string {
+    $t = accountUserTotal($username);
+    return $t ? $t['hr'] : '—';
 }
 
 // Execute a hook script (add_domain or delete_domain) after domain operations
@@ -325,6 +366,8 @@ switch ($action) {
             $pv = $phpVer ?: '8.4';
             $fpmService = "php{$pv}-fpm";
             Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
+            // Refresh disk usage cache for the affected user (background, non-blocking)
+            Shell::exec('sudo /usr/local/bin/inetp disk_cache_scan --user ' . escapeshellarg($username) . ' >/dev/null 2>&1 &', 'disk-cache-refresh');
         }
         break;
 
@@ -355,6 +398,8 @@ switch ($action) {
         if ($result['success']) {
             DB::delete('domains', 'domain_name = ?', [$domain]);
             DB::delete('account_ports', 'domain_name = ?', [$domain]);
+            // Purge disk_cache row for this domain; user's DB total gets refreshed below.
+            DB::query('DELETE FROM disk_cache WHERE username = ? AND domain_name = ?', [$username, $domain]);
             if (DB::setting('cf_enabled', '0') === '1') {
                 $tunnelId  = DB::setting('cf_tunnel_id',  '');
                 $accountId = DB::setting('cf_account_id', '');
@@ -382,6 +427,8 @@ switch ($action) {
             $delPhpVer = $hookPhpVer ?: DB::setting('php_default_version', '8.4');
             $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $delPhpVer) . '-fpm';
             Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
+            // Refresh the user's DB total (domain row was already deleted above)
+            Shell::exec('sudo /usr/local/bin/inetp disk_cache_scan --user ' . escapeshellarg($username) . ' >/dev/null 2>&1 &', 'disk-cache-refresh');
         }
         break;
 
@@ -553,6 +600,8 @@ switch ($action) {
                 'DB_USER'   => $username,
                 'DB_PASS'   => trim(@file_get_contents('/root/.mysql_root_pass') ?: ''),
             ]);
+            // Refresh disk usage cache for the new user+domain (background)
+            Shell::exec('sudo /usr/local/bin/inetp disk_cache_scan --user ' . escapeshellarg($username) . ' >/dev/null 2>&1 &', 'disk-cache-refresh');
         }
         $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
         Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
@@ -683,6 +732,8 @@ switch ($action) {
                 'DB_USER'   => $username,
                 'DB_PASS'   => trim(@file_get_contents('/root/.mysql_root_pass') ?: ''),
             ]);
+            // Refresh disk usage cache for the affected user (background)
+            Shell::exec('sudo /usr/local/bin/inetp disk_cache_scan --user ' . escapeshellarg($username) . ' >/dev/null 2>&1 &', 'disk-cache-refresh');
         }
         $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
         Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
@@ -723,12 +774,15 @@ switch ($action) {
         if ($result['success']) {
             DB::delete('domains', 'domain_name = ?', [$domain]);
             DB::delete('account_ports', 'domain_name = ?', [$domain]);
+            // Purge disk_cache row for this domain
+            DB::query('DELETE FROM disk_cache WHERE username = ? AND domain_name = ?', [$username, $domain]);
 
             // If no more domains for this user, delete the user too
             $remaining = DB::fetchOne(
                 'SELECT COUNT(*) as cnt FROM domains d JOIN hosting_users h ON d.hosting_user_id = h.id WHERE h.username = ?',
                 [$username]
             );
+            $userDeleted = false;
             if (($remaining['cnt'] ?? 0) === 0) {
                 $delResult = Shell::run('delete_user', ['--username' => $username]);
                 if ($delResult['success']) {
@@ -738,6 +792,10 @@ switch ($action) {
                         Shell::run('wg_peer', ['--remove', '--name' => $username]);
                     }
                     DB::delete('wg_peers', 'hosting_user = ?', [$username]);
+                    // Full cleanup — drop both disk cache tables for this user
+                    DB::query('DELETE FROM disk_cache WHERE username = ?', [$username]);
+                    DB::query('DELETE FROM disk_cache_user WHERE username = ?', [$username]);
+                    $userDeleted = true;
                 }
             }
         }
@@ -753,6 +811,10 @@ switch ($action) {
                 'DOC_ROOT'  => "/home/{$username}/{$domain}/www",
                 'SERVER_IP' => trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: ''),
             ]);
+            // If user still exists (had more domains), refresh their DB total cache
+            if (empty($userDeleted)) {
+                Shell::exec('sudo /usr/local/bin/inetp disk_cache_scan --user ' . escapeshellarg($username) . ' >/dev/null 2>&1 &', 'disk-cache-refresh');
+            }
         }
         $delPhpVer = $domainRow['php_version'] ?? '8.4';
         $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $delPhpVer) . '-fpm';
@@ -861,18 +923,28 @@ switch ($action) {
         $wgPeers = DB::fetchAll('SELECT hosting_user, peer_ip FROM wg_peers');
         $wgMap   = array_column($wgPeers, 'peer_ip', 'hosting_user');
 
-        $diskCache = [];
+        // Per-row disk now comes from the cached disk_cache table (populated by cron).
+        // $userTotals caches the per-user total (files across all domains + user's DB bytes)
+        // so the UI can render a total under the username on that user's first row.
+        $userTotals = [];
         foreach ($domains as &$d) {
             $username = $d['hosting_username'] ?? $d['domain_name'];
             if ($skipDisk) {
                 $d['disk'] = null;
+                $d['disk_bytes'] = 0;
+                $d['user_total'] = null;
             } else {
-                if (!isset($diskCache[$username])) {
-                    $diskCache[$username] = accountDisk($username);
+                $files = accountDomainFiles($username, $d['domain_name']);
+                $d['disk'] = $files['hr'] ?? '—';
+                $d['disk_bytes'] = $files['bytes'] ?? 0;
+
+                if (!array_key_exists($username, $userTotals)) {
+                    $userTotals[$username] = accountUserTotal($username);
                 }
-                $d['disk'] = $diskCache[$username];
+                $d['user_total']    = $userTotals[$username]['hr'] ?? null;
+                $d['user_db_bytes'] = $userTotals[$username]['db_bytes'] ?? 0;
             }
-            $d['wg_ip'] = $wgMap[$username] ?? null;
+            $d['wg_ip']    = $wgMap[$username] ?? null;
             $d['username'] = $username;
         }
         unset($d);

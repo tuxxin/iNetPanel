@@ -123,6 +123,8 @@ case "$COMMAND" in
 
     check_domains)     bash "$SCRIPTS_DIR/check_domains.sh"    "$@" ;;
 
+    disk_cache_scan)   bash "$SCRIPTS_DIR/disk_cache_scan.sh"  "$@" ;;
+
     # Server health & diagnostics
     status)            bash "$SCRIPTS_DIR/status.sh"           "$@" ;;
     benchmark)         bash "$SCRIPTS_DIR/benchmark.sh"        "$@" ;;

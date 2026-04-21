@@ -258,6 +258,9 @@ function loadAccounts() {
                 tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No accounts found. <a href="/admin/add-account">Create one</a>.</td></tr>';
                 return;
             }
+            // Track which usernames have already shown their total so we render it
+            // just once per user (on that user's first row in the current ordering).
+            const usersShownTotal = new Set();
             tbody.innerHTML = data.data.map(a => {
                 const suspended = a.status === 'suspended';
                 const rowClass  = suspended ? 'table-secondary text-muted' : '';
@@ -265,6 +268,11 @@ function loadAccounts() {
                     ? '<span class="badge bg-warning text-dark">Suspended</span>'
                     : '<span class="badge bg-success">Active</span>';
                 const username = a.username || a.domain_name;
+                const showTotal = !usersShownTotal.has(username);
+                if (showTotal) usersShownTotal.add(username);
+                const userCell = `
+                    <span class="badge bg-light text-dark border">${username}</span>
+                    ${showTotal && a.user_total ? `<div class="small text-muted mt-1" title="Files across all domains + MariaDB total">Total: ${a.user_total}</div>` : ''}`;
                 const wgBadge = a.wg_ip
                     ? `<span class="badge bg-primary-subtle text-primary" style="cursor:pointer" onclick="showWgConfig('${username}')" title="${a.wg_ip}"><i class="fas fa-shield-alt"></i></span>`
                     : '<span class="text-muted">—</span>';
@@ -277,7 +285,7 @@ function loadAccounts() {
                 const loginAsBtn = `<button class="btn btn-sm btn-outline-info me-1" onclick="loginAsUser('${username}')" title="Login as ${username}"><i class="fas fa-sign-in-alt"></i></button>`;
                 const pwBtn = `<button class="btn btn-sm btn-outline-dark me-1" onclick="openChangePassword('${username}')" title="Change password"><i class="fas fa-lock"></i></button>`;
                 return `<tr class="${rowClass}">
-                    <td class="ps-4"><span class="badge bg-light text-dark border">${username}</span></td>
+                    <td class="ps-4">${userCell}</td>
                     <td class="fw-semibold"><a href="https://${a.domain_name}" target="_blank" class="text-decoration-none">${a.domain_name} <i class="fas fa-external-link-alt ms-1" style="font-size:.7em;opacity:.5"></i></a></td>
                     <td>${a.port ?? '—'}</td>
                     <td>${a.disk ?? '—'}</td>

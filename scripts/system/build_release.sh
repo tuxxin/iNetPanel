@@ -3,7 +3,8 @@
 # build_release.sh — iNetPanel Release Builder
 #
 # Output:
-#   /root/release/latest              — Bash installer (curl | bash style)
+#   /root/release/latest              — Stable installer (pulls GitHub release zip)
+#   /root/release/latest-beta         — Beta installer (pulls main-branch zipball)
 #   /root/release/inetpanel-latest.zip — Panel source files
 #
 # Usage:
@@ -30,11 +31,21 @@ command -v zip &>/dev/null || fail "'zip' is not installed. Run: apt-get install
 
 mkdir -p "$RELEASE_DIR"
 
-# ── 1. Copy installer as 'latest' ─────────────────────────────────────────────
-step "Copying installer → latest"
+# ── 1. Copy installer as 'latest' (stable) ────────────────────────────────────
+step "Copying installer → latest (stable, pulls release zip)"
 cp "$INSTALLER_SRC" "$RELEASE_DIR/latest"
 chmod +x "$RELEASE_DIR/latest"
 ok "Installer copied: $RELEASE_DIR/latest"
+
+# ── 1b. Generate 'latest-beta' variant (pulls main-branch zipball) ───────────
+# Single substitution: swap the release zip URL for the GitHub zipball of main.
+# The existing download_inetpanel fallback (find first dir inside extract) handles
+# the differently-named GitHub zipball root directory automatically.
+step "Generating latest-beta (pulls from main branch)"
+sed 's|https://github.com/tuxxin/iNetPanel/releases/latest/download/inetpanel-latest.zip|https://api.github.com/repos/tuxxin/iNetPanel/zipball/main|' \
+    "$INSTALLER_SRC" > "$RELEASE_DIR/latest-beta"
+chmod +x "$RELEASE_DIR/latest-beta"
+ok "Beta installer created: $RELEASE_DIR/latest-beta"
 
 # ── 2. Build panel zip (exclude secrets + dev artifacts) ─────────────────────
 step "Building inetpanel-latest.zip"
@@ -74,13 +85,16 @@ echo -e "${GREEN}   Release Build Complete!${NC}"
 echo -e "${BOLD}======================================================${NC}"
 
 LATEST_SIZE=$(du -sh "$RELEASE_DIR/latest"              2>/dev/null | cut -f1)
+BETA_SIZE=$(du -sh   "$RELEASE_DIR/latest-beta"         2>/dev/null | cut -f1)
 ZIP_SIZE=$(du -sh    "$RELEASE_DIR/inetpanel-latest.zip" 2>/dev/null | cut -f1)
 
 echo -e "  ${BOLD}latest${NC}                  ${GREEN}$LATEST_SIZE${NC}  →  $RELEASE_DIR/latest"
+echo -e "  ${BOLD}latest-beta${NC}             ${GREEN}$BETA_SIZE${NC}  →  $RELEASE_DIR/latest-beta"
 echo -e "  ${BOLD}inetpanel-latest.zip${NC}    ${GREEN}$ZIP_SIZE${NC}  →  $RELEASE_DIR/inetpanel-latest.zip"
 echo ""
-echo -e "  ${YELLOW}Upload both files to: https://inetpanel.tuxxin.com/${NC}"
+echo -e "  ${YELLOW}Upload all three files to: https://inetpanel.tuxxin.com/${NC}"
 echo ""
-echo -e "  Install command:"
-echo -e "    ${GREEN}curl -o latest https://inetpanel.tuxxin.com/latest && bash latest${NC}"
+echo -e "  Install commands:"
+echo -e "    stable: ${GREEN}curl -o latest https://inetpanel.tuxxin.com/latest && bash latest${NC}"
+echo -e "    beta:   ${GREEN}curl -o latest-beta https://inetpanel.tuxxin.com/latest-beta && bash latest-beta${NC}"
 echo -e "${BOLD}======================================================${NC}"

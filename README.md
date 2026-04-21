@@ -22,10 +22,10 @@ iNetPanel is a free, open-source hosting control panel designed for **home serve
 ## Quick Install
 
 ```bash
-bash <(curl -s https://inetpanel.info/latest)
+apt-get install -y curl && bash <(curl -s https://inetpanel.info/latest)
 ```
 
-Requires a **clean Debian 12** server with root access. The guided installer handles everything.
+Requires a **clean Debian 12** server with root access. The guided installer handles everything. (`curl` is not bundled with the Debian 12 server ISO, so we install it first — the `apt-get` step is a no-op if curl is already present.)
 
 > **[Full installation guide →](https://inetpanel.info/install)**
 

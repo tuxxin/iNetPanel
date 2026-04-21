@@ -301,6 +301,19 @@ file_put_contents($statsCron, "# iNetPanel stats collector — auto-managed by p
 chmod($statsCron, 0644);
 log_msg('Installed stats collector cron job');
 
+// Install disk usage scanner cron (every 10 minutes)
+$diskCron = "/etc/cron.d/inetpanel_disk_scan";
+file_put_contents($diskCron, "# iNetPanel disk usage scanner — auto-managed by panel_update.php\n*/10 * * * * root /root/scripts/disk_cache_scan.sh > /dev/null 2>&1\n");
+chmod($diskCron, 0644);
+log_msg('Installed disk usage scanner cron job');
+
+// Kick off an initial full scan in background (populates disk_cache/disk_cache_user
+// so the Accounts page has data immediately rather than waiting for the first cron tick)
+if (file_exists('/root/scripts/disk_cache_scan.sh')) {
+    exec('/root/scripts/disk_cache_scan.sh > /dev/null 2>&1 &');
+    log_msg('Kicked off initial disk cache scan in background');
+}
+
 // Rebuild sudoers file to match current requirements
 $sudoersFile = '/etc/sudoers.d/inetpanel';
 $sudoersContent = <<<'SUDOERS'

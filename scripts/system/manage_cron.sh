@@ -6,7 +6,7 @@
 ACTION="$1"
 NAME="$2"
 
-ALLOWED=("inetpanel_ddns" "inetpanel_autoupdate" "inetpanel_stats" "lamp_update" "lamp_backup")
+ALLOWED=("inetpanel_ddns" "inetpanel_autoupdate" "inetpanel_stats" "inetpanel_disk_scan" "lamp_update" "lamp_backup")
 
 VALID=0
 for a in "${ALLOWED[@]}"; do [[ "$NAME" == "$a" ]] && VALID=1; done
