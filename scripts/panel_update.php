@@ -502,6 +502,41 @@ if (file_exists($lightyConf)) {
     }
 }
 
+// Fix HTTP/2 cross-vhost contamination on existing installs (idempotent).
+// Name-based vhosts share TLS ports behind Cloudflare; cloudflared reuses HTTP/2
+// connections to the origin and coalesces requests across hostnames, so a request
+// for site A can be answered through site B's vhost + PHP-FPM pool (wrong
+// sitemap.xml / wrong page — an SEO-breaking, intermittent contamination).
+// Forcing the Cloudflare->Apache origin hop to HTTP/1.1 makes Apache route
+// strictly by Host header, eliminating the coalescing. Visitors keep HTTP/2+3
+// from Cloudflare's edge; only the origin hop changes. The directive lives in its
+// own conf-available file (inherited by every vhost, server scope) so that
+// optimize_server.sh, multiphp version switches, and SSL reissue can't clobber it.
+$originConf = '/etc/apache2/conf-available/inetpanel-origin.conf';
+$originWant = "# iNetPanel origin-hop hardening - auto-managed (install + panel_update).\n"
+    . "# Forces the Cloudflare->Apache origin hop to HTTP/1.1 so HTTP/2 connection\n"
+    . "# coalescing cannot serve one vhost's content under another domain.\n"
+    . "# Visitors still get HTTP/2/3 from Cloudflare; only the origin hop is 1.1.\n"
+    . "# Do not edit; this file is overwritten on panel updates.\n"
+    . "Protocols http/1.1\n";
+if (is_dir('/etc/apache2/conf-available')
+    && (!file_exists($originConf) || file_get_contents($originConf) !== $originWant)) {
+    file_put_contents($originConf, $originWant);
+    chmod($originConf, 0644);
+    shell_exec('a2enconf inetpanel-origin >/dev/null 2>&1');
+    $configtest = (string) shell_exec('apache2ctl configtest 2>&1');
+    if (stripos($configtest, 'Syntax OK') !== false) {
+        shell_exec('systemctl reload apache2 2>/dev/null');
+        log_msg('Applied Apache origin hardening (Protocols http/1.1) — stops HTTP/2 cross-vhost contamination');
+    } else {
+        // Don't risk leaving Apache unable to reload: back the change out cleanly.
+        shell_exec('a2disconf inetpanel-origin >/dev/null 2>&1');
+        @unlink($originConf);
+        shell_exec('systemctl reload apache2 2>/dev/null');
+        log_msg('WARNING: Apache origin hardening failed configtest — reverted. configtest: ' . trim($configtest));
+    }
+}
+
 // Ensure panel FPM pool allows large uploads
 foreach (glob('/etc/php/*/fpm/pool.d/www.conf') as $wwwPool) {
     $poolContent = file_get_contents($wwwPool);
