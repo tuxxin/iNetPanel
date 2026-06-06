@@ -67,13 +67,38 @@ if [ -z "$PHP_VER" ]; then
     PHP_VER="${PHP_VER:-8.4}"
 fi
 
-# Auto-assign port if not provided (skip 1443 — reserved for WireGuard)
+# Auto-assign / validate the port atomically. Co-located vhosts are isolated ONLY
+# by a unique port + ServerName; two domains on one port share a listener, so a
+# coalesced or SNI-mismatched request can fall through to the wrong vhost (cross-
+# domain content / sitemap contamination). flock serializes concurrent add_domain
+# runs; we scan the ports actually in use and reserve the chosen one before
+# releasing the lock so a parallel add can never pick the same port.
+RESERVED_PORTS="80 443 1443 8443 8888"
+exec 9>>"$CUSTOM_PORTS_CONF"
+flock 9
+
+ports_in_use() {
+    {
+        grep -hoE '^Listen[[:space:]]+[0-9]+' "$CUSTOM_PORTS_CONF" 2>/dev/null | awk '{print $2}'
+        grep -rhoE '<VirtualHost \*:[0-9]+>' /etc/apache2/sites-available/ 2>/dev/null | grep -oE '[0-9]+'
+        printf '%s\n' $RESERVED_PORTS
+    } | sort -un
+}
+
 if [ -z "$PORT" ]; then
-    LAST_PORT=$(grep "^Listen" "$CUSTOM_PORTS_CONF" 2>/dev/null | awk '{print $2}' | sort -n | tail -1)
-    PORT=${LAST_PORT:+$((LAST_PORT + 1))}
-    PORT=${PORT:-$BASE_PORT}
-    [ "$PORT" -eq 1443 ] && PORT=1444
+    USED_PORTS=$(ports_in_use)
+    PORT=$BASE_PORT
+    while printf '%s\n' "$USED_PORTS" | grep -qx "$PORT"; do PORT=$((PORT + 1)); done
+elif ports_in_use | grep -qx "$PORT"; then
+    flock -u 9; exec 9>&-
+    echo -e "${RED}Port ${PORT} is already in use by another vhost — refusing to co-locate '${DOMAIN}'.${NC}"
+    exit 1
 fi
+
+# Reserve the port now (still holding the lock) so a concurrent add can't take it.
+echo "Listen $PORT" >> "$CUSTOM_PORTS_CONF"
+flock -u 9
+exec 9>&-
 
 echo -e "${BOLD}--- Adding Domain: ${DOMAIN} → ${USERNAME} (port ${PORT}) ---${NC}"
 
@@ -183,7 +208,7 @@ ${SERVER_ALIAS}
 </VirtualHost>
 VHOST
 
-echo "Listen $PORT" >> "$CUSTOM_PORTS_CONF"
+# (Port was already reserved in ports_domains.conf during atomic allocation above.)
 a2ensite "${DOMAIN}.conf" > /dev/null 2>&1
 systemctl reload apache2
 

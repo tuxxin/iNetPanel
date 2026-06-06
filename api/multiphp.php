@@ -115,34 +115,34 @@ switch ($action) {
         $domain = trim($_POST['domain']  ?? '');
         $ver    = trim($_POST['version'] ?? '');
         if (!$domain) { echo json_encode(['success' => false, 'error' => 'Domain required.']); break; }
-        if ($ver && !in_array($ver, $supportedVersions)) {
-            echo json_encode(['success' => false, 'error' => 'Invalid PHP version.']); break;
+        // $domain flows into root-run file operations — validate strictly and
+        // confirm it actually exists rather than trusting the POST value.
+        if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9.\-]{1,253}[a-zA-Z0-9]$/', $domain)) {
+            echo json_encode(['success' => false, 'error' => 'Invalid domain.']); break;
         }
-        // Update domains table
-        DB::update('domains', ['php_version' => $ver ?: 'inherit'], 'domain_name = ?', [$domain]);
+        if (!DB::fetchOne('SELECT id FROM domains WHERE domain_name = ?', [$domain])) {
+            echo json_encode(['success' => false, 'error' => 'Unknown domain.']); break;
+        }
+        if ($ver && $ver !== 'inherit' && (!in_array($ver, $supportedVersions) || !phpIsInstalled($ver))) {
+            echo json_encode(['success' => false, 'error' => 'PHP version not installed.']); break;
+        }
 
         if ($ver && $ver !== 'inherit') {
-            // Rewrite the FPM pool config to point to the new version's socket
-            $currentDefault = DB::setting('php_default_version', '8.4');
-            $poolConf = "/etc/php/{$currentDefault}/fpm/pool.d/{$domain}.conf";
-            $newSock  = "/run/php/php{$ver}-fpm-{$domain}.sock";
-            $escapedSock = str_replace(['|', '&', '\\'], ['\\|', '\\&', '\\\\'], $newSock);
-            // Move pool config to correct PHP version dir
-            $newPool  = "/etc/php/{$ver}/fpm/pool.d/{$domain}.conf";
-            if (file_exists($poolConf) && !file_exists($newPool)) {
-                Shell::exec("sudo /bin/cp " . escapeshellarg($poolConf) . " " . escapeshellarg($newPool), 'multiphp-copy-pool');
-                // Update socket path inside new pool config
-                Shell::exec("sudo /bin/sed -i 's|listen = .*|listen = " . $escapedSock . "|' " . escapeshellarg($newPool), 'multiphp-sed');
+            // Delegate the privileged pool move + vhost handler rewrite to the root
+            // multiphp_manage script (correct pool naming, writes /etc/php/*/pool.d
+            // as root). Replaces the old inline sudo cp/sed, which used the wrong
+            // pool name, a malformed sed delimiter, and a cp not permitted by sudoers.
+            $res = Shell::run('multiphp_manage', [
+                '--action'  => 'set_domain',
+                '--domain'  => $domain,
+                '--version' => $ver,
+            ]);
+            if (!$res['success']) {
+                echo json_encode(['success' => false, 'error' => $res['error'] ?: 'Version switch failed.']); break;
             }
-            // Update Apache vhost to use new socket
-            $vhost = "/etc/apache2/sites-available/{$domain}.conf";
-            if (file_exists($vhost)) {
-                Shell::exec("sudo /bin/sed -i 's|proxy:unix:.*fpm-{$domain}.*fcgi|proxy:unix:" . $escapedSock . "|fcgi|' " . escapeshellarg($vhost), 'multiphp-sed');
-                Shell::exec("sudo /usr/sbin/a2ensite " . escapeshellarg("{$domain}.conf"), 'multiphp-a2ensite');
-                Shell::exec("sudo /bin/systemctl reload apache2", 'multiphp-apache-reload');
-            }
-            Shell::exec("sudo /bin/systemctl reload php{$ver}-fpm", 'multiphp-fpm-reload');
         }
+        // Record the choice (the script handles files/services; DB stays in PHP).
+        DB::update('domains', ['php_version' => $ver ?: 'inherit'], 'domain_name = ?', [$domain]);
         echo json_encode(['success' => true]);
         break;
 

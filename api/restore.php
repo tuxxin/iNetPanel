@@ -350,12 +350,39 @@ case 'execute':
         break;
     }
 
-    // Build domain and port lists
-    $domainList = [];
-    $portList   = [];
+    // Re-derive a unique, free port per domain SERVER-SIDE. The 'analyze' step only
+    // SUGGESTS ports to the client; trusting the client's returned ports lets two
+    // domains land on the same (or an in-use) port — they'd share one listener and
+    // cross-serve, since co-located vhosts differ only by ServerName/SNI. The
+    // restore script frees each restored domain's own old port first, so exclude
+    // those from the in-use set.
+    $reservedPorts = [80, 443, 1443, 8443, 8888];
+    $usedPorts = [];
+    $portsConf = @file_get_contents('/etc/apache2/ports_domains.conf') ?: '';
+    if (preg_match_all('/^Listen\s+(\d+)/m', $portsConf, $pm)) {
+        $usedPorts = array_map('intval', $pm[1]);
+    }
+    $restoreSet = array_map(static fn($d) => $d['domain'], $domainData);
+    foreach (glob('/etc/apache2/sites-available/*.conf') as $vf) {
+        if (preg_match('/<VirtualHost\s+\*:(\d+)>/', @file_get_contents($vf) ?: '', $vm)
+            && !in_array(basename($vf, '.conf'), $restoreSet, true)) {
+            $usedPorts[] = (int) $vm[1];
+        }
+    }
+    $usedPorts = array_unique(array_merge($usedPorts, $reservedPorts));
+
+    // Build domain and port lists from the server-derived assignment.
+    $domainList   = [];
+    $portList     = [];
+    $portByDomain = [];
+    $nextPort     = 1080;
     foreach ($domainData as $d) {
+        while (in_array($nextPort, $usedPorts, true)) $nextPort++;
+        $portByDomain[$d['domain']] = $nextPort;
         $domainList[] = $d['domain'];
-        $portList[]   = (int) $d['port'];
+        $portList[]   = $nextPort;
+        $usedPorts[]  = $nextPort;
+        $nextPort++;
     }
 
     // Build shell args
@@ -405,7 +432,7 @@ case 'execute':
         // domains + account_ports
         foreach ($domainData as $d) {
             $domain = $d['domain'];
-            $port   = (int) $d['port'];
+            $port   = $portByDomain[$domain] ?? (int) $d['port'];
             $phpVer = $d['php_version'] ?? $phpVersion ?: 'inherit';
 
             // Upsert domain
@@ -439,14 +466,8 @@ case 'execute':
         if ($accountId && $tunnelId) {
             $cf = new CloudflareAPI();
             foreach ($cfOverride as $domain) {
-                // Find the port for this domain
-                $port = null;
-                foreach ($domainData as $d) {
-                    if ($d['domain'] === $domain) {
-                        $port = (int) $d['port'];
-                        break;
-                    }
-                }
+                // Use the same server-derived port chosen for the vhost above.
+                $port = $portByDomain[$domain] ?? null;
                 if (!$port) continue;
 
                 try {
