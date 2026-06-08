@@ -1,7 +1,8 @@
 # iNetPanel CI — lightweight quality gate.
 #
-# Purpose: catch dumb breakage (a PHP parse error, a broken bash script) on every
-# push and pull request, BEFORE it reaches a beta machine. This is additive and
+# Purpose: catch dumb breakage (a PHP parse error, a broken bash script) and any
+# leaked secret on every push and pull request, BEFORE it reaches a beta machine
+# or the public history. This is additive and
 # advisory — it only reads code and reports pass/fail. It does not run the panel,
 # does not touch any server, and does not gate releases. The existing beta-channel
 # + real-machine testing workflow is unchanged.
@@ -70,3 +71,24 @@ jobs:
           done < <(find . -path ./.git -prune -o -path ./vendor -prune -o -name '*.sh' -print0)
           if [ "$fail" -eq 0 ]; then echo "All shell scripts passed bash -n + shellcheck -S error."; fi
           exit "$fail"
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history — this repo is public, so a secret in ANY past commit is
+          # retrievable by anyone. Scan every commit, not just the pushed tip.
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          ver=8.30.1
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: gitleaks (full git history)
+        # --redact: never print a found secret into the public Actions log.
+        # Exits non-zero (fails the build) if any leak is found.
+        run: gitleaks detect --source . --redact --no-banner
