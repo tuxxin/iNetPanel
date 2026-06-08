@@ -1,0 +1,6 @@
+# Normalize line endings. Shell and PHP are linted in CI and CRLF (\r) breaks
+# `bash -n` (SC1017) and can corrupt heredocs — keep them LF in the repo and on
+# checkout, regardless of contributor OS.
+*.sh   text eol=lf
+*.php  text eol=lf
+*.py   text eol=lf

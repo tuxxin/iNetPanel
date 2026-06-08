@@ -1,0 +1,72 @@
+# iNetPanel CI — lightweight quality gate.
+#
+# Purpose: catch dumb breakage (a PHP parse error, a broken bash script) on every
+# push and pull request, BEFORE it reaches a beta machine. This is additive and
+# advisory — it only reads code and reports pass/fail. It does not run the panel,
+# does not touch any server, and does not gate releases. The existing beta-channel
+# + real-machine testing workflow is unchanged.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Least privilege: CI only needs to read the checkout.
+permissions:
+  contents: read
+
+# Don't pile up runs on rapid pushes to the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  php-lint:
+    name: PHP lint (php -l)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          # The panel pins PHP 8.5 (install_LAMP.sh / sury.org). Lint against the
+          # version production actually runs so version-specific syntax is caught.
+          php-version: '8.5'
+          tools: none
+          coverage: none
+      - name: php -l on every *.php
+        run: |
+          fail=0
+          while IFS= read -r -d '' f; do
+            if ! out=$(php -l "$f" 2>&1); then
+              echo "::error file=$f::${out}"
+              printf '%s\n' "$out"
+              fail=1
+            fi
+          done < <(find . -path ./.git -prune -o -path ./vendor -prune -o -name '*.php' -print0)
+          if [ "$fail" -eq 0 ]; then echo "All PHP files passed php -l."; fi
+          exit "$fail"
+
+  shell-lint:
+    name: Shell lint (bash -n + shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: bash -n + shellcheck on every *.sh
+        run: |
+          fail=0
+          while IFS= read -r -d '' f; do
+            if ! err=$(bash -n "$f" 2>&1); then
+              echo "::error file=$f::bash -n: ${err}"
+              printf '%s\n' "$err"
+              fail=1
+            fi
+            # Start at severity=error only (syntax-level), so the build doesn't
+            # drown in style nits. Tighten to -S warning once the tree is clean.
+            if ! shellcheck -S error "$f"; then
+              fail=1
+            fi
+          done < <(find . -path ./.git -prune -o -path ./vendor -prune -o -name '*.sh' -print0)
+          if [ "$fail" -eq 0 ]; then echo "All shell scripts passed bash -n + shellcheck -S error."; fi
+          exit "$fail"
