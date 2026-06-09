@@ -19,15 +19,17 @@ iNetPanel is a free, open-source hosting control panel designed for **home serve
 
 ---
 
-> ### ⚠️ Already running iNetPanel? (installed before v1.24.4) — update from the command line
+> ### ⚠️ Already running iNetPanel? (installed before v1.24.4)
 > **v1.24.4** fixes a critical bug where creating accounts/domains/SSL **silently breaks on previously-working servers**: a routine PHP package update enabled php-fpm's `ProtectSystem=full`, which mounts `/etc` read-only for the panel's root helpers (symptom: `useradd: cannot lock /etc/passwd` or `Read-only file system`).
 >
-> **The web "Update Now" button cannot apply this particular fix** — it runs *inside* the sandbox it needs to change. Apply it once from a **root shell**:
+> **Most servers need no action** — the nightly **auto-update** applies the fix automatically (it runs as root, outside the sandbox). Just make sure auto-update is on under **Settings → Updates**.
+>
+> To apply it **right away**, or if auto-update is off, run once from a **root shell**:
 > ```bash
 > inetp panel_update
 > # or:  php /var/www/inetpanel/scripts/panel_update.php
 > ```
-> After it runs, php-fpm is relaxed to `ProtectSystem=true` and the panel — including web "Update Now" — works normally again. Full details and the backup recommendation are in the **[v1.24.4 release notes](https://github.com/tuxxin/iNetPanel/releases/tag/v1.24.4)**.
+> The web **"Update Now"** button **can't** apply this particular fix — it runs *inside* the sandbox it needs to change. After the fix applies, php-fpm is relaxed to `ProtectSystem=true` and the panel (including "Update Now") works normally again. Full details + backup recommendation: **[v1.24.4 release notes](https://github.com/tuxxin/iNetPanel/releases/tag/v1.24.4)**.
 
 ## Quick Install
 
