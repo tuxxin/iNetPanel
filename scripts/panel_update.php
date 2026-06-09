@@ -537,6 +537,41 @@ if (is_dir('/etc/apache2/conf-available')
     }
 }
 
+// Let the panel's php-fpm write /etc on existing installs. The panel manages system
+// config under /etc (passwd via useradd, apache vhosts, php-fpm pools, vsftpd.userlist,
+// letsencrypt) through sudo'd root helpers spawned by php-fpm. php-fpm's default unit
+// sets ProtectSystem=full, which mounts /etc read-only for its whole process tree —
+// and sudo does NOT escape that mount namespace — so those writes fail ("cannot lock
+// /etc/passwd" / "Read-only file system") and account/domain/SSL ops silently break.
+// Relax to ProtectSystem=true (keeps /usr and /boot read-only) via a drop-in for every
+// installed php-fpm version. NOTE: ReadWritePaths=/etc does NOT work for top-level /etc.
+$fpmDropWant = "# iNetPanel: relax ProtectSystem so panel root helpers can write /etc\n"
+    . "# (useradd, apache vhosts, php-fpm pools, vsftpd.userlist, letsencrypt).\n"
+    . "# Auto-managed; do not edit.\n"
+    . "[Service]\n"
+    . "ProtectSystem=true\n";
+$fpmRestart = [];
+foreach (glob('/etc/php/*/fpm') as $fpmDir) {
+    if (!preg_match('#/php/([0-9.]+)/fpm$#', $fpmDir, $vm)) continue;
+    $ver     = $vm[1];
+    $dropDir = "/etc/systemd/system/php{$ver}-fpm.service.d";
+    $drop    = "{$dropDir}/inetpanel-etc-writable.conf";
+    if (!is_dir($dropDir)) @mkdir($dropDir, 0755, true);
+    if (!file_exists($drop) || file_get_contents($drop) !== $fpmDropWant) {
+        if (file_put_contents($drop, $fpmDropWant) !== false) {
+            chmod($drop, 0644);
+            $fpmRestart[] = $ver;
+        }
+    }
+}
+if ($fpmRestart) {
+    shell_exec('systemctl daemon-reload 2>/dev/null');
+    foreach ($fpmRestart as $ver) {
+        shell_exec('systemctl restart ' . escapeshellarg("php{$ver}-fpm") . ' 2>/dev/null');
+    }
+    log_msg('Relaxed php-fpm ProtectSystem to true (/etc writable for panel ops): ' . implode(', ', $fpmRestart));
+}
+
 // Ensure panel FPM pool allows large uploads
 foreach (glob('/etc/php/*/fpm/pool.d/www.conf') as $wwwPool) {
     $poolContent = file_get_contents($wwwPool);
