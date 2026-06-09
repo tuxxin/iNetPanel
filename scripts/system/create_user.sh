@@ -45,11 +45,23 @@ if id "$USERNAME" &>/dev/null; then
     echo -e "${YELLOW}System user '${USERNAME}' already exists — updating password.${NC}"
     echo "$USERNAME:$PASSWORD" | chpasswd
 else
-    useradd -m -d "/home/$USERNAME" -s "$SHELL_PATH" -g www-data "$USERNAME"
+    if ! useradd -m -d "/home/$USERNAME" -s "$SHELL_PATH" -g www-data "$USERNAME"; then
+        echo -e "${RED}Failed to create system user '${USERNAME}'. useradd error — check the filesystem is writable and has free space/UIDs.${NC}"
+        exit 1
+    fi
     echo "$USERNAME:$PASSWORD" | chpasswd
     printf "\n# Custom Aliases\nalias ll='ls -alh'\n" >> "/home/$USERNAME/.bashrc"
     chown "$USERNAME:www-data" "/home/$USERNAME/.bashrc"
     chmod 750 "/home/$USERNAME"
+fi
+
+# Never report success unless the system user actually exists. Defends against a
+# read-only or full filesystem silently failing the steps above: without this the
+# script used to print "Created!" and exit 0 even when useradd failed, leaving the
+# panel to insert a phantom hosting_users row for a user the OS never got.
+if ! id "$USERNAME" &>/dev/null; then
+    echo -e "${RED}System user '${USERNAME}' does not exist after creation — aborting.${NC}"
+    exit 1
 fi
 
 # ----------------------------------------------------------------
