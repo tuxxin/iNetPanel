@@ -19,6 +19,16 @@ iNetPanel is a free, open-source hosting control panel designed for **home serve
 
 ---
 
+> ### ⚠️ Already running iNetPanel? (installed before v1.24.4) — update from the command line
+> **v1.24.4** fixes a critical bug where creating accounts/domains/SSL **silently breaks on previously-working servers**: a routine PHP package update enabled php-fpm's `ProtectSystem=full`, which mounts `/etc` read-only for the panel's root helpers (symptom: `useradd: cannot lock /etc/passwd` or `Read-only file system`).
+>
+> **The web "Update Now" button cannot apply this particular fix** — it runs *inside* the sandbox it needs to change. Apply it once from a **root shell**:
+> ```bash
+> inetp panel_update
+> # or:  php /var/www/inetpanel/scripts/panel_update.php
+> ```
+> After it runs, php-fpm is relaxed to `ProtectSystem=true` and the panel — including web "Update Now" — works normally again. Full details and the backup recommendation are in the **[v1.24.4 release notes](https://github.com/tuxxin/iNetPanel/releases/tag/v1.24.4)**.
+
 ## Quick Install
 
 ```bash
@@ -146,7 +156,7 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+GPL-3.0 — see [LICENSE](LICENSE)
 
 ---
 
