@@ -57,7 +57,16 @@ if [ -f "$VHOST_CONF" ]; then
     if [ -n "$PORT" ]; then
         sed -i "/^Listen ${PORT}$/d" "$CUSTOM_PORTS_CONF"
     fi
-    systemctl reload apache2 || systemctl restart apache2
+    # Validate before touching Apache. Never escalate a failed reload into a
+    # restart: a reload that fails leaves the running (good) config serving,
+    # but a restart on a broken config takes every site on the box down.
+    if apache2ctl configtest 2>&1 | grep -q "Syntax OK"; then
+        systemctl reload apache2
+    else
+        echo -e "${RED}Apache config is invalid — NOT reloading.${NC}"
+        apache2ctl configtest 2>&1 | sed 's/^/    /'
+        echo -e "${YELLOW}Sites keep serving on the old config. Fix the above, then: systemctl reload apache2${NC}"
+    fi
 fi
 
 # ----------------------------------------------------------------

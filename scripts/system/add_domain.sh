@@ -210,7 +210,15 @@ VHOST
 
 # (Port was already reserved in ports_domains.conf during atomic allocation above.)
 a2ensite "${DOMAIN}.conf" > /dev/null 2>&1
-systemctl reload apache2
+# Validate before reloading — a bad vhost here must not be able to knock the
+# whole server over the next time Apache is restarted (e.g. by apt upgrade).
+if apache2ctl configtest 2>&1 | grep -q "Syntax OK"; then
+    systemctl reload apache2
+else
+    echo -e "${RED}Apache config is invalid — disabling '${DOMAIN}' and NOT reloading.${NC}"
+    apache2ctl configtest 2>&1 | sed 's/^/    /'
+    a2dissite "${DOMAIN}.conf" > /dev/null 2>&1
+fi
 
 # ----------------------------------------------------------------
 # MariaDB — grant user privileges on username_* databases
@@ -223,7 +231,10 @@ MYSQL
 # ----------------------------------------------------------------
 # Welcome index page
 # ----------------------------------------------------------------
-if [ -f "$WELCOME_TEMPLATE" ]; then
+# Only ever drop the placeholder into an empty web root. This script also runs
+# in "recreate" mode on an existing domain (see the vhost cleanup near the top),
+# and overwriting a live site's index.php there is data loss.
+if [ -f "$WELCOME_TEMPLATE" ] && [ -z "$(ls -A "$DOC_ROOT" 2>/dev/null)" ]; then
     cp "$WELCOME_TEMPLATE" "$DOC_ROOT/index.php"
     sed -i "s|{{DOMAIN}}|$DOMAIN|g"     "$DOC_ROOT/index.php"
     sed -i "s|{{PORT}}|$PORT|g"         "$DOC_ROOT/index.php"
