@@ -16,11 +16,13 @@ PANEL_DB="/var/www/inetpanel/db/inetpanel.db"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --domain) DOMAIN="$2"; shift 2 ;;
-        *) shift ;;
+        -*)       shift ;;
+        # Accept a bare domain too: `inetp dns_check example.com`
+        *)        [ -z "$DOMAIN" ] && DOMAIN="$1"; shift ;;
     esac
 done
 
-[ -z "$DOMAIN" ] && { echo -e "${RED}Domain is required (--domain).${NC}"; exit 1; }
+[ -z "$DOMAIN" ] && { echo -e "${RED}Domain is required.${NC}  Usage: inetp dns_check <domain>"; exit 1; }
 
 PASS=0; FAIL=0
 
