@@ -103,6 +103,11 @@ TOKEN_FILE="${TOKEN_FILE:-/root/.env}"
 API="https://api.github.com"
 UPLOADS="https://uploads.github.com"
 
+# The host the README's install command actually points at. Distribution runs
+# through here rather than GitHub so downloads can be counted, which means
+# publishing a GitHub Release is only half of shipping — see the closing step.
+DIST_HOST="${DIST_HOST:-inetpanel.info}"
+
 # --- Output helpers ----------------------------------------------------------
 if [ -t 1 ]; then
     BOLD=$'\033[1m'; GREEN=$'\033[1;32m'; RED=$'\033[1;31m'
@@ -125,6 +130,7 @@ NOTES_FILE=""
 DRY_RUN=0
 SKIP_LINT=0
 ASSUME_YES=0
+VERIFY_ONLY=0
 
 usage() { sed -n '2,80p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
@@ -138,10 +144,52 @@ while [[ $# -gt 0 ]]; do
         --dry-run)    DRY_RUN=1;   shift ;;
         --skip-lint)  SKIP_LINT=1; shift ;;
         --yes|-y)     ASSUME_YES=1; shift ;;
+        --verify-published) VERIFY_ONLY=1; shift ;;
         -h|--help)    usage ;;
         *) die "unknown argument: $1  (try --help)" ;;
     esac
 done
+
+# --- --verify-published ------------------------------------------------------
+# Standalone check: does the distribution host serve the same bytes as the
+# current GitHub release? Run it after uploading to confirm, or any time you
+# want to know whether the two have drifted. Publishes nothing, changes nothing.
+if [ "$VERIFY_ONLY" -eq 1 ]; then
+    step "Comparing ${DIST_HOST} against the latest GitHub release"
+    DRIFT=0
+    # Only the two installers are hosted on DIST_HOST. inetpanel-latest.zip is
+    # NOT — the installer fetches that straight from the GitHub release (see
+    # ZIP_URL in install_LAMP.sh), and https://inetpanel.info/inetpanel-latest.zip
+    # 404s. Checking it here would report permanent false drift.
+    for asset in latest latest-beta; do
+        DIST_CODE="$(curl -sS -o /tmp/.rel_dist.$$ -w '%{http_code}' -L --max-time 60 \
+            "https://${DIST_HOST}/${asset}" 2>/dev/null || echo 000)"
+        if [ "$DIST_CODE" != "200" ]; then
+            warn "${asset} — ${DIST_HOST} returned HTTP ${DIST_CODE}"
+            DRIFT=1
+            rm -f "/tmp/.rel_dist.$$"
+            continue
+        fi
+        GH_SUM="$(curl -sSL --max-time 60 \
+            "https://github.com/${REPO_SLUG}/releases/latest/download/${asset}" 2>/dev/null | md5sum | cut -d' ' -f1)"
+        DIST_SUM="$(md5sum "/tmp/.rel_dist.$$" | cut -d' ' -f1)"
+        rm -f "/tmp/.rel_dist.$$"
+        if [ "$GH_SUM" = "$DIST_SUM" ]; then
+            ok "${asset} — in sync"
+        else
+            warn "${asset} — DRIFT (github ${GH_SUM:0:12} != ${DIST_HOST} ${DIST_SUM:0:12})"
+            DRIFT=1
+        fi
+    done
+    printf '\n'
+    if [ "$DRIFT" -eq 0 ]; then
+        printf '%s\n' "${GREEN}All published copies match.${NC}"
+    else
+        printf '%s\n' "${YELLOW}Upload the files above to ${DIST_HOST} — the documented install command is serving stale bytes.${NC}"
+        exit 1
+    fi
+    exit 0
+fi
 
 [ "$DRY_RUN" -eq 1 ] && printf '%s\n\n' "${YELLOW}${BOLD}DRY RUN${NC} — nothing will be committed, pushed or published."
 
@@ -298,6 +346,44 @@ if [ "$SKIP_LINT" -eq 0 ]; then
         ok "php -l"
     else
         warn "php not installed — skipping php -l (CI will still run it)"
+    fi
+
+    # --- The installer ------------------------------------------------------
+    # install_LAMP.sh is deliberately NOT in this repository: distribution runs
+    # through inetpanel.info so downloads can be counted. The side effect is
+    # that CI never sees it — so the one script users pipe into a root shell is
+    # the only shell in the project with no lint and no secret scan.
+    #
+    # We have it on disk right here at build time, so check it now. Same gates
+    # CI applies to everything else, without it ever entering git.
+    step "Lint installer ($(basename "$INSTALLER_SRC"))"
+
+    bash -n "$INSTALLER_SRC" || { warn "bash -n failed on the installer"; LINT_FAIL=1; }
+    ok "bash -n"
+
+    if command -v shellcheck >/dev/null 2>&1; then
+        shellcheck -S error "$INSTALLER_SRC" || LINT_FAIL=1
+        ok "shellcheck -S error"
+    fi
+
+    # Secret scan. This file handles MySQL root passwords and Cloudflare tokens,
+    # and it is published publicly — a hardcoded credential here is the worst
+    # case in the whole project.
+    if command -v gitleaks >/dev/null 2>&1; then
+        SCAN_DIR="$(mktemp -d)"
+        cp "$INSTALLER_SRC" "${SCAN_DIR}/install_LAMP.sh"
+        if ! gitleaks detect --source "$SCAN_DIR" --no-git --redact --no-banner >/dev/null 2>&1; then
+            rm -rf "$SCAN_DIR"
+            die "gitleaks found a secret in ${INSTALLER_SRC} — refusing to publish"
+        fi
+        rm -rf "$SCAN_DIR"
+        ok "gitleaks"
+    else
+        # Cheap fallback so this never silently does nothing.
+        if grep -nEq '(gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})' "$INSTALLER_SRC"; then
+            die "possible hardcoded credential in ${INSTALLER_SRC} — refusing to publish"
+        fi
+        warn "gitleaks not installed — ran a basic pattern check only"
     fi
 
     [ "$LINT_FAIL" -eq 0 ] || die "lint failed — fix the above before releasing"
@@ -460,9 +546,35 @@ printf '\n'
 printf '%s\n' "${GREEN}${BOLD}Released ${TAG}${NC}"
 printf '%s\n' "  https://github.com/${REPO_SLUG}/releases/tag/${TAG}"
 printf '\n'
-printf '%s\n' "  ${BOLD}Remaining manual step:${NC} upload these to https://inetpanel.tuxxin.com/"
-printf '%s\n' "    ${RELEASE_DIR}/latest"
-printf '%s\n' "    ${RELEASE_DIR}/latest-beta"
-printf '%s\n' "    ${RELEASE_DIR}/inetpanel-latest.zip"
-printf '%s\n' "  ${DIM}(the install commands in the README point at that host, not at GitHub)${NC}"
+
+# The README's install command points at inetpanel.info, NOT at GitHub — that
+# host is the counted distribution path. Publishing the release does not update
+# it, so until these are uploaded the documented install command still serves
+# the previous version. Show exactly which files are stale rather than leaving
+# it as a thing to remember.
+step "Distribution host (${DIST_HOST})"
+DIST_STALE=0
+# Installers only — the zip is served from the GitHub release, not from here.
+for asset in latest latest-beta; do
+    LOCAL_SUM="$(md5sum "${RELEASE_DIR}/${asset}" | cut -d' ' -f1)"
+    LIVE_SUM="$(curl -sSL --max-time 30 "https://${DIST_HOST}/${asset}" 2>/dev/null | md5sum | cut -d' ' -f1)"
+    if [ "$LOCAL_SUM" = "$LIVE_SUM" ]; then
+        ok "${asset} — already current"
+    else
+        warn "${asset} — still serving the OLD file"
+        DIST_STALE=1
+    fi
+done
+
+if [ "$DIST_STALE" -eq 1 ]; then
+    printf '\n'
+    printf '%s\n' "  ${BOLD}${YELLOW}Remaining manual step${NC} — upload to ${DIST_HOST}:"
+    printf '%s\n' "    ${RELEASE_DIR}/latest"
+    printf '%s\n' "    ${RELEASE_DIR}/latest-beta"
+    printf '\n'
+    printf '%s\n' "  ${DIM}Until then the README's install command serves ${CURRENT_VERSION}, not ${NEW_VERSION}.${NC}"
+    printf '%s\n' "  ${DIM}Re-check with:  ./release.sh --verify-published${NC}"
+else
+    ok "distribution host is in sync — nothing left to do"
+fi
 printf '\n'
