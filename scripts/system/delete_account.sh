@@ -64,17 +64,45 @@ if ! id "$USERNAME" &>/dev/null; then
     exit 1
 fi
 
-# Find all domains for this user
+# Find all domains for this user.
+# The home directory alone is not authoritative — if it was already removed (a
+# partial delete, a manual rm, or delete_user.sh --force) the glob finds nothing,
+# remove_domain.sh never runs, and the Apache vhost survives pointing at a
+# DocumentRoot and ErrorLog dir that no longer exist. Apache then refuses to
+# start on the *next* restart, taking every site on the box down. So take the
+# union of the filesystem, the panel DB, and the vhosts owned by this user.
 DOMAINS=()
+add_domain_once() {
+    local d="$1"
+    [ -z "$d" ] && return
+    [ "$d" = "tmp" ] && return
+    local existing
+    for existing in "${DOMAINS[@]}"; do
+        [ "$existing" = "$d" ] && return
+    done
+    DOMAINS+=("$d")
+}
+
 if [ -d "/home/$USERNAME" ]; then
     for dir in /home/$USERNAME/*/www; do
         [ -d "$dir" ] || continue
-        D=$(basename "$(dirname "$dir")")
-        # Skip tmp and other non-domain dirs
-        [ "$D" = "tmp" ] && continue
-        DOMAINS+=("$D")
+        add_domain_once "$(basename "$(dirname "$dir")")"
     done
 fi
+
+if [ -f "$PANEL_DB" ]; then
+    while read -r D; do
+        add_domain_once "$D"
+    done < <(sqlite3 "$PANEL_DB" "SELECT d.domain_name FROM domains d JOIN hosting_users h ON d.hosting_user_id = h.id WHERE h.username = '${USERNAME}'" 2>/dev/null)
+fi
+
+for conf in /etc/apache2/sites-available/*.conf; do
+    [ -f "$conf" ] || continue
+    DOC_ROOT=$(grep -oP 'DocumentRoot\s+\K\S+' "$conf" 2>/dev/null | head -1)
+    case "$DOC_ROOT" in
+        /home/"$USERNAME"/*) add_domain_once "$(basename "$conf" .conf)" ;;
+    esac
+done
 
 echo -e "  User:    ${BOLD}$USERNAME${NC}"
 echo -e "  Domains: ${BOLD}${#DOMAINS[@]}${NC}"
