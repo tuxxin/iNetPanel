@@ -112,6 +112,7 @@ case "$COMMAND" in
     ssl_manage)        bash "$SCRIPTS_DIR/ssl_manage.sh"       "$@" ;;
     fix_permissions)   bash "$SCRIPTS_DIR/fix_permissions.sh"   "$@" ;;
     rebuild_pools)     bash "$SCRIPTS_DIR/rebuild_pools.sh"     "$@" ;;
+    rebuild_vhosts)    bash "$SCRIPTS_DIR/rebuild_vhosts.sh"    "$@" ;;
     multiphp_manage)   bash "$SCRIPTS_DIR/multiphp_manage.sh"   "$@" ;;
     panel_ssl)         bash "$SCRIPTS_DIR/panel_ssl.sh"         "$@" ;;
     service_monitor)   bash "$SCRIPTS_DIR/service_monitor.sh"   "$@" ;;
@@ -196,6 +197,7 @@ case "$COMMAND" in
         echo -e "    ${GREEN}firewall${NC}          Firewall management (status, flush, ban, unban)"
         echo -e "    ${GREEN}fix_permissions${NC}   Reset file/directory permissions for a user"
         echo -e "    ${GREEN}rebuild_pools${NC}    Regenerate missing PHP-FPM pool configs"
+        echo -e "    ${GREEN}rebuild_vhosts${NC}   Regenerate missing Apache vhosts, flag orphaned ones"
         echo -e "    ${GREEN}ssl_manage${NC}        SSL certificate management (issue, revoke, renew, status)"
         echo -e "    ${GREEN}list${NC}              List all active accounts and ports"
         echo ""
