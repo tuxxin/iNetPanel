@@ -14,13 +14,21 @@ fi
 
 PANEL_DB="/var/www/inetpanel/db/inetpanel.db"
 
-echo -e "${BOLD}═══════════════════════════════════════════════════${NC}"
+# Fall back to ASCII when the terminal is not UTF-8 — the Proxmox/noVNC console
+# is the common case, and there these render as a row of '?' characters.
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+    *UTF-8*|*utf-8*|*UTF8*|*utf8*) G_RULE='═'; G_SECT='▸'; G_DOT='●' ;;
+    *)                             G_RULE='='; G_SECT='>'; G_DOT='*' ;;
+esac
+RULE=$(printf '%51s' ''); RULE=${RULE// /$G_RULE}
+
+echo -e "${BOLD}${RULE}${NC}"
 echo -e "${BOLD}  iNetPanel Server Status${NC}"
-echo -e "${BOLD}═══════════════════════════════════════════════════${NC}"
+echo -e "${BOLD}${RULE}${NC}"
 echo ""
 
 # ── System ────────────────────────────────────────────────────────────────────
-echo -e "${CYAN}▸ System${NC}"
+echo -e "${CYAN}${G_SECT} System${NC}"
 echo -e "  Hostname:   ${BOLD}$(hostname)${NC}"
 echo -e "  OS:         $(lsb_release -ds 2>/dev/null || cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2)"
 echo -e "  Kernel:     $(uname -r)"
@@ -39,7 +47,7 @@ echo -e "  Load:       ${BOLD}${LOAD}${NC} (${CORES} cores) [$LOAD_STATUS]"
 echo ""
 
 # ── Memory ────────────────────────────────────────────────────────────────────
-echo -e "${CYAN}▸ Memory${NC}"
+echo -e "${CYAN}${G_SECT} Memory${NC}"
 MEM_TOTAL=$(free -m | awk '/Mem:/ {print $2}')
 MEM_USED=$(free -m | awk '/Mem:/ {print $3}')
 MEM_PCT=$((MEM_USED * 100 / MEM_TOTAL))
@@ -58,7 +66,7 @@ fi
 echo ""
 
 # ── Disk ──────────────────────────────────────────────────────────────────────
-echo -e "${CYAN}▸ Disk${NC}"
+echo -e "${CYAN}${G_SECT} Disk${NC}"
 df -h / /home /backup 2>/dev/null | awk 'NR==1{next} !seen[$1]++ {
     pct=$5; gsub(/%/,"",pct);
     color="\033[1;32m"; if(pct>=80) color="\033[1;33m"; if(pct>=90) color="\033[1;31m";
@@ -67,7 +75,7 @@ df -h / /home /backup 2>/dev/null | awk 'NR==1{next} !seen[$1]++ {
 echo ""
 
 # ── Services ──────────────────────────────────────────────────────────────────
-echo -e "${CYAN}▸ Services${NC}"
+echo -e "${CYAN}${G_SECT} Services${NC}"
 
 PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.4")
 SERVICES="apache2 lighttpd php${PHP_VER}-fpm mariadb vsftpd cron fail2ban cloudflared wg-quick@wg0"
@@ -87,15 +95,15 @@ for svc in $SERVICES; do
 
     STATUS=$(systemctl is-active "$svc" 2>/dev/null)
     if [ "$STATUS" = "active" ]; then
-        printf "  %-20s ${GREEN}●${NC} running\n" "$DISPLAY_NAME"
+        printf "  %-20s ${GREEN}${G_DOT}${NC} running\n" "$DISPLAY_NAME"
     else
-        printf "  %-20s ${RED}●${NC} %s\n" "$DISPLAY_NAME" "$STATUS"
+        printf "  %-20s ${RED}${G_DOT}${NC} %s\n" "$DISPLAY_NAME" "$STATUS"
     fi
 done
 echo ""
 
 # ── SSL Certificates ─────────────────────────────────────────────────────────
-echo -e "${CYAN}▸ SSL Certificates${NC}"
+echo -e "${CYAN}${G_SECT} SSL Certificates${NC}"
 CERT_COUNT=0
 NEAREST_EXPIRY=""
 NEAREST_DOMAIN=""
@@ -119,7 +127,7 @@ fi
 echo ""
 
 # ── Backups ───────────────────────────────────────────────────────────────────
-echo -e "${CYAN}▸ Backups${NC}"
+echo -e "${CYAN}${G_SECT} Backups${NC}"
 BACKUP_DIR=$(sqlite3 "$PANEL_DB" "SELECT value FROM settings WHERE key='backup_destination'" 2>/dev/null)
 [ -z "$BACKUP_DIR" ] && BACKUP_DIR="/backup"
 if [ -d "$BACKUP_DIR" ]; then
@@ -139,7 +147,7 @@ fi
 echo ""
 
 # ── Accounts ──────────────────────────────────────────────────────────────────
-echo -e "${CYAN}▸ Accounts${NC}"
+echo -e "${CYAN}${G_SECT} Accounts${NC}"
 if [ -f "$PANEL_DB" ]; then
     USER_COUNT=$(sqlite3 "$PANEL_DB" "SELECT COUNT(*) FROM hosting_users" 2>/dev/null || echo 0)
     DOMAIN_COUNT=$(sqlite3 "$PANEL_DB" "SELECT COUNT(*) FROM domains" 2>/dev/null || echo 0)
@@ -149,14 +157,20 @@ fi
 
 # ── Panel Version ─────────────────────────────────────────────────────────────
 echo ""
-echo -e "${CYAN}▸ Panel${NC}"
-CURRENT_VER=$(grep "APP_VERSION" /var/www/inetpanel/TiCore/Version.php 2>/dev/null | grep -oP "'[^']+'" | tr -d "'")
+echo -e "${CYAN}${G_SECT} Panel${NC}"
+# Match only the constant declaration. A bare grep for APP_VERSION also hits the
+# doc comments and the self-update regex further down Version.php, which turned
+# CURRENT_VER into a multi-line blob and made every version comparison fail.
+CURRENT_VER=$(grep -oP "^\s*const APP_VERSION\s*=\s*'\K[^']+" /var/www/inetpanel/TiCore/Version.php 2>/dev/null | head -1)
 LATEST_VER=$(sqlite3 "$PANEL_DB" "SELECT value FROM settings WHERE key='panel_latest_ver'" 2>/dev/null)
 echo -e "  Version:    ${BOLD}${CURRENT_VER:-unknown}${NC}"
-if [ -n "$LATEST_VER" ] && [ "$LATEST_VER" != "$CURRENT_VER" ]; then
+# Only newer counts as an update — a stale panel_latest_ver must not read as one.
+if [ -n "$LATEST_VER" ] && [ -n "$CURRENT_VER" ] && \
+   [ "$(printf '%s\n%s\n' "$CURRENT_VER" "$LATEST_VER" | sort -V | tail -1)" = "$LATEST_VER" ] && \
+   [ "$LATEST_VER" != "$CURRENT_VER" ]; then
     echo -e "  Update:     ${YELLOW}v${LATEST_VER} available${NC}"
 else
     echo -e "  Update:     ${GREEN}up to date${NC}"
 fi
 echo ""
-echo -e "${BOLD}═══════════════════════════════════════════════════${NC}"
+echo -e "${BOLD}${RULE}${NC}"
