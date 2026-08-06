@@ -16,10 +16,19 @@ on:
 permissions:
   contents: read
 
-# Don't pile up runs on rapid pushes to the same ref.
+# Don't pile up runs on rapid pushes to the same ref — but only supersede runs
+# on a pull request branch, where the newer commit genuinely obsoletes the older.
+#
+# Cancelling on push to a real branch silently killed the secret scan. The
+# gitleaks job clones full history (fetch-depth: 0), so it is always the slowest
+# to start and the last still running; any second push landing in the same
+# concurrency group killed it mid-flight. A release pushes a commit and a tag
+# moments apart, so releases cancelled it almost every time — and because the
+# job reports "cancelled" rather than "failed", it read as CI flakiness instead
+# of a security gate that never ran.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   php-lint:
