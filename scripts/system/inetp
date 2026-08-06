@@ -135,6 +135,7 @@ case "$COMMAND" in
 
     # Security
     audit)             bash "$SCRIPTS_DIR/audit.sh"            "$@" ;;
+    audit_orphans)     bash "$SCRIPTS_DIR/audit_orphans.sh"    "$@" ;;
     malware_scan)      bash "$SCRIPTS_DIR/malware_scan.sh"     "$@" ;;
 
     # Maintenance
@@ -210,6 +211,7 @@ case "$COMMAND" in
         echo ""
         echo -e "  ${BOLD}Security:${NC}"
         echo -e "    ${GREEN}audit${NC}             Security audit (permissions, ports, SSL, SSH, PHP)"
+        echo -e "    ${GREEN}audit_orphans${NC}     Find accounts/resources left behind by a partial delete"
         echo -e "    ${GREEN}malware_scan${NC}      Scan PHP files for backdoors and webshells"
         echo ""
         echo -e "  ${BOLD}Tools:${NC}"

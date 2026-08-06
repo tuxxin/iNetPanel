@@ -31,6 +31,7 @@ class Shell
         'multiphp_manage',
         'restore_account',
         'disk_cache_scan',
+        'audit_orphans',
         'list',
     ];
 
