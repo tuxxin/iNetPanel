@@ -205,6 +205,15 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => "The username '{$username}' is reserved and cannot be used."]);
             break;
         }
+        // Refuse to reuse a name whose deletion never finished. Its databases,
+        // crontab, home directory or FTP entry may still exist, and a new
+        // account would silently inherit them — the uid is recycled too, so a
+        // leftover crontab keyed by name starts firing as the new tenant.
+        if (file_exists('/var/lib/inetpanel/deleting/user-' . $username . '.tomb')) {
+            echo json_encode(['success' => false, 'error' =>
+                "An unfinished deletion for '{$username}' still exists. Run: inetp delete_user --username {$username} --force"]);
+            break;
+        }
 
         $result = Shell::run('create_user', ['--username' => $username, '--password' => $password]);
         if ($result['success']) {
@@ -482,6 +491,15 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => "The username '{$username}' is reserved and cannot be used."]);
             break;
         }
+        // Refuse to reuse a name whose deletion never finished. Its databases,
+        // crontab, home directory or FTP entry may still exist, and a new
+        // account would silently inherit them — the uid is recycled too, so a
+        // leftover crontab keyed by name starts firing as the new tenant.
+        if (file_exists('/var/lib/inetpanel/deleting/user-' . $username . '.tomb')) {
+            echo json_encode(['success' => false, 'error' =>
+                "An unfinished deletion for '{$username}' still exists. Run: inetp delete_user --username {$username} --force"]);
+            break;
+        }
 
         if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9\-\.]{1,61}[a-zA-Z0-9]$/', $domain)) {
             echo json_encode(['success' => false, 'error' => 'Invalid domain name.']);
@@ -750,7 +768,26 @@ switch ($action) {
         }
 
         $domainRow = DB::fetchOne('SELECT d.*, h.username FROM domains d LEFT JOIN hosting_users h ON d.hosting_user_id = h.id WHERE d.domain_name = ?', [$domain]);
-        $username = $domainRow['username'] ?? $domain;
+
+        // This used to be `$domainRow['username'] ?? $domain`, which silently
+        // substituted the DOMAIN NAME as the owner whenever the domains row was
+        // already gone — precisely the state a resumed or partial delete leaves.
+        // remove_domain.sh then ran against /home/<domain>/<domain>, every step
+        // found nothing, and the whole thing reported success while removing
+        // nothing. Recover the real owner from the vhost instead, and refuse
+        // rather than guess.
+        $username = $domainRow['username'] ?? '';
+        if ($username === '') {
+            $vhost = "/etc/apache2/sites-available/{$domain}.conf";
+            if (is_readable($vhost) && preg_match('#^\s*DocumentRoot\s+/home/([^/\s]+)/#m', file_get_contents($vhost), $m)) {
+                $username = $m[1];
+            }
+        }
+        if (!preg_match('/^[a-z][a-z0-9\-]{0,31}$/', $username)) {
+            echo json_encode(['success' => false, 'error' =>
+                "Could not determine which account owns '{$domain}'. Run: inetp audit_orphans"]);
+            break;
+        }
 
         // Remove CF tunnel route first — most likely to fail, acts as safety net
         if (DB::setting('cf_enabled', '0') === '1') {
@@ -784,7 +821,11 @@ switch ($action) {
             );
             $userDeleted = false;
             if (($remaining['cnt'] ?? 0) === 0) {
-                $delResult = Shell::run('delete_user', ['--username' => $username]);
+                // Pass --no-backup through so the final pre-deletion backup
+                // honours the checkbox instead of always being taken.
+                $duArgs = ['--username' => $username];
+                if ($noBackup) { $duArgs[] = '--no-backup'; }
+                $delResult = Shell::run('delete_user', $duArgs);
                 if ($delResult['success']) {
                     DB::delete('hosting_users', 'username = ?', [$username]);
                     $wgPeer = DB::fetchOne('SELECT id FROM wg_peers WHERE hosting_user = ?', [$username]);
