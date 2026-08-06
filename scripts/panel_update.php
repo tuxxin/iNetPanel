@@ -295,6 +295,16 @@ if ($pyScripts) {
     log_msg('Deployed ' . count($pyScripts) . ' Python script(s) to /root/scripts/');
 }
 
+// Deletion tombstone directory. A deletion records its intent here BEFORE
+// destroying anything, and clears it only once every step has verified its own
+// post-condition — so an interrupted delete leaves a findable record instead of
+// an invisible orphan. Root-owned: www-data may read it but must never be able
+// to forge or clear a deletion intent for a root-privileged operation.
+if (!is_dir('/var/lib/inetpanel/deleting')) {
+    mkdir('/var/lib/inetpanel/deleting', 0755, true);
+    log_msg('Created deletion tombstone directory /var/lib/inetpanel/deleting');
+}
+
 // Install stats collector cron (every minute)
 $statsCron = "/etc/cron.d/inetpanel_stats";
 file_put_contents($statsCron, "# iNetPanel stats collector — auto-managed by panel_update.php\n* * * * * root /root/scripts/stats_collector.sh > /dev/null 2>&1\n");
