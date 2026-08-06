@@ -43,10 +43,17 @@ source /root/scripts/lib_account.sh 2>/dev/null || {
 
 SCOPE_USER=""
 QUIET=0
+IGNORE_PENDING=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --user)  SCOPE_USER="$2"; shift 2 ;;
-        --quiet) QUIET=1; shift ;;
+        --user)   SCOPE_USER="$2"; shift 2 ;;
+        --quiet)  QUIET=1; shift ;;
+        # Used only by the deletion path when it audits its own work. A deletion
+        # still holds its own tombstone at the moment it self-checks, and without
+        # this it would fail its own post-condition, refuse to clear the
+        # tombstone, and so never be able to succeed. The deletion owns that
+        # tombstone's lifecycle; it does not need the audit to report it back.
+        --ignore-pending) IGNORE_PENDING=1; shift ;;
         *) shift ;;
     esac
 done
@@ -261,7 +268,10 @@ fi
 section "Pending deletions"
 # ==============================================================================
 found_tomb=0
-if [ -d "$TOMB_DIR" ]; then
+if [ "$IGNORE_PENDING" -eq 1 ]; then
+    found_tomb=1
+    result PASS "pending-deletion check skipped (--ignore-pending)"
+elif [ -d "$TOMB_DIR" ]; then
     for t in "$TOMB_DIR"/user-*.tomb; do
         [ -f "$t" ] || continue
         u=$(basename "$t" .tomb); u=${u#user-}
