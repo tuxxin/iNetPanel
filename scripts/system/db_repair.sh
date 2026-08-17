@@ -13,6 +13,11 @@ fi
 DATABASE=""
 MYSQL_PASS=$(cat /root/.mysql_root_pass 2>/dev/null)
 
+# Debian 13 / MariaDB 11.x ships most mysql* compat symlinks from mariadb-client,
+# but NOT mysqlcheck — verified on a clean trixie install, where mysql, mysqldump
+# and mysqladmin all exist and mysqlcheck does not. Resolve the real binary.
+MARIADB_CHECK_BIN=$(command -v mariadb-check 2>/dev/null || command -v mysqlcheck 2>/dev/null || echo mysqlcheck)
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --database) DATABASE="$2"; shift 2 ;;
@@ -34,12 +39,12 @@ FAILED_COUNT=0
 if [ -n "$DATABASE" ]; then
     echo -e "${CYAN}▸ Checking database: ${BOLD}${DATABASE}${NC}"
     echo ""
-    RESULT=$(mysqlcheck -u root -p"$MYSQL_PASS" --auto-repair --check "$DATABASE" 2>/dev/null)
+    RESULT=$("$MARIADB_CHECK_BIN" -u root -p"$MYSQL_PASS" --auto-repair --check "$DATABASE" 2>/dev/null)
 else
     echo -e "${CYAN}▸ Checking all databases${NC}"
     echo ""
     # Skip system databases
-    RESULT=$(mysqlcheck -u root -p"$MYSQL_PASS" --auto-repair --check --all-databases 2>/dev/null)
+    RESULT=$("$MARIADB_CHECK_BIN" -u root -p"$MYSQL_PASS" --auto-repair --check --all-databases 2>/dev/null)
 fi
 
 while IFS= read -r line; do
