@@ -89,6 +89,30 @@ if [ -z "$MAIN_IFACE" ]; then
 fi
 
 # Write server config
+# NAT rules for the VPN.
+#
+# iptables is not a dependency of wireguard-tools, and on Debian 12 it is only
+# present because firewalld 1.x Recommends it. firewalld 2.x (Debian 13) dropped the
+# iptables backend and that recommendation, so `iptables` can legitimately be absent
+# — and wg-quick would then fail at PostUp and roll the interface straight back.
+#
+# Prefer nft, which firewalld uses on both releases, and fall back to iptables where
+# nft is the one that is missing.
+if command -v nft >/dev/null 2>&1; then
+    # Chain names avoid nft reserved words — `fwd` is one (it is the netdev
+    # forwarding verb), and using it makes the whole ruleset fail to parse.
+    # Validated with `nft -c`.
+    WG_POSTUP="nft add table inet inetp_wg; nft add chain inet inetp_wg wgfwd '{ type filter hook forward priority 0; }'; nft add rule inet inetp_wg wgfwd iifname wg0 accept; nft add chain inet inetp_wg wgpost '{ type nat hook postrouting priority 100; }'; nft add rule inet inetp_wg wgpost oifname ${MAIN_IFACE} masquerade"
+    WG_POSTDOWN="nft delete table inet inetp_wg"
+elif command -v iptables >/dev/null 2>&1; then
+    WG_POSTUP="iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o ${MAIN_IFACE} -j MASQUERADE"
+    WG_POSTDOWN="iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o ${MAIN_IFACE} -j MASQUERADE"
+else
+    echo -e "${RED}Neither nft nor iptables is installed — cannot set up VPN NAT.${NC}"
+    echo -e "${YELLOW}Install one:  apt-get install nftables${NC}"
+    exit 1
+fi
+
 cat << WGCONF > "$WG_CONF"
 [Interface]
 Address    = ${WG_SERVER_IP}/24
@@ -96,8 +120,8 @@ ListenPort = ${WG_PORT}
 PrivateKey = ${SERVER_PRIVKEY}
 
 # NAT: forward VPN traffic to internet
-PostUp   = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o ${MAIN_IFACE} -j MASQUERADE
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o ${MAIN_IFACE} -j MASQUERADE
+PostUp   = ${WG_POSTUP}
+PostDown = ${WG_POSTDOWN}
 
 # Peers are added below by wg_peer.sh
 WGCONF

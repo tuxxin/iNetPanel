@@ -99,11 +99,32 @@ if [ -f "$JAIL_LOCAL" ]; then
     echo -e "  ${GREEN}Fail2Ban updated${NC}"
 fi
 
+# 3b. Socket activation overrides sshd_config entirely.
+# When ssh.socket is enabled, the listening port comes from its ListenStream=, and
+# `Port` in sshd_config is ignored. Editing the config would then appear to work —
+# `sshd -T` reports the new port because it parses the CONFIG — while the daemon
+# keeps listening on the old one. Combined with the firewall change above, that is a
+# lockout. Debian 13 is more likely to ship with the socket enabled.
+if systemctl is-enabled ssh.socket >/dev/null 2>&1 || systemctl is-active ssh.socket >/dev/null 2>&1; then
+    echo -e "  ${YELLOW}ssh.socket is enabled — sshd_config's Port is ignored under socket activation.${NC}"
+    SOCKET_DROPIN=/etc/systemd/system/ssh.socket.d/99-inetpanel.conf
+    install -d -m 0755 /etc/systemd/system/ssh.socket.d
+    printf '# Managed by iNetPanel — keeps the socket in step with sshd_config.\n[Socket]\nListenStream=\nListenStream=%s\n' \
+        "$NEW_PORT" > "$SOCKET_DROPIN"
+    systemctl daemon-reload
+    systemctl restart ssh.socket 2>/dev/null
+    echo -e "  ${GREEN}ssh.socket ListenStream set to ${NEW_PORT}${NC}"
+fi
+
 # 4. Validate config and restart SSH
 if sshd -t 2>/dev/null && systemctl restart sshd 2>/dev/null; then
     # Confirm sshd really came back on the new port before declaring success —
     # reporting a port change that did not take effect is how people get locked out.
-    ACTUAL=$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')
+    #
+    # Check the ACTUAL listener, not `sshd -T`. `sshd -T` parses the config, so under
+    # socket activation it happily reports a port nothing is listening on.
+    ACTUAL=$(ss -H -tlnp 2>/dev/null | awk '/sshd|systemd/ {split($4,a,":"); print a[length(a)]}' | sort -u | grep -Fx "$NEW_PORT" | head -1)
+    [ -z "$ACTUAL" ] && ACTUAL=$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')
     if [ "$ACTUAL" = "$NEW_PORT" ]; then
         rm -f "${SSHD_CONF}.inetp-bak" "${DROPIN}.inetp-bak"
         echo -e "  ${GREEN}SSH restarted on port ${NEW_PORT}${NC}"
