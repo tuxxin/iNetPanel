@@ -19,6 +19,19 @@ iNetPanel is a free, open-source hosting control panel designed for **home serve
 
 ---
 
+> ### Debian 13 (Trixie) is supported as of v1.26.0
+> Both **Debian 12 (Bookworm)** and **Debian 13 (Trixie)** are supported. Debian 12 left
+> regular support on 2026-07-11 but remains on LTS until June 2028, so existing servers
+> do not need to migrate.
+>
+> New in the same release: the setup wizard is served over **HTTPS** from the first
+> request. It collects the admin password and your Cloudflare API key, and previously
+> those went over plain HTTP. The installer generates a self-signed certificate so setup
+> is encrypted immediately — your browser will warn once, which is expected. Replace it
+> with a trusted certificate at any time with `inetp panel_ssl <hostname>`.
+
+---
+
 > ### ⚠️ Already running iNetPanel? (installed before v1.24.4)
 > **v1.24.4** fixes a critical bug where creating accounts/domains/SSL **silently breaks on previously-working servers**: a routine PHP package update enabled php-fpm's `ProtectSystem=full`, which mounts `/etc` read-only for the panel's root helpers (symptom: `useradd: cannot lock /etc/passwd` or `Read-only file system`).
 >
@@ -122,8 +135,8 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 
 | Layer | Technology | Port |
 |---|---|---|
-| Admin panel | lighttpd + PHP-FPM | 80 |
-| Client portal | lighttpd (same) | 80 |
+| Admin panel | lighttpd + PHP-FPM | 443 (80 redirects) |
+| Client portal | lighttpd (same) | 443 (80 redirects) |
 | phpMyAdmin | Apache2 vhost | 8888 / 8443 (SSL) |
 | Hosting sites | Apache2 SSL vhosts | 1080+ |
 | Panel database | SQLite | — |
