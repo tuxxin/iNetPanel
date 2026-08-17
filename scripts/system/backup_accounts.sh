@@ -92,7 +92,9 @@ backup_user() {
     local DB DUMP_FAILED=0
     while IFS= read -r DB; do
         [ -z "$DB" ] && continue
-        if mysqldump -u root ${DB_ROOT_PASS:+-p"$DB_ROOT_PASS"} --single-transaction "$DB" \
+        # mysqldump_root resolves mariadb-dump vs mysqldump — the compat symlinks are
+        # a separate package on Debian 13 and may not be installed. See lib_account.sh.
+        if mysqldump_root --single-transaction "$DB" \
             > "${TMP_SQL}/${DB}.sql" 2>/dev/null; then
             echo -e "    Exported DB: $DB"
         else

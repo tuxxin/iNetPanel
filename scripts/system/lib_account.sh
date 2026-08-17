@@ -109,10 +109,24 @@ section()   { printf '\n%s▸ %s%s\n'         "$CYAN"   "$*" "$NC"; }
 # ==============================================================================
 # MariaDB
 # ==============================================================================
+# `mysql`, `mysqldump` and friends are compatibility symlinks to the real
+# `mariadb*` binaries. Under MariaDB 11.x packaging (Debian 13) those symlinks moved
+# out of mariadb-client into separate mariadb-*-compat packages, which are not
+# guaranteed to be installed. Resolve the real name once, preferring it.
+#
+# This is not cosmetic: if `mysql` is missing, mysql_available() returns false and
+# the deletion path only *warns* before skipping every database and MariaDB user —
+# silently recreating the orphan class that 1.25.0 exists to fix.
+MARIADB_BIN=$(command -v mariadb 2>/dev/null || command -v mysql 2>/dev/null || echo mysql)
+MARIADB_DUMP_BIN=$(command -v mariadb-dump 2>/dev/null || command -v mysqldump 2>/dev/null || echo mysqldump)
+
 # Unquoted ${DB_ROOT_PASS:+...} on purpose: it must vanish entirely when empty
 # so socket auth is used. This is the idiom used throughout the tree.
 # shellcheck disable=SC2086
-mysql_root() { mysql -u root ${DB_ROOT_PASS:+-p"$DB_ROOT_PASS"} "$@"; }
+mysql_root() { "$MARIADB_BIN" -u root ${DB_ROOT_PASS:+-p"$DB_ROOT_PASS"} "$@"; }
+
+# shellcheck disable=SC2086
+mysqldump_root() { "$MARIADB_DUMP_BIN" -u root ${DB_ROOT_PASS:+-p"$DB_ROOT_PASS"} "$@"; }
 
 mysql_available() { mysql_root -N -e "SELECT 1" >/dev/null 2>&1; }
 
