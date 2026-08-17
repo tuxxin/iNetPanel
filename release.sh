@@ -98,7 +98,17 @@ REPO_SLUG="tuxxin/iNetPanel"
 MAIN_BRANCH="main"
 VERSION_FILE="TiCore/Version.php"
 RELEASE_DIR="${RELEASE_DIR:-/root/release}"
-INSTALLER_SRC="${INSTALLER_SRC:-/root/install_LAMP.sh}"
+# The installer now lives in the repo, so the checkout is the source of truth and
+# CI lints and secret-scans it like every other shell script. /root/install_LAMP.sh
+# remains a fallback for machines that still keep a local copy.
+INSTALLER_SRC="${INSTALLER_SRC:-}"
+if [ -z "$INSTALLER_SRC" ]; then
+    if [ -f "$(dirname "${BASH_SOURCE[0]}")/install_LAMP.sh" ]; then
+        INSTALLER_SRC="$(dirname "${BASH_SOURCE[0]}")/install_LAMP.sh"
+    else
+        INSTALLER_SRC="/root/install_LAMP.sh"
+    fi
+fi
 TOKEN_FILE="${TOKEN_FILE:-/root/.env}"
 API="https://api.github.com"
 UPLOADS="https://uploads.github.com"
@@ -473,6 +483,7 @@ rsync -a \
     --exclude='.installed' \
     --exclude='*.log' \
     --exclude='release.sh' \
+    --exclude='install_LAMP.sh' \
     ./ "$PANEL_COPY/"
 mkdir -p "${PANEL_COPY}/db"
 touch "${PANEL_COPY}/db/.gitkeep"
