@@ -64,7 +64,7 @@ if [ -z "$PHP_VER" ]; then
     for v in 8.5 8.4 8.3 8.2 8.1 8.0 7.4 7.3 7.2 7.1 7.0 5.6; do
         [ -f "/usr/sbin/php-fpm${v}" ] && PHP_VER="$v" && break
     done
-    PHP_VER="${PHP_VER:-8.4}"
+    PHP_VER="${PHP_VER:-8.5}"
 fi
 
 # Auto-assign / validate the port atomically. Co-located vhosts are isolated ONLY
@@ -155,10 +155,27 @@ POOL
 # SSL Certificate
 # ----------------------------------------------------------------
 if [ "$NO_CF" -eq 1 ]; then
-    # No Cloudflare — need a real LE cert for direct access
-    bash "$SCRIPTS_DIR/ssl_manage.sh" issue "$DOMAIN"
+    # No Cloudflare — a real Let's Encrypt cert is required for direct access, so a
+    # failure here is fatal. Previously the result was ignored: ssl_manage would fall
+    # back to a self-signed cert, and this script carried on reporting success, so
+    # the domain went live with a certificate every browser rejects.
+    if ! bash "$SCRIPTS_DIR/ssl_manage.sh" issue "$DOMAIN"; then
+        echo -e "${RED}Certificate issuance failed for ${DOMAIN} — not adding the domain.${NC}"
+        echo -e "${YELLOW}Fix the SSL configuration, then re-run this command.${NC}"
+        exit 1
+    fi
+    # Issuance can "succeed" and still leave a self-signed cert behind. Check the
+    # issuer rather than trusting the exit code.
+    if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ] \
+       && ! openssl x509 -issuer -noout -in "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" 2>/dev/null \
+            | grep -qi "let's encrypt"; then
+        echo -e "${RED}${DOMAIN} got a self-signed certificate, not a Let's Encrypt one.${NC}"
+        echo -e "${YELLOW}Check: inetp ssl_manage status  —  and Settings → Cloudflare.${NC}"
+        exit 1
+    fi
 else
-    # CF tunnel handles public TLS; Apache only needs a cert for the local hop
+    # CF tunnel handles public TLS; Apache only needs a cert for the local hop, so a
+    # self-signed one is correct here and its failure is not fatal.
     bash "$SCRIPTS_DIR/ssl_manage.sh" issue "$DOMAIN" --self-signed
 fi
 SSL_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"

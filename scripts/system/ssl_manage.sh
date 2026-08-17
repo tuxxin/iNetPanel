@@ -24,23 +24,62 @@ get_admin_email() {
     echo "$email"
 }
 
-# Ensure Cloudflare credentials file exists
+# Major version of the installed certbot, or 0 if it cannot be determined.
+certbot_major() {
+    certbot --version 2>&1 | grep -oE '[0-9]+' | head -1
+}
+
+# Ensure the Cloudflare credentials file exists, in the format this certbot accepts.
+#
+# certbot-dns-cloudflare 4.x (Debian 13 ships certbot 4.0; Debian 12 has 2.1)
+# REMOVED support for the Cloudflare Global API Key. Only a scoped API token works.
+#
+# This mattered more than it looks: issuance would fail, ssl_manage falls back to a
+# self-signed certificate, and add_domain.sh never checked the result — so the panel
+# reported success while every domain on the box quietly got a self-signed cert.
+#
+# Note the panel's OWN Cloudflare calls (TiCore/CloudflareAPI.php) still use the
+# Global API Key and are unaffected — Cloudflare kept it in the REST API. This is
+# purely about what certbot's DNS plugin will accept.
 ensure_credentials() {
-    if [ ! -f "$CRED_FILE" ]; then
-        # Try to read from panel DB
-        local token
-        token=$(sqlite3 "$PANEL_DB" "SELECT value FROM settings WHERE key='cf_api_key'" 2>/dev/null)
-        if [ -z "$token" ]; then
-            echo -e "${RED}No Cloudflare API credentials found.${NC}"
-            echo "Run: ssl_manage.sh write-credentials <api_key>"
-            exit 1
-        fi
-        echo "dns_cloudflare_api_key = ${token}" > "$CRED_FILE"
-        local email
-        email=$(sqlite3 "$PANEL_DB" "SELECT value FROM settings WHERE key='cf_email'" 2>/dev/null)
-        [ -n "$email" ] && echo "dns_cloudflare_email = ${email}" >> "$CRED_FILE"
+    [ -f "$CRED_FILE" ] && return 0
+
+    local api_token api_key email major
+    api_token=$(sqlite3 "$PANEL_DB" "SELECT value FROM settings WHERE key='cf_api_token'" 2>/dev/null)
+    api_key=$(sqlite3   "$PANEL_DB" "SELECT value FROM settings WHERE key='cf_api_key'"   2>/dev/null)
+    email=$(sqlite3     "$PANEL_DB" "SELECT value FROM settings WHERE key='cf_email'"     2>/dev/null)
+    major=$(certbot_major)
+
+    # Preferred: a scoped API token. Works on every certbot version.
+    if [ -n "$api_token" ]; then
+        echo "dns_cloudflare_api_token = ${api_token}" > "$CRED_FILE"
         chmod 600 "$CRED_FILE"
+        return 0
     fi
+
+    if [ -z "$api_key" ]; then
+        echo -e "${RED}No Cloudflare API credentials found.${NC}"
+        echo "Add a scoped API token in Settings → Cloudflare (Zone:DNS:Edit + Zone:Zone:Read)."
+        return 1
+    fi
+
+    # Only a Global API Key is configured. Refuse rather than let issuance fail and
+    # silently degrade to a self-signed certificate.
+    if [ "${major:-0}" -ge 4 ] 2>/dev/null; then
+        echo -e "${RED}Cloudflare Global API Key is not usable with certbot ${major}.x.${NC}"
+        echo "Support for it was removed in certbot-dns-cloudflare 4.0."
+        echo ""
+        echo "Create a scoped API token at https://dash.cloudflare.com/profile/api-tokens"
+        echo "with Zone:DNS:Edit + Zone:Zone:Read, then save it in"
+        echo "Settings → Cloudflare → API Token."
+        return 1
+    fi
+
+    # certbot 2.x/3.x — the legacy pair still works.
+    echo "dns_cloudflare_api_key = ${api_key}" > "$CRED_FILE"
+    [ -n "$email" ] && echo "dns_cloudflare_email = ${email}" >> "$CRED_FILE"
+    chmod 600 "$CRED_FILE"
+    return 0
 }
 
 # Generate a self-signed fallback certificate
@@ -96,7 +135,13 @@ case "$COMMAND" in
             exit 0
         fi
 
-        ensure_credentials
+        # Do NOT fall through to a self-signed certificate here. A credentials
+        # problem is a configuration error the operator must see, not something to
+        # paper over with a cert browsers will reject.
+        if ! ensure_credentials; then
+            echo -e "${RED}Cannot issue a Let's Encrypt certificate for ${DOMAIN}.${NC}"
+            exit 1
+        fi
         EMAIL=$(get_admin_email)
 
         # If a self-signed cert previously failed into LE's live dir, clean it
