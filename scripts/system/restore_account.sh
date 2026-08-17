@@ -57,10 +57,10 @@ done
 
 # Default PHP version
 if [ -z "$PHP_VER" ]; then
-    for v in 8.5 8.4 8.3 8.2 8.1 8.0 7.4 5.6; do
+    for v in 8.5 8.4 8.3 8.2 8.1 8.0 7.4 7.3 7.2 7.1 7.0 5.6; do
         [ -f "/usr/sbin/php-fpm${v}" ] && PHP_VER="$v" && break
     done
-    PHP_VER="${PHP_VER:-8.4}"
+    PHP_VER="${PHP_VER:-8.5}"
 fi
 
 # Split domains and ports into arrays

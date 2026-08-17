@@ -77,7 +77,7 @@ echo ""
 # ── Services ──────────────────────────────────────────────────────────────────
 echo -e "${CYAN}${G_SECT} Services${NC}"
 
-PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.4")
+PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.5")
 SERVICES="apache2 lighttpd php${PHP_VER}-fpm mariadb vsftpd cron fail2ban cloudflared wg-quick@wg0"
 
 for svc in $SERVICES; do

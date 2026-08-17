@@ -29,6 +29,43 @@ function shellResult(array $r): array {
     return ['success' => false, 'error' => $r['output'] ?: $r['error'] ?: 'Script execution failed.'];
 }
 
+/**
+ * Resolve a PHP version to a concrete "X.Y", falling back to the panel default.
+ *
+ * Two bugs this exists to kill:
+ *
+ *  - `domains.php_version` defaults to the sentinel 'inherit'. That is NOT null, so
+ *    `$row['php_version'] ?? '8.4'` never fires, and the old callers then ran it
+ *    through preg_replace('/[^0-9.]/','',...) which stripped it to an empty string —
+ *    producing the service name "php-fpm", which Shell.php's whitelist rejects, so
+ *    the FPM reload silently never happened.
+ *  - Several callers hardcoded '8.4' while settings.php_default_version says 8.5,
+ *    and php8.4-fpm is not installed. Reloading a unit that does not exist means the
+ *    new pool's socket is never created and the domain 503s until someone notices.
+ */
+function phpVerOrDefault(?string $ver): string {
+    $ver = trim((string) $ver);
+    if ($ver === '' || $ver === 'inherit' || !preg_match('/^\d+\.\d+$/', $ver)) {
+        $ver = (string) DB::setting('php_default_version', '');
+    }
+    // Last resort: whatever FPM is actually installed, newest first.
+    if (!preg_match('/^\d+\.\d+$/', $ver)) {
+        $found = [];
+        foreach (glob('/usr/sbin/php-fpm*') ?: [] as $bin) {
+            if (preg_match('/(\d+\.\d+)$/', $bin, $m)) $found[] = $m[1];
+        }
+        usort($found, 'version_compare');          // version_compare, not sort() —
+        $ver = $found ? end($found) : '';          // "8.10" sorts below "8.4" as a string
+    }
+    return $ver;
+}
+
+/** Systemd unit name for a domain's PHP-FPM pool, or '' if it cannot be resolved. */
+function fpmServiceFor(?string $ver): string {
+    $v = phpVerOrDefault($ver);
+    return $v === '' ? '' : "php{$v}-fpm";
+}
+
 // Format a byte count as human-readable (e.g. "10.6 GB")
 function formatDiskBytes(int $bytes): string {
     if ($bytes <= 0) return '0 B';
@@ -367,14 +404,14 @@ switch ($action) {
                 'WEB_ROOT'  => "/home/{$username}/{$domain}/www",
                 'LOG_DIR'   => "/home/{$username}/{$domain}/logs",
                 'SERVER_IP' => trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: ''),
-                'PHP_VER'   => $phpVer ?: '8.4',
+                'PHP_VER'   => phpVerOrDefault($phpVer),
                 'DB_NAME'   => $username . '_' . str_replace(['.', '-'], '_', $domain),
                 'DB_USER'   => $username,
                 'DB_PASS'   => trim(@file_get_contents('/root/.mysql_root_pass') ?: ''),
             ]);
-            $pv = $phpVer ?: '8.4';
-            $fpmService = "php{$pv}-fpm";
-            Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
+            $pv = phpVerOrDefault($phpVer);
+            $fpmService = fpmServiceFor($pv);
+            if ($fpmService !== '') Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
             // Refresh disk usage cache for the affected user (background, non-blocking)
             Shell::exec('sudo /usr/local/bin/inetp disk_cache_scan --user ' . escapeshellarg($username) . ' >/dev/null 2>&1 &', 'disk-cache-refresh');
         }
@@ -433,9 +470,9 @@ switch ($action) {
                 'SERVER_IP' => trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: ''),
             ]);
             // Reload FPM to drop the removed pool's workers
-            $delPhpVer = $hookPhpVer ?: DB::setting('php_default_version', '8.4');
-            $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $delPhpVer) . '-fpm';
-            Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
+            $delPhpVer = phpVerOrDefault($hookPhpVer);
+            $fpmService = fpmServiceFor($delPhpVer);
+            if ($fpmService !== '') Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
             // Refresh the user's DB total (domain row was already deleted above)
             Shell::exec('sudo /usr/local/bin/inetp disk_cache_scan --user ' . escapeshellarg($username) . ' >/dev/null 2>&1 &', 'disk-cache-refresh');
         }
@@ -461,7 +498,7 @@ switch ($action) {
         $domain   = trim($_POST['domain']   ?? '');
         $username = trim($_POST['username'] ?? '');
         $password = trim($_POST['password'] ?? '');
-        $phpVer   = trim($_POST['php_version'] ?? '8.4');
+        $phpVer   = phpVerOrDefault($_POST['php_version'] ?? '');
 
         if (!$domain || !$password) {
             echo json_encode(['success' => false, 'error' => 'Domain and password are required.']);
@@ -613,7 +650,7 @@ switch ($action) {
                 'WEB_ROOT'  => "/home/{$username}/{$domain}/www",
                 'LOG_DIR'   => "/home/{$username}/{$domain}/logs",
                 'SERVER_IP' => trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: ''),
-                'PHP_VER'   => $phpVer ?: '8.4',
+                'PHP_VER'   => phpVerOrDefault($phpVer),
                 'DB_NAME'   => $username . '_' . str_replace(['.', '-'], '_', $domain),
                 'DB_USER'   => $username,
                 'DB_PASS'   => trim(@file_get_contents('/root/.mysql_root_pass') ?: ''),
@@ -621,8 +658,8 @@ switch ($action) {
             // Refresh disk usage cache for the new user+domain (background)
             Shell::exec('sudo /usr/local/bin/inetp disk_cache_scan --user ' . escapeshellarg($username) . ' >/dev/null 2>&1 &', 'disk-cache-refresh');
         }
-        $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
-        Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
+        $fpmService = fpmServiceFor($phpVer);
+        if ($fpmService !== '') Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
         break;
 
     case 'change_password':
@@ -647,7 +684,7 @@ switch ($action) {
         Auth::requireAdmin();
         $domain   = trim($_POST['domain']   ?? '');
         $username = trim($_POST['username'] ?? '');
-        $phpVer   = trim($_POST['php_version'] ?? '8.4');
+        $phpVer   = phpVerOrDefault($_POST['php_version'] ?? '');
 
         if (!$domain || !$username) {
             echo json_encode(['success' => false, 'error' => 'Domain and username are required.']);
@@ -745,7 +782,7 @@ switch ($action) {
                 'WEB_ROOT'  => "/home/{$username}/{$domain}/www",
                 'LOG_DIR'   => "/home/{$username}/{$domain}/logs",
                 'SERVER_IP' => trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: ''),
-                'PHP_VER'   => $phpVer ?: '8.4',
+                'PHP_VER'   => phpVerOrDefault($phpVer),
                 'DB_NAME'   => $username . '_' . str_replace(['.', '-'], '_', $domain),
                 'DB_USER'   => $username,
                 'DB_PASS'   => trim(@file_get_contents('/root/.mysql_root_pass') ?: ''),
@@ -753,8 +790,8 @@ switch ($action) {
             // Refresh disk usage cache for the affected user (background)
             Shell::exec('sudo /usr/local/bin/inetp disk_cache_scan --user ' . escapeshellarg($username) . ' >/dev/null 2>&1 &', 'disk-cache-refresh');
         }
-        $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $phpVer) . '-fpm';
-        Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
+        $fpmService = fpmServiceFor($phpVer);
+        if ($fpmService !== '') Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
         break;
 
     case 'delete':
@@ -857,9 +894,9 @@ switch ($action) {
                 Shell::exec('sudo /usr/local/bin/inetp disk_cache_scan --user ' . escapeshellarg($username) . ' >/dev/null 2>&1 &', 'disk-cache-refresh');
             }
         }
-        $delPhpVer = $domainRow['php_version'] ?? '8.4';
-        $fpmService = 'php' . preg_replace('/[^0-9.]/', '', $delPhpVer) . '-fpm';
-        Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
+        $delPhpVer = phpVerOrDefault($domainRow['php_version'] ?? '');
+        $fpmService = fpmServiceFor($delPhpVer);
+        if ($fpmService !== '') Shell::exec('sudo /bin/systemctl reload ' . escapeshellarg($fpmService), 'fpm-reload');
         break;
 
     // =========================================================================

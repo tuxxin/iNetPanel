@@ -98,7 +98,7 @@ fi
 
 # Panel default PHP version
 DEFAULT_PHP=$(sqlite3 "$PANEL_DB" "SELECT value FROM settings WHERE key='php_default_version'" 2>/dev/null)
-DEFAULT_PHP=${DEFAULT_PHP:-8.4}
+DEFAULT_PHP=${DEFAULT_PHP:-8.5}
 
 if [[ "$ACTION" == "remove" && "$VERSION" == "$DEFAULT_PHP" ]]; then
     echo '{"success":false,"error":"Cannot remove the panel default PHP version."}'

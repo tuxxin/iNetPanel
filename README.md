@@ -37,7 +37,7 @@ iNetPanel is a free, open-source hosting control panel designed for **home serve
 apt-get install -y curl && bash <(curl -s https://inetpanel.info/latest)
 ```
 
-Requires a **clean Debian 12** server with root access. The guided installer handles everything. (`curl` is not bundled with the Debian 12 server ISO, so we install it first — the `apt-get` step is a no-op if curl is already present.)
+Requires a **clean Debian 12 or 13** server with root access. The guided installer handles everything. (`curl` is not bundled with the Debian server ISO, so we install it first — the `apt-get` step is a no-op if curl is already present.)
 
 > **[Full installation guide →](https://inetpanel.info/install)**
 
@@ -70,7 +70,7 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 - One-click account creation with Apache, PHP-FPM, FTP, SSL, and tunnel routing
 - Multi-domain users — each domain gets its own vhost, document root and SSL certificate
 - [Client portal](https://inetpanel.info/features) for hosting users with database management, SSH keys, file manager, and backups
-- Multi-PHP version switching (5.6–8.5) per domain
+- Multi-PHP version switching (5.6–8.5) per domain, via the sury.org repository
 - Hook scripts for custom post-deploy automation
 
 ### Security & Networking
@@ -98,7 +98,7 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 
 ## Requirements
 
-- **Debian 12** (Bookworm) — clean install
+- **Debian 12** (Bookworm) or **Debian 13** (Trixie) — clean install
 - **Root access**
 - **Cloudflare account** (recommended) — or manual port-based mode without Cloudflare
 

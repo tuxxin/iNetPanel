@@ -44,7 +44,7 @@ done
 [ ! -f "$PANEL_DB" ] && { echo -e "${RED}Panel database not found: ${PANEL_DB}${NC}"; exit 1; }
 
 DEFAULT_PHP=$(sqlite3 "$PANEL_DB" "SELECT value FROM settings WHERE key='php_default_version'" 2>/dev/null)
-DEFAULT_PHP=${DEFAULT_PHP:-8.4}
+DEFAULT_PHP=${DEFAULT_PHP:-8.5}
 
 echo -e "${BOLD}Rebuilding Apache VHosts${NC}"
 echo ""

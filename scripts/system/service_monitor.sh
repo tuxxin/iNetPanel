@@ -54,7 +54,7 @@ get_monitored_services() {
 get_php_fpm() {
     local ver
     ver=$(sqlite3 "$PANEL_DB" "SELECT value FROM settings WHERE key='php_default_version'" 2>/dev/null)
-    [ -z "$ver" ] && ver="8.4"
+    [ -z "$ver" ] && ver="8.5"
     echo "php${ver}-fpm"
 }
 

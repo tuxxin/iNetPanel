@@ -9,7 +9,7 @@
 
 PANEL_DB="/var/www/inetpanel/db/inetpanel.db"
 DEFAULT_PHP=$(sqlite3 "$PANEL_DB" "SELECT value FROM settings WHERE key='php_default_version'" 2>/dev/null)
-DEFAULT_PHP=${DEFAULT_PHP:-8.4}
+DEFAULT_PHP=${DEFAULT_PHP:-8.5}
 
 echo -e "\033[1mRebuilding PHP-FPM Pools\033[0m"
 echo ""

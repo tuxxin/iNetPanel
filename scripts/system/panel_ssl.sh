@@ -114,7 +114,7 @@ else
     fi
 
     # Detect PHP-FPM version for socket path
-    PHP_FPM_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.4")
+    PHP_FPM_VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo "8.5")
 
     # Add SSL vhost block to existing config
     cat >> "$PMA_CONF" <<PMAEOF
