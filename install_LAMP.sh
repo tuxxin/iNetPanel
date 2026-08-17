@@ -520,7 +520,9 @@ server.modules = (
     "mod_rewrite",
     "mod_access",
     "mod_accesslog",
-    "mod_setenv"
+    "mod_setenv",
+    "mod_openssl",
+    "mod_redirect"
 )
 
 server.document-root = "/var/www/inetpanel/public"
@@ -579,6 +581,58 @@ LCONF
         return 1
     fi
 
+    # --- TLS from the very first request ------------------------------------
+    # The setup wizard at /install.php collects the admin password AND, a few
+    # steps later, the Cloudflare API key. Serving that over plaintext HTTP put
+    # both on the wire, and there was no HTTPS option at all until someone ran
+    # panel_ssl.sh by hand — which is after the credentials have been sent.
+    #
+    # A self-signed certificate generated here is not trusted by browsers, but it
+    # encrypts the setup wizard, which is the part that matters. panel_ssl.sh can
+    # replace it with a real Let's Encrypt certificate later; it writes the same
+    # $SERVER["socket"] == ":443" block, so the shapes match.
+    # Port 443 belongs to lighttpd (the panel). Apache's ssl module ships a
+    # `Listen 443` in ports.conf and grabs it first, so lighttpd's bind fails with
+    # status 255 — and it fails at BIND time, not config-parse time, so
+    # `lighttpd -tt` still passes and the failure only shows up as a dead service.
+    # panel_ssl.sh already does this; the installer has to do it too now that TLS
+    # is configured up front. Per-domain vhosts use their own high ports.
+    if grep -qE '^\s*Listen\s+443' /etc/apache2/ports.conf 2>/dev/null; then
+        sed -i '/^\s*Listen\s\+443/d' /etc/apache2/ports.conf
+        if apache2ctl configtest 2>&1 | grep -q "Syntax OK"; then
+            systemctl reload apache2 2>/dev/null
+        fi
+    fi
+
+    mkdir -p /etc/lighttpd/ssl
+    if [ ! -s /etc/lighttpd/ssl/panel.pem ]; then
+        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+            -keyout /etc/lighttpd/ssl/panel.key \
+            -out    /etc/lighttpd/ssl/panel.crt \
+            -subj   "/CN=${SERVER_IP}" \
+            -addext "subjectAltName=IP:${SERVER_IP},DNS:$(hostname -f 2>/dev/null || hostname)" \
+            >/dev/null 2>&1
+        # lighttpd wants key and cert concatenated in one pemfile.
+        cat /etc/lighttpd/ssl/panel.key /etc/lighttpd/ssl/panel.crt \
+            > /etc/lighttpd/ssl/panel.pem
+        chmod 600 /etc/lighttpd/ssl/panel.pem /etc/lighttpd/ssl/panel.key
+    fi
+
+    cat >> /etc/lighttpd/lighttpd.conf << 'SSLCONF'
+
+# --- SSL Configuration (managed by iNetPanel) ---
+$SERVER["socket"] == ":443" {
+    ssl.engine  = "enable"
+    ssl.pemfile = "/etc/lighttpd/ssl/panel.pem"
+    ssl.openssl.ssl-conf-cmd = ("MinProtocol" => "TLSv1.2")
+}
+
+# Redirect HTTP to HTTPS so the setup wizard is never served in the clear.
+$HTTP["scheme"] == "http" {
+    url.redirect = ("" => "https://${url.authority}${url.path}${qsa}")
+}
+SSLCONF
+
     # Validate before restarting — a bad config here aborts the whole installer.
     if ! lighttpd -tt -f /etc/lighttpd/lighttpd.conf >/dev/null 2>&1; then
         echo "  ERROR: generated lighttpd.conf failed validation:"
@@ -589,7 +643,7 @@ LCONF
     systemctl enable lighttpd
     systemctl restart lighttpd
 }
-exec_cmd "Configuring lighttpd (Port 80, iNetPanel)" configure_lighttpd
+exec_cmd "Configuring lighttpd (TLS on 443, iNetPanel)" configure_lighttpd
 
 # ==============================================================================
 # 6. VSFTPD
@@ -1040,7 +1094,8 @@ install_firewall() {
     firewall-cmd --permanent --add-port=20/tcp            # FTP data
     firewall-cmd --permanent --add-port=21/tcp            # FTP control
     firewall-cmd --permanent --add-port=40000-50000/tcp   # FTP passive range
-    firewall-cmd --permanent --add-port=80/tcp            # Panel (lighttpd)
+    firewall-cmd --permanent --add-port=80/tcp            # Panel — redirects to 443
+    firewall-cmd --permanent --add-port=443/tcp           # Panel (lighttpd, TLS)
     firewall-cmd --permanent --add-port=8888/tcp          # phpMyAdmin
 
     # Allow loopback (for cloudflared, local services)
@@ -1111,7 +1166,7 @@ echo -e "${BOLD}======================================================${NC}"
 echo -e "${GREEN}   Installation Complete!${NC}"
 echo -e "${BOLD}======================================================${NC}"
 echo -e "  ${BOLD}Server IP:${NC}    $SERVER_IP"
-echo -e "  ${BOLD}iNetPanel:${NC}    ${GREEN}http://$SERVER_IP/install.php${NC}  ← complete setup here"
+echo -e "  ${BOLD}iNetPanel:${NC}    ${GREEN}https://$SERVER_IP/install.php${NC}  ← complete setup here"
 echo -e "  ${BOLD}phpMyAdmin:${NC}   http://$SERVER_IP:8888"
 echo -e "  ${BOLD}PHP:${NC}          $PHP_VER (FPM)"
 echo -e "  ${BOLD}Scripts:${NC}      $SCRIPTS_DIR"
@@ -1132,5 +1187,9 @@ echo -e "    ${GREEN}inetp list${NC}"
 echo ""
 echo -e "  ${YELLOW}MySQL root password saved to: /root/.mysql_root_pass${NC}"
 echo -e ""
-echo -e "  ${BLUE}Open http://$SERVER_IP/install.php to complete iNetPanel setup.${NC}"
+echo -e "  ${BLUE}Open https://$SERVER_IP/install.php to complete iNetPanel setup.${NC}"
+echo -e "  ${DIM}The certificate is self-signed, so your browser will warn once — that is${NC}"
+echo -e "  ${DIM}expected. It exists so the admin password and Cloudflare API key you${NC}"
+echo -e "  ${DIM}enter next are not sent in the clear. Replace it with a trusted cert${NC}"
+echo -e "  ${DIM}later:  inetp panel_ssl <hostname>${NC}"
 echo -e "${BOLD}======================================================${NC}"
