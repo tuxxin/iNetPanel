@@ -357,14 +357,11 @@ www-data ALL=(root) NOPASSWD: /bin/sed
 www-data ALL=(root) NOPASSWD: /bin/bash /tmp/inetp_hook_*
 www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf
 www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetp_motd /etc/motd
-www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetp_ht_* /home/*
-www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetp_pw_* /home/*
-www-data ALL=(root) NOPASSWD: /bin/cat /home/*/.htaccess
-www-data ALL=(root) NOPASSWD: /bin/cat /home/*/.htpasswd
-www-data ALL=(root) NOPASSWD: /bin/chown *\:www-data /home/*
-www-data ALL=(root) NOPASSWD: /bin/chmod 644 /home/*
-www-data ALL=(root) NOPASSWD: /bin/chmod 640 /home/*
-www-data ALL=(root) NOPASSWD: /bin/rm -f /home/*/.htpasswd
+# The tenant .htaccess/.htpasswd manager. This single helper replaced eight
+# broad grants (cp/cat/chown/chmod/rm over /home/*) that let a hosting tenant
+# point root at any file by planting a symlink - GHSA-mjmx-xpqq-p2h8. It takes
+# an identity and a RELATIVE directory, never a path, and opens with O_NOFOLLOW.
+www-data ALL=(root) NOPASSWD: /root/scripts/ht_manage.py *
 www-data ALL=(root) NOPASSWD: /bin/cat /root/.mysql_root_pass
 www-data ALL=(root) NOPASSWD: /usr/bin/php* /var/www/inetpanel/scripts/panel_update.php *
 SUDOERS;

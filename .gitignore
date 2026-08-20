@@ -63,3 +63,7 @@ Thumbs.db
 *.cache
 cache/
 latest
+
+# Python bytecode from the helper scripts
+__pycache__/
+*.pyc

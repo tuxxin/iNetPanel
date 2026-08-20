@@ -51,6 +51,44 @@ function runAccountKeyScript(string $username, string $action, array $extra = []
     return $data;
 }
 
+/**
+ * Root-privileged access to a tenant's .htaccess/.htpasswd.
+ *
+ * All of it goes through scripts/system/ht_manage.py, which re-derives the
+ * document root from the panel database and opens the file with O_NOFOLLOW.
+ *
+ * This replaced direct `sudo /bin/cp|cat|chown` calls on a path built here as
+ * $safePath . '/.htaccess'. validateDirPath() realpath()-resolves the DIRECTORY
+ * only, so that trailing component was never resolved — and a tenant owns their
+ * document root over SFTP. Replacing .htaccess with a symlink made root cp/cat
+ * follow it: arbitrary root read, write and chown, i.e. local privilege
+ * escalation from the lowest-privilege account the panel issues.
+ * (GHSA-mjmx-xpqq-p2h8, CWE-59.)
+ *
+ * No caller passes a path any more — only identity plus a relative directory.
+ */
+function htManage(string $action, string $user, string $domain, string $dir, string $which, ?string $content = null): array
+{
+    $cmd = 'sudo /root/scripts/ht_manage.py'
+         . ' --user '   . escapeshellarg($user)
+         . ' --domain ' . escapeshellarg($domain)
+         . ' --dir '    . escapeshellarg($dir)
+         . ' --file '   . escapeshellarg($which)
+         . ' --action ' . escapeshellarg($action);
+    $tmp = null;
+    if ($action === 'write') {
+        $tmp = tempnam('/tmp', 'inetp_ht_');
+        file_put_contents($tmp, (string) $content);
+        chmod($tmp, 0600);
+        $cmd .= ' --content-file ' . escapeshellarg($tmp);
+    }
+    $out = [];
+    $rc  = 0;
+    exec($cmd . ' 2>/dev/null', $out, $rc);
+    if ($tmp !== null) { @unlink($tmp); }
+    return ['ok' => $rc === 0, 'content' => implode("\n", $out)];
+}
+
 // Helper: validate directory path is under doc root (prevents traversal)
 function validateDirPath(string $docRoot, string $dir): string|false
 {
@@ -462,7 +500,7 @@ switch ($action) {
         $safePath = validateDirPath($docRoot, $dir);
         if ($safePath === false) { echo json_encode(['success' => false, 'error' => 'Invalid directory path.']); break; }
         $htFile = $safePath . '/.htaccess';
-        $content = file_exists($htFile) ? (exec('sudo /bin/cat ' . escapeshellarg($htFile), $lines) !== false ? implode("\n", $lines) : '') : '';
+        $content = htManage('read', $username, $domain, $dir, 'htaccess')['content'];
         $isProtected = file_exists($safePath . '/.htpasswd');
         echo json_encode(['success' => true, 'content' => $content, 'is_protected' => $isProtected]);
         break;
@@ -482,14 +520,12 @@ switch ($action) {
         // Write via temp file + sudo cp (www-data can't write to user dirs)
         $tmp = tempnam('/tmp', 'inetp_ht_');
         file_put_contents($tmp, $content);
-        exec('sudo /bin/cp ' . escapeshellarg($tmp) . ' ' . escapeshellarg($htFile) . ' 2>&1', $out, $rc);
+        $rc = htManage('write', $username, $domain, $dir, 'htaccess', $content)['ok'] ? 0 : 1;
         @unlink($tmp);
         if ($rc !== 0) {
             echo json_encode(['success' => false, 'error' => 'Failed to write file.']);
             break;
         }
-        exec('sudo /bin/chown ' . escapeshellarg("{$username}:www-data") . ' ' . escapeshellarg($htFile));
-        exec('sudo /bin/chmod 644 ' . escapeshellarg($htFile));
         echo json_encode(['success' => true]);
         break;
 
@@ -503,7 +539,8 @@ switch ($action) {
         $users = [];
         if (file_exists($htpasswdFile)) {
             $pwLines = [];
-            exec('sudo /bin/cat ' . escapeshellarg($htpasswdFile), $pwLines);
+            $pwLines = explode("
+", htManage('read', $username, $domain, $dir, 'htpasswd')['content']);
             foreach ($pwLines as $line) {
                 $line = trim($line);
                 if ($line && str_contains($line, ':')) {
@@ -525,29 +562,29 @@ switch ($action) {
         $htpasswdFile = $safePath . '/.htpasswd';
         if (!file_exists($htpasswdFile)) { echo json_encode(['success' => true]); break; }
         $pwLines = [];
-        exec('sudo /bin/cat ' . escapeshellarg($htpasswdFile), $pwLines);
+        $pwLines = explode("
+", htManage('read', $username, $domain, $dir, 'htpasswd')['content']);
         $remaining = array_filter($pwLines, fn($l) => !str_starts_with(trim($l), "{$delUser}:"));
         if (empty($remaining)) {
             // No users left — remove protection entirely
-            exec('sudo /bin/rm -f ' . escapeshellarg($htpasswdFile));
+            htManage('delete', $username, $domain, $dir, 'htpasswd');
             $htFile = $safePath . '/.htaccess';
             if (file_exists($htFile)) {
                 $htLines = [];
-                exec('sudo /bin/cat ' . escapeshellarg($htFile), $htLines);
+                $htLines = explode("
+", htManage('read', $username, $domain, $dir, 'htaccess')['content']);
                 $content = implode("\n", $htLines);
                 $content = preg_replace('/# BEGIN iNetPanel Directory Protection.*?# END iNetPanel Directory Protection\n?/s', '', $content);
                 $tmp = tempnam('/tmp', 'inetp_ht_');
                 file_put_contents($tmp, $content);
-                exec('sudo /bin/cp ' . escapeshellarg($tmp) . ' ' . escapeshellarg($htFile));
+                htManage('write', $username, $domain, $dir, 'htaccess', file_get_contents($tmp));
                 @unlink($tmp);
-                exec('sudo /bin/chown ' . escapeshellarg("{$username}:www-data") . ' ' . escapeshellarg($htFile));
             }
         } else {
             $tmp = tempnam('/tmp', 'inetp_pw_');
             file_put_contents($tmp, implode("\n", $remaining) . "\n");
-            exec('sudo /bin/cp ' . escapeshellarg($tmp) . ' ' . escapeshellarg($htpasswdFile));
+            htManage('write', $username, $domain, $dir, 'htpasswd', file_get_contents($tmp));
             @unlink($tmp);
-            exec('sudo /bin/chown ' . escapeshellarg("{$username}:www-data") . ' ' . escapeshellarg($htpasswdFile));
         }
         echo json_encode(['success' => true]);
         break;
@@ -574,46 +611,44 @@ switch ($action) {
             $hash = password_hash($htPass, PASSWORD_BCRYPT);
             $existingPasswd = '';
             if (file_exists($htpasswdFile)) {
-                exec('sudo /bin/cat ' . escapeshellarg($htpasswdFile), $pwLines);
+                $pwLines = explode("
+", htManage('read', $username, $domain, $dir, 'htpasswd')['content']);
                 // Remove existing entry for this user, keep others
                 $existingPasswd = implode("\n", array_filter($pwLines, fn($l) => !str_starts_with(trim($l), "{$htUser}:")));
                 if ($existingPasswd) $existingPasswd .= "\n";
             }
             $tmp = tempnam('/tmp', 'inetp_pw_');
             file_put_contents($tmp, $existingPasswd . "{$htUser}:{$hash}\n");
-            exec('sudo /bin/cp ' . escapeshellarg($tmp) . ' ' . escapeshellarg($htpasswdFile));
+            htManage('write', $username, $domain, $dir, 'htpasswd', file_get_contents($tmp));
             @unlink($tmp);
-            exec('sudo /bin/chown ' . escapeshellarg("{$username}:www-data") . ' ' . escapeshellarg($htpasswdFile));
-            exec('sudo /bin/chmod 640 ' . escapeshellarg($htpasswdFile));
 
             // Add protection block to .htaccess (replace existing if present)
             $existingHt = '';
             if (file_exists($htFile)) {
                 $htLines = [];
-                exec('sudo /bin/cat ' . escapeshellarg($htFile), $htLines);
+                $htLines = explode("
+", htManage('read', $username, $domain, $dir, 'htaccess')['content']);
                 $existingHt = implode("\n", $htLines);
             }
             $existingHt = preg_replace('/# BEGIN iNetPanel Directory Protection.*?# END iNetPanel Directory Protection\n?/s', '', $existingHt);
             $protBlock = "# BEGIN iNetPanel Directory Protection\nAuthType Basic\nAuthName \"Restricted Area\"\nAuthUserFile {$htpasswdFile}\nRequire valid-user\n# END iNetPanel Directory Protection\n";
             $tmp = tempnam('/tmp', 'inetp_ht_');
             file_put_contents($tmp, $protBlock . $existingHt);
-            exec('sudo /bin/cp ' . escapeshellarg($tmp) . ' ' . escapeshellarg($htFile));
+            htManage('write', $username, $domain, $dir, 'htaccess', file_get_contents($tmp));
             @unlink($tmp);
-            exec('sudo /bin/chown ' . escapeshellarg("{$username}:www-data") . ' ' . escapeshellarg($htFile));
-            exec('sudo /bin/chmod 644 ' . escapeshellarg($htFile));
         } else {
             // Remove protection
-            exec('sudo /bin/rm -f ' . escapeshellarg($htpasswdFile));
+            htManage('delete', $username, $domain, $dir, 'htpasswd');
             if (file_exists($htFile)) {
                 $htLines = [];
-                exec('sudo /bin/cat ' . escapeshellarg($htFile), $htLines);
+                $htLines = explode("
+", htManage('read', $username, $domain, $dir, 'htaccess')['content']);
                 $content = implode("\n", $htLines);
                 $content = preg_replace('/# BEGIN iNetPanel Directory Protection.*?# END iNetPanel Directory Protection\n?/s', '', $content);
                 $tmp = tempnam('/tmp', 'inetp_ht_');
                 file_put_contents($tmp, $content);
-                exec('sudo /bin/cp ' . escapeshellarg($tmp) . ' ' . escapeshellarg($htFile));
+                htManage('write', $username, $domain, $dir, 'htaccess', file_get_contents($tmp));
                 @unlink($tmp);
-                exec('sudo /bin/chown ' . escapeshellarg("{$username}:www-data") . ' ' . escapeshellarg($htFile));
             }
         }
         echo json_encode(['success' => true]);
