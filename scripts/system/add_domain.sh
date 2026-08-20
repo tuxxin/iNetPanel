@@ -108,13 +108,20 @@ echo -e "${BOLD}--- Adding Domain: ${DOMAIN} → ${USERNAME} (port ${PORT}) ---$
 DOC_ROOT="/home/$USERNAME/$DOMAIN/www"
 LOG_DIR="/home/$USERNAME/$DOMAIN/logs"
 TMP_DIR="/home/$USERNAME/tmp"
-mkdir -p "$DOC_ROOT" "$LOG_DIR" "$TMP_DIR"
+# Per-domain session store — see the pool template below for why this is not
+# shared across the account. Cookie name is derived from the domain so two of an
+# account's sites cannot collide on PHPSESSID either.
+SESS_DIR="/home/$USERNAME/$DOMAIN/tmp/sessions"
+SESS_NAME="SESS$(printf '%s' "$DOMAIN" | sha256sum | cut -c1-12)"
+mkdir -p "$DOC_ROOT" "$LOG_DIR" "$TMP_DIR" "$SESS_DIR"
 
 chown -R "$USERNAME:www-data" "/home/$USERNAME/$DOMAIN"
 chown "$USERNAME:www-data" "$TMP_DIR"
 chmod 750 "/home/$USERNAME/$DOMAIN"
 chmod 755 "$DOC_ROOT"
 chmod 750 "$LOG_DIR" "$TMP_DIR"
+chown "$USERNAME:www-data" "$SESS_DIR"
+chmod 700 "$SESS_DIR"
 
 # ----------------------------------------------------------------
 # PHP-FPM Pool (per user+domain — socket named username_domain)
@@ -142,7 +149,21 @@ pm.max_spare_servers = 3
 php_admin_value[error_log]           = ${LOG_DIR}/php_error.log
 php_admin_flag[log_errors]           = on
 php_admin_value[upload_tmp_dir]      = ${TMP_DIR}
-php_value[session.save_path]         = ${TMP_DIR}
+
+; Sessions are scoped PER DOMAIN, not per account. Sharing one store across an
+; account's domains meant a session (and its CSRF token) minted on any domain was
+; valid on every other domain the account owns — demonstrated across two separate
+; registrable domains. A low-value domain (staging, a legacy app with an XSS) then
+; becomes a foothold against the account's valuable ones.
+php_value[session.save_path]         = ${SESS_DIR}
+php_value[session.name]              = ${SESS_NAME}
+
+; PHP ships these empty, so every hosted site emitted a bare cookie.
+php_value[session.cookie_httponly]   = 1
+php_value[session.cookie_secure]     = 1
+php_value[session.cookie_samesite]   = Lax
+; Upstream default is 0, which lets a fabricated session id be adopted.
+php_value[session.use_strict_mode]   = 1
 php_admin_value[open_basedir]        = /home/${USERNAME}/:/tmp/
 php_admin_value[upload_max_filesize] = 100M
 php_admin_value[post_max_size]       = 100M

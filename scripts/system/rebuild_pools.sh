@@ -23,6 +23,8 @@ sqlite3 "$PANEL_DB" "SELECT d.domain_name, h.username, COALESCE(NULLIF(d.php_ver
     FPM_SOCK="/run/php/php${PHP_VER}-fpm-${POOL_NAME}.sock"
     LOG_DIR="/home/${USERNAME}/${DOMAIN}/logs"
     TMP_DIR="/home/${USERNAME}/tmp"
+    SESS_DIR="/home/${USERNAME}/${DOMAIN}/tmp/sessions"
+    SESS_NAME="SESS$(printf '%s' "$DOMAIN" | sha256sum | cut -c1-12)"
     POOL_CONF="/etc/php/${PHP_VER}/fpm/pool.d/${POOL_NAME}.conf"
 
     if [ -f "$POOL_CONF" ]; then
@@ -38,8 +40,9 @@ sqlite3 "$PANEL_DB" "SELECT d.domain_name, h.username, COALESCE(NULLIF(d.php_ver
         continue
     fi
 
-    mkdir -p "$LOG_DIR" "$TMP_DIR"
-    chown "${USERNAME}:www-data" "$LOG_DIR" "$TMP_DIR" 2>/dev/null
+    mkdir -p "$LOG_DIR" "$TMP_DIR" "$SESS_DIR"
+    chown "${USERNAME}:www-data" "$LOG_DIR" "$TMP_DIR" "$SESS_DIR" 2>/dev/null
+    chmod 700 "$SESS_DIR" 2>/dev/null
 
     cat > "$POOL_CONF" << POOL
 [${POOL_NAME}]
@@ -60,7 +63,21 @@ pm.max_spare_servers = 3
 php_admin_value[error_log]           = ${LOG_DIR}/php_error.log
 php_admin_flag[log_errors]           = on
 php_admin_value[upload_tmp_dir]      = ${TMP_DIR}
-php_value[session.save_path]         = ${TMP_DIR}
+
+; Sessions are scoped PER DOMAIN, not per account. Sharing one store across an
+; account's domains meant a session (and its CSRF token) minted on any domain was
+; valid on every other domain the account owns — demonstrated across two separate
+; registrable domains. A low-value domain (staging, a legacy app with an XSS) then
+; becomes a foothold against the account's valuable ones.
+php_value[session.save_path]         = ${SESS_DIR}
+php_value[session.name]              = ${SESS_NAME}
+
+; PHP ships these empty, so every hosted site emitted a bare cookie.
+php_value[session.cookie_httponly]   = 1
+php_value[session.cookie_secure]     = 1
+php_value[session.cookie_samesite]   = Lax
+; Upstream default is 0, which lets a fabricated session id be adopted.
+php_value[session.use_strict_mode]   = 1
 php_admin_value[open_basedir]        = /home/${USERNAME}/:/tmp/
 php_admin_value[upload_max_filesize] = 100M
 php_admin_value[post_max_size]       = 100M

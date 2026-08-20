@@ -305,6 +305,56 @@ if (!is_dir('/var/lib/inetpanel/deleting')) {
     log_msg('Created deletion tombstone directory /var/lib/inetpanel/deleting');
 }
 
+// Per-site log rotation.
+// The vhost template writes ErrorLog/CustomLog into /home/<acct>/<domain>/logs/,
+// and nothing in /etc/logrotate.d/ matched /home — so hosted sites' logs grew
+// without bound (218 MB and 106 MB access logs seen on one audited host, never
+// rotated). They also default to 0644, and access logs capture full query
+// strings, so any app putting a token in a URL leaked it world-readable.
+// copytruncate because Apache holds these open and there is no per-site reload.
+$siteRotate = "/etc/logrotate.d/inetpanel-sites";
+file_put_contents($siteRotate, <<<'ROTATE'
+# Managed by iNetPanel — do not edit by hand.
+/home/*/*/logs/*.log {
+    weekly
+    rotate 8
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    su root www-data
+    create 0640 root www-data
+}
+ROTATE);
+chmod($siteRotate, 0644);
+log_msg('Installed per-site log rotation (/etc/logrotate.d/inetpanel-sites)');
+
+// Tighten existing per-site logs that were created world-readable.
+foreach (glob('/home/*/*/logs/*.log') ?: [] as $siteLog) {
+    if ((fileperms($siteLog) & 0o004) !== 0) { @chmod($siteLog, 0640); }
+}
+
+// Session reaper. Debian's sessionclean reads the SAPI php.ini only and never
+// parses pool.d/*.conf, so the panel's per-pool save_path is invisible to it —
+// one audited host reached 4.2 million session files. Batched deliberately: an
+// unbounded delete over that many files has stalled a container before.
+$sessCron = "/etc/cron.d/inetpanel_sessions";
+file_put_contents($sessCron, "# iNetPanel session reaper — auto-managed by panel_update.php\n"
+    . "17 * * * * root /root/scripts/session_reaper.sh >/dev/null 2>&1\n");
+chmod($sessCron, 0644);
+log_msg('Installed session reaper cron');
+
+// Refresh the Cloudflare trusted-proxy ranges weekly. If they go stale the real
+// client IP silently reverts to Cloudflare edge addresses.
+if (file_exists('/root/scripts/cf_remoteip.sh')) {
+    $cfCron = "/etc/cron.d/inetpanel_remoteip";
+    file_put_contents($cfCron, "# iNetPanel Cloudflare RemoteIP refresh — auto-managed by panel_update.php\n"
+        . "43 4 * * 1 root /root/scripts/cf_remoteip.sh >/dev/null 2>&1\n");
+    chmod($cfCron, 0644);
+    log_msg('Installed Cloudflare RemoteIP refresh cron');
+}
+
 // Install stats collector cron (every minute)
 $statsCron = "/etc/cron.d/inetpanel_stats";
 file_put_contents($statsCron, "# iNetPanel stats collector — auto-managed by panel_update.php\n* * * * * root /root/scripts/stats_collector.sh > /dev/null 2>&1\n");

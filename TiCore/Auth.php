@@ -5,6 +5,34 @@
 
 class Auth
 {
+
+    /**
+     * The real client IP, for logging and for the fail2ban jail.
+     *
+     * Behind Cloudflare Tunnel, REMOTE_ADDR is loopback for every request, and
+     * jail.local ignores loopback — so the inetpanel-auth jail recorded every
+     * failed login and could ban none of them. Other parts of the panel
+     * (src/firewall.php, src/restore.php) already resolved this correctly;
+     * Auth.php simply had not been updated to match.
+     *
+     * Order matters. X-Forwarded-For is APPENDED to by Cloudflare, so the
+     * left-most entry is caller-controlled — taking it lets an attacker forge
+     * any address. Take the RIGHT-most, which is the nearest trusted hop.
+     */
+    public static function clientIp(): string
+    {
+        $cf = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? '';
+        if ($cf !== '' && filter_var($cf, FILTER_VALIDATE_IP)) return $cf;
+
+        $xff = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
+        if ($xff !== '') {
+            $parts = array_map('trim', explode(',', $xff));
+            $last  = end($parts);
+            if ($last !== false && filter_var($last, FILTER_VALIDATE_IP)) return $last;
+        }
+        $ra = self::clientIp();
+        return filter_var($ra, FILTER_VALIDATE_IP) ? $ra : '0.0.0.0';
+    }
     private static bool $started = false;
 
     private static function startSession(): void
@@ -69,7 +97,7 @@ class Auth
                 DB::insert('logs', [
                     'source' => 'auth', 'level' => 'INFO',
                     'message' => "Admin login: {$username}",
-                    'user' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
+                    'user' => $username, 'ip_address' => self::clientIp(),
                 ]);
             } catch (\Throwable $e) { error_log('iNetPanel: auth log failed - ' . $e->getMessage()); }
             return true;
@@ -91,14 +119,14 @@ class Auth
                 DB::insert('logs', [
                     'source' => 'auth', 'level' => 'INFO',
                     'message' => "Panel user login: {$username} (role: " . ($panelUser['role'] ?? 'subadmin') . ")",
-                    'user' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
+                    'user' => $username, 'ip_address' => self::clientIp(),
                 ]);
             } catch (\Throwable $e) { error_log('iNetPanel: auth log failed - ' . $e->getMessage()); }
             return true;
         }
 
         // Log failed login for fail2ban (inetpanel-auth jail)
-        $clientIp = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+        $clientIp = self::clientIp();
         @file_put_contents(
             '/var/log/inetpanel_auth.log',
             date('Y-m-d H:i:s') . " {$clientIp} - LOGIN_FAILED user={$username}\n",
@@ -125,7 +153,7 @@ class Auth
             DB::insert('logs', [
                 'source' => 'auth', 'level' => 'INFO',
                 'message' => "Logout: {$username}",
-                'user' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
+                'user' => $username, 'ip_address' => self::clientIp(),
             ]);
         } catch (\Throwable $e) { error_log('iNetPanel: auth log failed - ' . $e->getMessage()); }
         $_SESSION = [];

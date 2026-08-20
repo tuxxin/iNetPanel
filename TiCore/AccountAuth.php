@@ -193,15 +193,38 @@ class AccountAuth
             exit;
         }
 
-        // Token-based signon: write credentials to temp file, redirect to signon.php with token
+        // Token-based signon: stage credentials for signon.php to pick up once.
+        //
+        // This file holds a plaintext database password, and on the admin route it
+        // is the MySQL ROOT password. It used to be written 0644 and never removed,
+        // so any local user — including every hosting tenant — could read it.
+        // Reported alongside GHSA-mjmx-xpqq-p2h8 (CWE-377 / CWE-312).
+        //
+        // Now: created 0600 before any content is written, owned by the web user,
+        // and stale files are swept so an interrupted hand-off cannot leave one
+        // behind. signon.php unlinks it on pickup.
         $token = bin2hex(random_bytes(32));
         $tokenFile = '/tmp/pma_signon_' . $token;
-        file_put_contents($tokenFile, json_encode([
+
+        // Sweep abandoned tokens (>5 min). Bounded: this directory holds few files.
+        foreach (glob('/tmp/pma_signon_*') ?: [] as $stale) {
+            if (@filemtime($stale) < time() - 300) { @unlink($stale); }
+        }
+
+        // Create with 0600 FIRST, then write — otherwise there is a window where
+        // the credentials exist at the default umask.
+        $fh = @fopen($tokenFile, 'x');
+        if ($fh === false) {
+            header("Location: {$pmaBase}/");
+            exit;
+        }
+        @chmod($tokenFile, 0600);
+        fwrite($fh, json_encode([
             'user'     => $username,
             'password' => $dbPass,
             'created'  => time(),
         ]));
-        chmod($tokenFile, 0644);
+        fclose($fh);
 
         header("Location: {$pmaBase}/signon.php?token=" . urlencode($token));
         exit;

@@ -32,6 +32,8 @@ class Shell
         'restore_account',
         'disk_cache_scan',
         'audit_orphans',
+        'cf_remoteip',
+        'session_reaper',
         'list',
     ];
 
