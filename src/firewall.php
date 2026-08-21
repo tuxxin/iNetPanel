@@ -250,7 +250,15 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
                 <span class="badge bg-secondary" id="qsa-tier-badge">free tier</span>
             </div>
             <div class="card-body p-0">
-                <pre id="qsa-output" style="margin:0;padding:16px;background:#0d1117;color:#c9d1d9;
+                <div class="alert alert-warning d-flex align-items-center m-3 d-none" id="qsa-repair-wrap">
+        <i class="fas fa-wrench me-2"></i>
+        <div class="flex-grow-1 small">
+            The panel can redeploy <code>/usr/local/bin/inetp</code> from the files it
+            already has. No download, no restart.
+        </div>
+        <button class="btn btn-sm btn-warning ms-2" id="qsa-repair-btn">Repair CLI</button>
+    </div>
+    <pre id="qsa-output" style="margin:0;padding:16px;background:#0d1117;color:#c9d1d9;
                      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
                      line-height:1.5;max-height:520px;overflow:auto;white-space:pre-wrap;
                      word-break:break-word;">Ready.</pre>
@@ -745,6 +753,11 @@ document.getElementById('qsa-run-btn').addEventListener('click', function () {
         .then(r => r.json())
         .then(d => {
             out.textContent = qsaClean(d.output) || 'No output returned.';
+            // Only offer the repair when the API confirmed the panel's own copy
+            // of inetp is current — otherwise redeploying just copies the same
+            // stale file and looks like the repair silently did nothing.
+            document.getElementById('qsa-repair-wrap')
+                    .classList.toggle('d-none', !d.repairable);
             document.getElementById('qsa-tier-badge').textContent =
                 (d.tier === 'token' ? 'token tier' : 'free tier');
             if (d.rate_limited) {
@@ -760,6 +773,24 @@ document.getElementById('qsa-run-btn').addEventListener('click', function () {
             btn.innerHTML = '<i class="fas fa-radar me-1"></i> Run scan';
             qsaLoadSettings();
         });
+});
+
+document.getElementById('qsa-repair-btn').addEventListener('click', function () {
+    const btn = this, out = document.getElementById('qsa-output');
+    btn.disabled = true; btn.textContent = 'Repairing…';
+    const fd = new FormData();
+    fd.append('action', 'qsa_repair_cli');
+    fetch('/api/firewall', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(d => {
+            showFwToast(d.message, d.success ? 'success' : 'danger');
+            if (d.log) { out.textContent += '\n\n--- redeploy log ---\n' + d.log; }
+            if (d.success) {
+                document.getElementById('qsa-repair-wrap').classList.add('d-none');
+            }
+        })
+        .catch(() => showFwToast('Repair request failed.', 'danger'))
+        .finally(() => { btn.disabled = false; btn.textContent = 'Repair CLI'; });
 });
 
 document.getElementById('qsa-save-btn').addEventListener('click', function () {

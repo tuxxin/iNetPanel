@@ -337,16 +337,36 @@ switch ($action) {
         // the terminal pane and looks like the scan "worked". Detect it and say
         // what is actually wrong instead.
         if (preg_match('/^\s*inetp\s+[-—]\s+Server Account Manager|Usage:\s*inetp\s+<command>/mi', $out)) {
+            // Two different faults produce identical symptoms, and they need
+            // opposite fixes, so distinguish them instead of guessing. The
+            // deploy step copies PANEL_PATH/scripts/system/inetp over
+            // /usr/local/bin/inetp — so compare the two directly.
+            $src     = '/var/www/inetpanel/scripts/system/inetp';
+            $srcHas  = is_readable($src)
+                       && strpos((string) file_get_contents($src), 'qsa_scan)') !== false;
+
+            if ($srcHas) {
+                $msg = "This server's inetp command is out of date.\n\n"
+                     . "The panel files are current — /var/www/inetpanel/scripts/system/inetp\n"
+                     . "does support qsa_scan — but the copy of it at /usr/local/bin/inetp was\n"
+                     . "never replaced, so the scan request fell through to the usage text you\n"
+                     . "would otherwise be reading here.\n\n"
+                     . "Use \"Repair CLI\" below to re-run just the file-deployment step.";
+                $repair = true;
+            } else {
+                $msg = "This server's panel files are older than they appear.\n\n"
+                     . "/var/www/inetpanel/scripts/system/inetp has no qsa_scan support, so the\n"
+                     . "update that added this feature has not fully landed. Repairing the CLI\n"
+                     . "would only redeploy the same old file.\n\n"
+                     . "Run a full update first:\n"
+                     . "    sudo php /var/www/inetpanel/scripts/panel_update.php --force";
+                $repair = false;
+            }
             echo json_encode([
-                'success' => false,
+                'success'   => false,
                 'stale_cli' => true,
-                'output'  => "This server's inetp command is out of date and does not support qsa_scan.\n\n"
-                           . "The panel files updated but /usr/local/bin/inetp did not, so the scan\n"
-                           . "request fell through to the usage text you would otherwise see here.\n\n"
-                           . "Fix it by re-running the panel update:\n"
-                           . "    sudo php /var/www/inetpanel/scripts/panel_update.php --force\n\n"
-                           . "Then check /var/log/inetpanel_update.log for the line\n"
-                           . "    Deployed inetp command to /usr/local/bin/inetp",
+                'repairable'=> $repair,
+                'output'    => $msg,
             ]);
             break;
         }
@@ -437,6 +457,33 @@ switch ($action) {
         }
         @unlink($tmp);
         echo json_encode(['success' => true, 'monitor' => $monitor && file_exists($cron)]);
+        break;
+
+    case 'qsa_repair_cli':
+        // Re-runs only the deployment phase of panel_update.php — no download,
+        // no rsync, no migrations. Already covered by the existing sudoers
+        // grant for panel_update.php, so this adds no new privilege.
+        @set_time_limit(300);
+        // Mirror api/settings.php's update action exactly. Do NOT use PHP_BINARY:
+        // under FPM that resolves to /usr/sbin/php-fpm8.x, which does not match
+        // the sudoers rule (/usr/bin/php* ... panel_update.php *) and the repair
+        // would be denied. A bare "php8.5" lets sudo resolve it via PATH to
+        // /usr/bin/php8.5, which does match.
+        $phpBin = 'php' . DB::setting('php_default_version', '8.5');
+        if (!preg_match('/^php\d+\.\d+$/', $phpBin)) {
+            $phpBin = 'php';
+        }
+        $r = Shell::exec('sudo ' . escapeshellarg($phpBin)
+             . ' /var/www/inetpanel/scripts/panel_update.php --deploy-only', 'qsa-repair-cli');
+        $now = shell_exec('/usr/local/bin/inetp 2>&1');
+        $fixed = strpos((string) $now, 'qsa_scan') !== false;
+        echo json_encode([
+            'success' => $fixed,
+            'message' => $fixed
+                ? 'CLI redeployed — run the scan again.'
+                : 'Redeploy ran but the CLI still lacks qsa_scan. Check /var/log/inetpanel_update.log.',
+            'log'     => implode("\n", array_slice(explode("\n", trim((string) $r['output'])), -8)),
+        ]);
         break;
 
     case 'qsa_webhook_test':

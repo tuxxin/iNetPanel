@@ -47,6 +47,18 @@ $currentVersion = class_exists('Version') ? Version::get() : '0.000';
 $updateChannel  = class_exists('DB') ? (DB::setting('update_channel', 'stable') ?? 'stable') : 'stable';
 log_msg("iNetPanel update check — current version: {$currentVersion}, channel: {$updateChannel}");
 
+// --deploy-only re-runs just the file-deployment phase below, skipping the
+// download and rsync. This exists because the fix for a failed inetp deploy
+// ships *inside this script*: the update that delivers it is still executing
+// the old, broken copy logic, so one more pass with the new code is needed to
+// actually repair the CLI. It is also the cheap way to recover any box whose
+// /usr/local/bin/inetp fell behind for any other reason.
+$deployOnly = in_array('--deploy-only', $argv ?? [], true);
+if ($deployOnly) {
+    log_msg('Deploy-only mode — skipping download, re-deploying system files.');
+    $latestTag = $currentVersion;
+} else {
+
 // Fetch latest release info from GitHub
 $ghHeaders = class_exists('Version') ? Version::githubHeaders() : ['User-Agent: iNetPanel/' . $currentVersion];
 
@@ -241,6 +253,8 @@ if (is_dir($migrationsDir) && class_exists('DB')) {
     }
 }
 
+} // end download/apply phase (skipped by --deploy-only)
+
 // Write new version into Version.php constant
 $versionFile = PANEL_PATH . '/TiCore/Version.php';
 if (file_exists($versionFile)) {
@@ -285,6 +299,9 @@ if (file_exists($inetpSrc)) {
     $tmpInetp = '/usr/local/bin/.inetp.new';
     if (copy($inetpSrc, $tmpInetp) && chmod($tmpInetp, 0755) && rename($tmpInetp, '/usr/local/bin/inetp')) {
         log_msg('Deployed inetp command to /usr/local/bin/inetp');
+        if (class_exists('DB')) {
+            try { DB::saveSetting('cli_deployed_ver', $latestTag); } catch (Throwable) {}
+        }
     } else {
         @unlink($tmpInetp);
         log_msg('ERROR: Failed to deploy inetp to /usr/local/bin/inetp — '
@@ -741,5 +758,7 @@ POOL;
 @unlink(TMP_ZIP);
 shell_exec('rm -rf ' . escapeshellarg(TMP_DIR));
 
-log_msg("Update complete! Panel is now version {$latestTag}.");
+log_msg($deployOnly
+    ? 'Deploy-only pass complete.'
+    : "Update complete! Panel is now version {$latestTag}.");
 exit(0);
