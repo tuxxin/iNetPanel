@@ -30,7 +30,7 @@ class Auth
             $last  = end($parts);
             if ($last !== false && filter_var($last, FILTER_VALIDATE_IP)) return $last;
         }
-        $ra = self::clientIp();
+        $ra = $_SERVER['REMOTE_ADDR'] ?? '';
         return filter_var($ra, FILTER_VALIDATE_IP) ? $ra : '0.0.0.0';
     }
     private static bool $started = false;
