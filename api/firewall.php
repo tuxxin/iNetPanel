@@ -302,6 +302,93 @@ switch ($action) {
         break;
 
     // -------------------------------------------------------------------------
+    // ===================== qsa.sh exposure scan =====================
+    // qsa.sh scans the public IP that calls it, so running it from this server
+    // shows what the internet actually sees of this box — a different question
+    // from what firewalld was told to open. A port exposed by a container or
+    // upstream of this host only shows up here.
+    case 'qsa_scan':
+        // The free tier takes ~30s and paid tiers minutes, so give PHP room. The
+        // script enforces its own per-tier curl deadline; this is just the outer
+        // bound so a hung request cannot pin an FPM worker indefinitely.
+        @set_time_limit(1260);
+        $r = Shell::run('qsa_scan', ['--quiet']);
+        $out = $r['output'] ?? '';
+
+        // Rate limiting is the common case on the free tier (1 scan / 24h), so
+        // surface qsa.sh's own wording rather than a generic failure.
+        $limited = (bool) preg_match('/daily scan allowance|rate.?limit|try again in/i', $out);
+        echo json_encode([
+            'success'      => $r['success'] || $limited,
+            'rate_limited' => $limited,
+            'output'       => $out,
+            'tier'         => DB::setting('qsa_token', '') !== '' ? 'token' : 'free',
+        ]);
+        break;
+
+    case 'qsa_settings_get':
+        $cron = '/etc/cron.d/inetpanel_qsa_monitor';
+        echo json_encode([
+            'success'      => true,
+            // Never return the token itself — only whether one is set.
+            'has_token'    => DB::setting('qsa_token', '') !== '',
+            'monitor'      => file_exists($cron),
+            'schedule'     => DB::setting('qsa_monitor_schedule', 'daily'),
+            'last_run'     => DB::setting('qsa_last_run', ''),
+            'last_change'  => DB::setting('qsa_last_change', ''),
+        ]);
+        break;
+
+    case 'qsa_settings_save':
+        $token    = trim($_POST['qsa_token'] ?? '');
+        $monitor  = ($_POST['monitor'] ?? '0') === '1';
+        $schedule = in_array($_POST['schedule'] ?? 'daily', ['hourly', 'daily', 'weekly'], true)
+                  ? $_POST['schedule'] : 'daily';
+
+        // An empty field means "leave as-is", so a saved token is not wiped by
+        // saving the form back with the masked placeholder still in it.
+        if ($token !== '' && $token !== '********') {
+            if (!preg_match('/^[A-Za-z0-9._-]{8,128}$/', $token)) {
+                echo json_encode(['success' => false, 'error' => 'That does not look like a qsa.sh token.']);
+                break;
+            }
+            DB::saveSetting('qsa_token', $token);
+        }
+        DB::saveSetting('qsa_monitor_schedule', $schedule);
+
+        // The diff checker is just a cron entry around `qsa_scan --monitor`.
+        // Free tier is 1 scan/24h, so refuse a schedule the tier cannot sustain —
+        // otherwise every run 429s and the monitor silently never has a baseline.
+        $hasToken = DB::setting('qsa_token', '') !== '';
+        if ($monitor && $schedule === 'hourly' && !$hasToken) {
+            echo json_encode(['success' => false,
+                'error' => 'Hourly monitoring needs a qsa.sh token — the free tier allows one scan per 24h.']);
+            break;
+        }
+        $spec = ['hourly' => '17 * * * *', 'daily' => '17 4 * * *', 'weekly' => '17 4 * * 1'][$schedule];
+        $cron = '/etc/cron.d/inetpanel_qsa_monitor';
+        $tmp  = tempnam('/tmp', 'inetp_cron_');
+        if ($monitor) {
+            file_put_contents($tmp,
+                "# iNetPanel qsa.sh exposure monitor — auto-managed by the Firewall page\n"
+              . "{$spec} root /root/scripts/qsa_scan.sh --monitor --quiet >> /var/log/qsa-monitor.log 2>&1\n");
+            Shell::exec('sudo /root/scripts/manage_cron.sh write inetpanel_qsa_monitor < ' . escapeshellarg($tmp), 'qsa-cron-write');
+        } else {
+            Shell::exec('sudo /root/scripts/manage_cron.sh remove inetpanel_qsa_monitor', 'qsa-cron-remove');
+        }
+        @unlink($tmp);
+        echo json_encode(['success' => true, 'monitor' => $monitor && file_exists($cron)]);
+        break;
+
+    case 'qsa_diff':
+        $r = Shell::run('qsa_scan', ['--diff']);
+        echo json_encode([
+            'success' => true,
+            'diff'    => $r['output'] ?? '',
+            'has_history' => $r['success'],
+        ]);
+        break;
+
     case 'set_ssh_port':
         $port = (int)($_POST['port'] ?? 0);
         if ($port < 1 || $port > 65535) {

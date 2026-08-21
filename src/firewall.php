@@ -66,6 +66,7 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
     <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab-firewalld">Firewalld</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-fail2ban">Fail2Ban</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-whitelist">Whitelist</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-qsa">Exposure Scan</a></li>
 </ul>
 
 <div class="tab-content mt-3">
@@ -201,6 +202,158 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
                 <p class="text-muted small mt-2 mb-0"><i class="fas fa-info-circle me-1"></i>Your IP: <code><?= htmlspecialchars($clientIp) ?></code></p>
                 <?php endif; ?>
                 <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== Exposure Scan (qsa.sh) ===================== -->
+    <div class="tab-pane fade" id="tab-qsa">
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                    <div>
+                        <h5 class="mb-1">External exposure scan</h5>
+                        <p class="text-muted small mb-0" style="max-width:60ch;">
+                            Everything else on this page describes what the firewall was
+                            <em>told</em> to do. This scans your public IP from the outside
+                            and reports what the internet can actually reach — including
+                            anything exposed by a container or upstream of this server.
+                            Powered by <a href="https://qsa.sh" target="_blank" rel="noopener">qsa.sh</a>.
+                        </p>
+                    </div>
+                    <button class="btn btn-success" id="qsa-run-btn">
+                        <i class="fas fa-radar me-1"></i> Run scan
+                    </button>
+                </div>
+
+                <div class="alert alert-warning mt-3 mb-0 small" id="qsa-consent">
+                    <strong>This performs a real external port and vulnerability scan</strong>
+                    of <code id="qsa-target">this server's public IP</code>.
+                    By running it you confirm you are authorised to scan that address.
+                    See <a href="https://qsa.sh/terms" target="_blank" rel="noopener">qsa.sh/terms</a>.
+                </div>
+            </div>
+        </div>
+
+        <!-- Terminal-style output. qsa.sh is a CLI tool first; showing its real
+             output rather than reformatting it keeps the result verifiable against
+             running `curl qsa.sh` by hand. -->
+        <div class="card border-0 shadow-sm mb-3 d-none" id="qsa-output-card">
+            <div class="card-header d-flex justify-content-between align-items-center py-2"
+                 style="background:#0d1117;border-bottom:1px solid #30363d;">
+                <span class="small" style="color:#8b949e;font-family:ui-monospace,monospace;">
+                    <span style="color:#ff5f56;">&#9679;</span>
+                    <span style="color:#ffbd2e;">&#9679;</span>
+                    <span style="color:#27c93f;">&#9679;</span>
+                    &nbsp; curl qsa.sh
+                </span>
+                <span class="badge bg-secondary" id="qsa-tier-badge">free tier</span>
+            </div>
+            <div class="card-body p-0">
+                <pre id="qsa-output" style="margin:0;padding:16px;background:#0d1117;color:#c9d1d9;
+                     font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+                     line-height:1.5;max-height:520px;overflow:auto;white-space:pre-wrap;
+                     word-break:break-word;">Ready.</pre>
+            </div>
+        </div>
+
+        <!-- Change monitoring -->
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body">
+                <h6 class="mb-1">Change monitoring</h6>
+                <p class="text-muted small">
+                    Re-scans on a schedule and compares against the previous result,
+                    ignoring volatile detail like scan duration and certificate expiry
+                    dates. You are alerted only when your actual exposure changes — a
+                    new open port, a service version change, a new finding.
+                </p>
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="qsa-monitor">
+                            <label class="form-check-label fw-semibold" for="qsa-monitor">Enable change monitoring</label>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small fw-semibold">Frequency</label>
+                        <select class="form-select form-select-sm" id="qsa-schedule">
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="hourly">Hourly (needs a token)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <button class="btn btn-primary btn-sm w-100" id="qsa-save-btn">Save monitoring settings</button>
+                    </div>
+                </div>
+                <div class="small text-muted mt-2" id="qsa-monitor-state">—</div>
+                <div class="mt-3 d-none" id="qsa-diff-wrap">
+                    <label class="form-label small fw-semibold">Last detected change</label>
+                    <pre id="qsa-diff" style="background:#0d1117;color:#c9d1d9;padding:12px;border-radius:6px;
+                         font-family:ui-monospace,monospace;font-size:12px;max-height:300px;overflow:auto;"></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Token -->
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body">
+                <h6 class="mb-1">qsa.sh token <span class="text-muted fw-normal small">(optional)</span></h6>
+                <p class="text-muted small mb-2">
+                    Without a token you get the free tier: the top 1,000 TCP ports and one
+                    scan per 24 hours. A token unlocks all 65,535 ports and more frequent scans.
+                </p>
+                <div class="input-group input-group-sm" style="max-width:520px;">
+                    <input type="password" class="form-control" id="qsa-token" placeholder="Paste your qsa.sh token">
+                    <button class="btn btn-outline-secondary" id="qsa-token-save">Save token</button>
+                </div>
+                <div class="small text-muted mt-1" id="qsa-token-state">No token set — using the free tier.</div>
+            </div>
+        </div>
+
+        <!-- Upsell -->
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h6 class="mb-3">Scan depth</h6>
+                <div class="table-responsive">
+                <table class="table table-sm align-middle mb-2" style="font-size:.875rem;">
+                    <thead>
+                        <tr>
+                            <th style="width:22%"></th>
+                            <th>Free<div class="small text-muted fw-normal">$0 · see what the internet sees</div></th>
+                            <th>Full <span class="badge bg-success">Pro</span><div class="small text-muted fw-normal">$5/mo · complete surface coverage</div></th>
+                            <th>Deep<div class="small text-muted fw-normal">$7/scan · uncovers what the surface hides</div></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        $qsaRows = [
+                            ['Scans / IP',        '1 / 24h',              '1 / hour',                    'Unlimited'],
+                            ['Ports (naabu)',     'Top 1,000 TCP',        'All 65,535 TCP',              'All 65,535 TCP'],
+                            ['Vuln checks',       '~2,000 curated',       '~2,000 curated, all ports',   '~10,500 full set + custom'],
+                            ['Findings',          'Ports, versions & top 3', 'Full list + remediation',  'Full list + remediation, emailed'],
+                            ['Typical time',      '~30 seconds',          '~2–12 minutes',               '~13–16 minutes'],
+                            ['Data retention',    'Nothing stored',       'Single-read or 24h Redis · no DB', 'Emailed · single-read or 24h Redis · no DB'],
+                        ];
+                        foreach ($qsaRows as [$label, $free, $full, $deep]): ?>
+                        <tr>
+                            <td class="text-muted"><?= htmlspecialchars($label) ?></td>
+                            <td><?= htmlspecialchars($free) ?></td>
+                            <td><?= htmlspecialchars($full) ?></td>
+                            <td><?= htmlspecialchars($deep) ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <a href="https://qsa.sh/pay?tier=full" target="_blank" rel="noopener" class="btn btn-success btn-sm">Subscribe to Full &rarr;</a>
+                    <a href="https://qsa.sh/pay?tier=deep" target="_blank" rel="noopener" class="btn btn-outline-success btn-sm">Buy a Deep scan &rarr;</a>
+                    <a href="https://qsa.sh/pricing" target="_blank" rel="noopener" class="btn btn-link btn-sm text-muted">Compare tiers</a>
+                </div>
+                <p class="text-muted mt-2 mb-0" style="font-size:.75rem;">
+                    All tiers run naabu, nmap + vulners and nuclei. qsa.sh is a Tuxxin service.
+                </p>
             </div>
         </div>
     </div>
@@ -451,4 +604,114 @@ function fwAutoConfigure() {
 }
 
 document.addEventListener('DOMContentLoaded', loadFirewallStatus);
+
+/* ===================== Exposure Scan (qsa.sh) ===================== */
+
+/* The free scan streams a 15-second authorisation countdown before it starts,
+   which is meaningful in a terminal and pure noise in a browser. Strip those
+   frames but keep everything else verbatim, so what is shown here matches what
+   `curl qsa.sh` prints. */
+function qsaClean(t) {
+    return (t || '')
+        .split('\n')
+        .filter(l => !/Starting scan of .* in \d+s/.test(l))
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function qsaLoadSettings() {
+    fetch('/api/firewall?action=qsa_settings_get')
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) return;
+            document.getElementById('qsa-monitor').checked = !!d.monitor;
+            document.getElementById('qsa-schedule').value  = d.schedule || 'daily';
+            document.getElementById('qsa-tier-badge').textContent = d.has_token ? 'token tier' : 'free tier';
+            document.getElementById('qsa-token-state').textContent = d.has_token
+                ? 'Token saved — all 65,535 ports available.'
+                : 'No token set — using the free tier.';
+            let st = d.monitor ? 'Monitoring is on.' : 'Monitoring is off.';
+            if (d.last_run)    st += ' Last run: ' + d.last_run + '.';
+            if (d.last_change) st += ' Last change detected: ' + d.last_change + '.';
+            document.getElementById('qsa-monitor-state').textContent = st;
+            if (d.last_change) qsaLoadDiff();
+        });
+}
+
+function qsaLoadDiff() {
+    fetch('/api/firewall?action=qsa_diff')
+        .then(r => r.json())
+        .then(d => {
+            if (d.diff && d.diff.trim() !== '') {
+                document.getElementById('qsa-diff').textContent = d.diff;
+                document.getElementById('qsa-diff-wrap').classList.remove('d-none');
+            }
+        });
+}
+
+document.getElementById('qsa-run-btn').addEventListener('click', function () {
+    const btn = this;
+    const card = document.getElementById('qsa-output-card');
+    const out  = document.getElementById('qsa-output');
+    card.classList.remove('d-none');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Scanning…';
+    out.textContent = 'Contacting qsa.sh…\n\nThe free tier takes about 30 seconds, plus a 15-second\nauthorisation countdown before the scan begins.\nA token scan can take several minutes.';
+
+    const fd = new FormData();
+    fd.append('action', 'qsa_scan');
+    fetch('/api/firewall', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(d => {
+            out.textContent = qsaClean(d.output) || 'No output returned.';
+            document.getElementById('qsa-tier-badge').textContent =
+                (d.tier === 'token' ? 'token tier' : 'free tier');
+            if (d.rate_limited) {
+                /* Expected on the free tier rather than an error — say so plainly
+                   instead of showing a failure the user cannot act on. */
+                out.textContent += '\n\n— Free tier allows one scan per 24 hours. '
+                                 + 'A token raises this to hourly (Full) or unlimited (Deep).';
+            }
+        })
+        .catch(e => { out.textContent = 'Request failed: ' + e; })
+        .finally(() => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-radar me-1"></i> Run scan';
+            qsaLoadSettings();
+        });
+});
+
+document.getElementById('qsa-save-btn').addEventListener('click', function () {
+    const fd = new FormData();
+    fd.append('action', 'qsa_settings_save');
+    fd.append('monitor',  document.getElementById('qsa-monitor').checked ? '1' : '0');
+    fd.append('schedule', document.getElementById('qsa-schedule').value);
+    fetch('/api/firewall', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(d => {
+            showFwToast(d.success ? 'Monitoring settings saved.' : (d.error || 'Could not save.'), d.success ? 'success' : 'danger');
+            qsaLoadSettings();
+        });
+});
+
+document.getElementById('qsa-token-save').addEventListener('click', function () {
+    const el = document.getElementById('qsa-token');
+    if (!el.value.trim()) { showFwToast('Enter a token first.', 'danger'); return; }
+    const fd = new FormData();
+    fd.append('action', 'qsa_settings_save');
+    fd.append('qsa_token', el.value.trim());
+    fd.append('monitor',  document.getElementById('qsa-monitor').checked ? '1' : '0');
+    fd.append('schedule', document.getElementById('qsa-schedule').value);
+    fetch('/api/firewall', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(d => {
+            showFwToast(d.success ? 'Token saved.' : (d.error || 'Could not save the token.'), d.success ? 'success' : 'danger');
+            el.value = '';
+            qsaLoadSettings();
+        });
+});
+
+qsaLoadSettings();
+
 </script>

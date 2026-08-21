@@ -34,6 +34,7 @@ class Shell
         'audit_orphans',
         'cf_remoteip',
         'session_reaper',
+        'qsa_scan',
         'list',
     ];
 
