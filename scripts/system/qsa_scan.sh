@@ -77,10 +77,29 @@ run_scan() {
     # it falls through to BROWSER — and browsers get the marketing page, not a
     # scan. That is not a hypothetical: it is what this integration did first.
     # X-QSA-Scan: 1 is kept as the documented belt-and-braces opt-in.
-    curl -sS --fail-with-body --max-time "$MAXTIME" \
+    # -4 is required, not a preference. qsa.sh is dual-stack behind Cloudflare, and
+    # curl follows RFC 6724 and prefers the AAAA record on any host with working
+    # IPv6. qsa.sh scans the origin it sees, cannot yet reputation-check IPv6
+    # origins, and rejects such requests with HTTP 400. Without -4 the scan works
+    # on IPv4-only hosts and fails on every dual-stack one.
+    local out rc
+    out=$(curl -4 -sS --fail-with-body --max-time "$MAXTIME" \
         -H 'X-QSA-Scan: 1' \
         -H 'Accept: text/plain' \
-        "$URL" 2>&1
+        "$URL" 2>&1)
+    rc=$?
+
+    # curl exit 6/7 with -4 on a host with no IPv4 route at all. qsa.sh cannot
+    # scan IPv6-only hosts yet, so say that rather than surfacing a DNS error.
+    if [ "$rc" -ne 0 ] && [ -z "${out//[[:space:]]/}" ]; then
+        if ! ip -4 route get 1.1.1.1 >/dev/null 2>&1; then
+            echo "This server has no IPv4 address. qsa.sh cannot scan IPv6-only hosts yet"
+            echo "(see https://qsa.sh/contact)."
+            return 1
+        fi
+    fi
+    printf '%s\n' "$out"
+    return "$rc"
 }
 
 # Strip everything that legitimately differs between two identical scans, so the

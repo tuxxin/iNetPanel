@@ -26,6 +26,81 @@ function abort(string $msg, int $code = 1): never
     exit($code);
 }
 
+/**
+ * Install a file to a root-owned location, working around systemd sandboxing.
+ *
+ * Debian's php-fpm unit ships ProtectSystem=yes, which mounts /usr read-only in
+ * a mount namespace. That namespace is inherited by every child process, and
+ * sudo raises privilege but does NOT escape it — so when an update is triggered
+ * from the panel button, root itself gets EROFS writing /usr/local/bin/inetp
+ * while /etc and /root succeed normally. The same update run from cron or a
+ * root shell works, which is why this only ever bit UI-triggered updates.
+ *
+ * systemd-run asks PID 1 to spawn the command, and PID 1 lives in the host
+ * namespace, so the write lands. panel_update.php is already root here, so this
+ * grants no privilege it did not already have and needs no sudoers entry.
+ *
+ * @return array{ok: bool, how: string, error: string}
+ */
+function install_root_file(string $src, string $dst, int $mode): array
+{
+    $tmp = $dst . '.inetp-new';
+
+    // Fast path: a direct write, which is what cron and a root shell get.
+    if (@copy($src, $tmp) && @chmod($tmp, $mode) && @rename($tmp, $dst)) {
+        return ['ok' => true, 'how' => 'direct', 'error' => ''];
+    }
+    @unlink($tmp);
+
+    // Only worth the fallback when the destination really is on a read-only
+    // mount; anything else (missing source, full disk) should surface as-is.
+    $roFs = !is_writable(dirname($dst));
+    if (!$roFs) {
+        $e = error_get_last();
+        return ['ok' => false, 'how' => 'direct', 'error' => $e['message'] ?? 'copy/rename failed'];
+    }
+
+    $systemdRun = null;
+    foreach (['/usr/bin/systemd-run', '/bin/systemd-run'] as $cand) {
+        if (@is_executable($cand)) { $systemdRun = $cand; break; }
+    }
+    if ($systemdRun === null) {
+        return ['ok' => false, 'how' => 'none',
+                'error' => dirname($dst) . ' is read-only (systemd ProtectSystem) and systemd-run is unavailable'];
+    }
+
+    $inner = sprintf('cp -f %s %s && chmod %o %s && mv -f %s %s',
+        escapeshellarg($src), escapeshellarg($tmp),
+        $mode, escapeshellarg($tmp),
+        escapeshellarg($tmp), escapeshellarg($dst));
+
+    $cmd = escapeshellarg($systemdRun) . ' --quiet --collect --wait --service-type=oneshot '
+         . '/bin/sh -c ' . escapeshellarg($inner) . ' 2>&1';
+
+    $out = []; $rc = 0;
+    exec($cmd, $out, $rc);
+    if ($rc === 0 && @is_file($dst)) {
+        return ['ok' => true, 'how' => 'systemd-run', 'error' => ''];
+    }
+    return ['ok' => false, 'how' => 'systemd-run', 'error' => trim(implode(' ', $out)) ?: "exit {$rc}"];
+}
+
+/**
+ * Same as install_root_file() but for generated content rather than a file.
+ * Stages inside PANEL_PATH, which is always shared with the host namespace —
+ * /tmp is not, if the unit ever gains PrivateTmp=yes.
+ */
+function write_root_file(string $dst, string $content, int $mode): array
+{
+    $stage = PANEL_PATH . '/db/.deploy-stage-' . basename($dst);
+    if (@file_put_contents($stage, $content) === false) {
+        return ['ok' => false, 'how' => 'stage', 'error' => "could not stage {$stage}"];
+    }
+    $r = install_root_file($stage, $dst, $mode);
+    @unlink($stage);
+    return $r;
+}
+
 // Load TiCore classes to access DB and Version
 $ticore = PANEL_PATH . '/TiCore';
 foreach (['Config.php', 'Router.php', 'DB.php', 'Auth.php', 'Shell.php',
@@ -276,14 +351,24 @@ if ($systemScripts) {
     if (!is_dir($scriptDest)) {
         mkdir($scriptDest, 0755, true);
     }
+    $okCount = 0; $failed = [];
     foreach ($systemScripts as $script) {
         $dest = $scriptDest . '/' . basename($script);
-        if (!copy($script, $dest)) {
-            log_msg("ERROR: Failed to copy {$script} → {$dest}");
+        if (@copy($script, $dest)) {
+            @chmod($dest, 0755);
+            $okCount++;
+        } else {
+            $failed[] = basename($script);
         }
-        chmod($dest, 0755);
     }
-    log_msg('Deployed ' . count($systemScripts) . ' system script(s) to ' . $scriptDest . '/');
+    // This count used to be logged unconditionally, so a deploy in which every
+    // single copy failed still reported "Deployed 51 system script(s)". That is
+    // what made the /usr read-only failure invisible for so long: the only
+    // honest line in the whole phase was the inetp one.
+    log_msg("Deployed {$okCount}/" . count($systemScripts) . ' system script(s) to ' . $scriptDest . '/');
+    if ($failed) {
+        log_msg('ERROR: Failed to deploy ' . count($failed) . ' script(s): ' . implode(', ', $failed));
+    }
 }
 
 // Deploy inetp command wrapper to /usr/local/bin/
@@ -296,16 +381,16 @@ if (file_exists($inetpSrc)) {
     // new features: every new subcommand falls through to the usage text.
     // Write to a temp file in the same directory and rename over the target,
     // which is atomic and unaffected by the old binary being in use.
-    $tmpInetp = '/usr/local/bin/.inetp.new';
-    if (copy($inetpSrc, $tmpInetp) && chmod($tmpInetp, 0755) && rename($tmpInetp, '/usr/local/bin/inetp')) {
-        log_msg('Deployed inetp command to /usr/local/bin/inetp');
+    $res = install_root_file($inetpSrc, '/usr/local/bin/inetp', 0755);
+    if ($res['ok']) {
+        log_msg('Deployed inetp command to /usr/local/bin/inetp'
+              . ($res['how'] === 'systemd-run' ? ' (via systemd-run: /usr is read-only in this context)' : ''));
         if (class_exists('DB')) {
             try { DB::saveSetting('cli_deployed_ver', $latestTag); } catch (Throwable) {}
         }
     } else {
-        @unlink($tmpInetp);
-        log_msg('ERROR: Failed to deploy inetp to /usr/local/bin/inetp — '
-              . 'the CLI and any new panel features that call it will not work.');
+        log_msg('ERROR: Failed to deploy inetp to /usr/local/bin/inetp — ' . $res['error']
+              . ' | The CLI and any panel feature that calls it will not work.');
     }
 }
 
@@ -510,9 +595,15 @@ button:hover{background:#e06f00;}</style></head>
 <button type="submit">Log In</button>
 </form></div></body></html>
 SIGNON;
-    file_put_contents("{$pmaDir}/signon.php", $signonPhp);
-    chmod("{$pmaDir}/signon.php", 0644);
-    log_msg('Deployed phpMyAdmin signon.php');
+    // Also under /usr, so it hits the same read-only mount, and its success was
+    // logged unconditionally regardless of whether the write landed.
+    $sres = write_root_file("{$pmaDir}/signon.php", $signonPhp, 0644);
+    if ($sres['ok']) {
+        log_msg('Deployed phpMyAdmin signon.php'
+              . ($sres['how'] === 'systemd-run' ? ' (via systemd-run)' : ''));
+    } else {
+        log_msg('ERROR: Failed to deploy phpMyAdmin signon.php — ' . $sres['error']);
+    }
 
     // Patch config for signon auth if still using cookie
     $pmaConfig = '/etc/phpmyadmin/config.inc.php';
