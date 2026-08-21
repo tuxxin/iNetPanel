@@ -91,6 +91,14 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 - Automatic Let's Encrypt SSL via DNS-01 challenge
 - WireGuard VPN with auto-provisioned peers and full server lockdown option
 - Firewall management (firewalld + fail2ban) from the panel
+- **External exposure scanning** via [qsa.sh](https://qsa.sh/) — scan your public IP from
+  outside your own network, straight from the Firewall page or the CLI. Reports open TCP
+  ports, service versions, CVE matches and high-signal exposure checks, so you see what an
+  attacker reaches rather than what the server believes about itself. The last 30 runs are
+  kept on the server.
+- **Exposure change monitoring** — scheduled re-scans that report only genuine changes (a
+  new open port, a changed service version, a new finding). Alerts surface in the panel
+  header and can be delivered to a Discord or Slack webhook — no mail server required.
 - [Security details →](https://inetpanel.info/features)
 
 ### Cloudflare Integration
@@ -142,6 +150,7 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 | Panel database | SQLite | — |
 | Site databases | MariaDB (localhost) | 3306 |
 | VPN | WireGuard | 1443/UDP |
+| External scanning | [qsa.sh](https://qsa.sh/) (outbound HTTPS) | — |
 
 ---
 
