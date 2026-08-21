@@ -275,11 +275,21 @@ if ($systemScripts) {
 // Deploy inetp command wrapper to /usr/local/bin/
 $inetpSrc = PANEL_PATH . '/scripts/system/inetp';
 if (file_exists($inetpSrc)) {
-    if (!copy($inetpSrc, '/usr/local/bin/inetp')) {
-        log_msg('ERROR: Failed to copy inetp command to /usr/local/bin/inetp');
+    // copy() onto a running executable can fail with ETXTBSY, and the success
+    // message used to be logged unconditionally — so a FAILED copy logged an
+    // ERROR and then "Deployed inetp command" right after it. That is how a
+    // server ends up silently running an old dispatcher while the panel shows
+    // new features: every new subcommand falls through to the usage text.
+    // Write to a temp file in the same directory and rename over the target,
+    // which is atomic and unaffected by the old binary being in use.
+    $tmpInetp = '/usr/local/bin/.inetp.new';
+    if (copy($inetpSrc, $tmpInetp) && chmod($tmpInetp, 0755) && rename($tmpInetp, '/usr/local/bin/inetp')) {
+        log_msg('Deployed inetp command to /usr/local/bin/inetp');
+    } else {
+        @unlink($tmpInetp);
+        log_msg('ERROR: Failed to deploy inetp to /usr/local/bin/inetp — '
+              . 'the CLI and any new panel features that call it will not work.');
     }
-    chmod('/usr/local/bin/inetp', 0755);
-    log_msg('Deployed inetp command to /usr/local/bin/inetp');
 }
 
 // Deploy Python scripts to /root/scripts/

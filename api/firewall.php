@@ -7,6 +7,22 @@ Auth::requireAdmin();
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
+/**
+ * Classify a webhook URL. Returns 'discord', 'slack', 'generic', or '' if the
+ * URL is unusable. Used for validation only — the actual POST is done by
+ * qsa_scan.sh so there is exactly one delivery implementation.
+ */
+function qsa_webhook_kind(string $url): string
+{
+    if (!preg_match('~^https://~i', $url)) return '';   // plaintext would leak the report
+    if (filter_var($url, FILTER_VALIDATE_URL) === false) return '';
+    $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+    if ($host === '') return '';
+    if (preg_match('/(^|\.)discord(app)?\.com$/', $host))  return 'discord';
+    if (preg_match('/(^|\.)slack\.com$/', $host))          return 'slack';
+    return 'generic';
+}
+
 switch ($action) {
 
     // -------------------------------------------------------------------------
@@ -315,6 +331,26 @@ switch ($action) {
         $r = Shell::run('qsa_scan', ['--quiet']);
         $out = $r['output'] ?? '';
 
+        // A server whose /usr/local/bin/inetp predates this feature has no
+        // qsa_scan case, so the dispatcher falls through to *) and prints its
+        // whole usage listing. Echoing that verbatim dumps the inetp help into
+        // the terminal pane and looks like the scan "worked". Detect it and say
+        // what is actually wrong instead.
+        if (preg_match('/^\s*inetp\s+[-—]\s+Server Account Manager|Usage:\s*inetp\s+<command>/mi', $out)) {
+            echo json_encode([
+                'success' => false,
+                'stale_cli' => true,
+                'output'  => "This server's inetp command is out of date and does not support qsa_scan.\n\n"
+                           . "The panel files updated but /usr/local/bin/inetp did not, so the scan\n"
+                           . "request fell through to the usage text you would otherwise see here.\n\n"
+                           . "Fix it by re-running the panel update:\n"
+                           . "    sudo php /var/www/inetpanel/scripts/panel_update.php --force\n\n"
+                           . "Then check /var/log/inetpanel_update.log for the line\n"
+                           . "    Deployed inetp command to /usr/local/bin/inetp",
+            ]);
+            break;
+        }
+
         // Rate limiting is the common case on the free tier (1 scan / 24h), so
         // surface qsa.sh's own wording rather than a generic failure.
         $limited = (bool) preg_match('/daily scan allowance|rate.?limit|try again in/i', $out);
@@ -336,6 +372,9 @@ switch ($action) {
             'schedule'     => DB::setting('qsa_monitor_schedule', 'daily'),
             'last_run'     => DB::setting('qsa_last_run', ''),
             'last_change'  => DB::setting('qsa_last_change', ''),
+            'webhook_set'  => DB::setting('qsa_webhook_url', '') !== '',
+            'webhook_kind' => DB::setting('qsa_webhook_kind', ''),
+            'unacked'      => DB::setting('qsa_change_unacked', '0') === '1',
         ]);
         break;
 
@@ -355,6 +394,26 @@ switch ($action) {
             DB::saveSetting('qsa_token', $token);
         }
         DB::saveSetting('qsa_monitor_schedule', $schedule);
+
+        // Webhook delivery. There is no MTA on a stock iNetPanel box, so a
+        // webhook is the only way a change notice reaches you when you are not
+        // looking at the panel. Empty string clears it.
+        if (array_key_exists('webhook_url', $_POST)) {
+            $hook = trim($_POST['webhook_url']);
+            if ($hook === '') {
+                DB::saveSetting('qsa_webhook_url', '');
+                DB::saveSetting('qsa_webhook_kind', '');
+            } else {
+                $kind = qsa_webhook_kind($hook);
+                if ($kind === '') {
+                    echo json_encode(['success' => false,
+                        'error' => 'Webhook must be an https:// Discord, Slack, or generic JSON endpoint.']);
+                    break;
+                }
+                DB::saveSetting('qsa_webhook_url', $hook);
+                DB::saveSetting('qsa_webhook_kind', $kind);
+            }
+        }
 
         // The diff checker is just a cron entry around `qsa_scan --monitor`.
         // Free tier is 1 scan/24h, so refuse a schedule the tier cannot sustain —
@@ -378,6 +437,37 @@ switch ($action) {
         }
         @unlink($tmp);
         echo json_encode(['success' => true, 'monitor' => $monitor && file_exists($cron)]);
+        break;
+
+    case 'qsa_webhook_test':
+        $hook = trim($_POST['webhook_url'] ?? '');
+        if ($hook === '') { $hook = DB::setting('qsa_webhook_url', ''); }
+        if ($hook === '') {
+            echo json_encode(['success' => false, 'error' => 'No webhook URL configured.']);
+            break;
+        }
+        if (qsa_webhook_kind($hook) === '') {
+            echo json_encode(['success' => false, 'error' => 'Not a recognised webhook URL.']);
+            break;
+        }
+        // Deliberately delivered by qsa_scan.sh rather than re-implemented here:
+        // the monitor runs from cron as root and posts from bash, so a PHP-side
+        // lookalike could pass while the real notification path is broken. The
+        // URL is persisted first so the script reads the same value cron will.
+        DB::saveSetting('qsa_webhook_url', $hook);
+        DB::saveSetting('qsa_webhook_kind', qsa_webhook_kind($hook));
+        $r = Shell::run('qsa_scan', ['--test-webhook']);
+        echo json_encode([
+            'success' => $r['success'],
+            'message' => trim($r['output'] ?: 'Test message delivered.'),
+            'error'   => $r['success'] ? '' : trim($r['output'] ?: 'Delivery failed.'),
+        ]);
+        break;
+
+    case 'qsa_ack':
+        // Dismiss the panel-wide banner. The logs row stays for the audit trail.
+        DB::saveSetting('qsa_change_unacked', '0');
+        echo json_encode(['success' => true]);
         break;
 
     case 'qsa_diff':

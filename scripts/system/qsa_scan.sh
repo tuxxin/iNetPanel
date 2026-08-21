@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==============================================================================
 # qsa_scan.sh — external exposure scan of this server via qsa.sh
-# Usage: inetp qsa_scan [--monitor] [--diff] [--quiet]
+# Usage: inetp qsa_scan [--monitor] [--diff] [--quiet] [--test-webhook]
 #
 # WHAT IT DOES
 # ------------
@@ -17,7 +17,8 @@
 #   deep   $7/scan    all 65,535 TCP, ~10,500 checks, unlimited,     ~13-16m
 # Set a token in Settings -> Firewall -> Exposure Scan, or:
 #   sqlite3 /var/www/inetpanel/db/inetpanel.db \
-#     "INSERT OR REPLACE INTO settings VALUES('qsa_token','<token>');"
+#     "INSERT INTO settings (key,value,category) VALUES('qsa_token','<token>','security')
+#      ON CONFLICT(key) DO UPDATE SET value=excluded.value;"
 #
 # WHY THE OPT-IN HEADER
 # ---------------------
@@ -36,6 +37,7 @@ QUIET=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --monitor) MODE="monitor"; shift ;;
+        --test-webhook) MODE="test-webhook"; shift ;;
         --diff)    MODE="diff";    shift ;;
         --quiet)   QUIET=1; shift ;;
         *) shift ;;
@@ -90,6 +92,73 @@ normalise() {
         | grep -av '^$'
 }
 
+# ---------------------------------------------------------------------------
+# Notification delivery.
+#
+# A stock iNetPanel box has no MTA, so there is no mail path to fall back on.
+# Delivery is therefore: (1) a row in the panel `logs` table, (2) a sticky
+# banner flag the panel header reads, and (3) optionally an outbound webhook.
+# This function owns (3) — api/firewall.php's "Send test" button calls back
+# into this same script rather than re-implementing the POST, so the test
+# exercises the real path.
+#
+# Discord and Slack both accept a simple JSON body but disagree on the field
+# name ("content" vs "text"), and Discord hard-caps a message at 2000 chars.
+send_webhook() {
+    local subject="$1" body="$2"
+    local url kind payload code
+    url=$(panel_setting qsa_webhook_url)
+    [ -z "$url" ] && return 0          # not configured — not an error
+    kind=$(panel_setting qsa_webhook_kind)
+    [ -z "$kind" ] && kind="generic"
+
+    # Trim to Discord's limit with room for the fences and subject line.
+    local max=1500
+    [ "${#body}" -gt "$max" ] && body="${body:0:$max}"$'\n'"... (truncated — see the panel for the full diff)"
+
+    local text="**${subject}** — $(hostname)"$'\n'"\`\`\`"$'\n'"${body}"$'\n'"\`\`\`"
+
+    case "$kind" in
+        discord) payload=$(json_obj content "$text") ;;
+        slack)   payload=$(json_obj text    "$text") ;;
+        *)       payload=$(json_obj text    "$text") ;;
+    esac
+
+    code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 \
+                -H 'Content-Type: application/json' \
+                -X POST --data "$payload" "$url" 2>/dev/null) || code="000"
+
+    if [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 300 ]; then
+        return 0
+    fi
+    echo "webhook delivery failed (HTTP ${code})" >&2
+    return 1
+}
+
+# Build a one-key JSON object with the value properly escaped. Doing this with
+# printf and sed gets control characters wrong; python3 is already a hard
+# dependency of the panel (ht_manage.py, verify_account_credentials.py).
+json_obj() {
+    python3 -c 'import json,sys; print(json.dumps({sys.argv[1]: sys.argv[2]}))' "$1" "$2"
+}
+
+panel_setting() {
+    sqlite3 "$PANEL_DB" "SELECT value FROM settings WHERE key='$1'" 2>/dev/null
+}
+
+# The settings table is (key, value, category, updated_at) — a bare
+# INSERT OR REPLACE ... VALUES('k','v') is rejected with "table settings has 4
+# columns but 2 values were supplied". Every such write here was suppressed with
+# 2>/dev/null, so the monitor recorded neither its last run nor any detected
+# change and the panel could only ever show "—". Name the columns.
+panel_set_setting() {
+    sqlite3 "$PANEL_DB" \
+        "INSERT INTO settings (key, value, category, updated_at)
+         VALUES ('$1', '$2', 'security', datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at;" \
+        || echo "warning: could not record '$1' in the panel database" >&2
+}
+
 case "$MODE" in
     scan)
         [ "$QUIET" -eq 0 ] && echo -e "${BOLD}Scanning this server's public exposure via qsa.sh (${TIER} tier)...${NC}" >&2
@@ -140,19 +209,42 @@ case "$MODE" in
         ls -1t "$STATE_DIR"/scan-*.txt 2>/dev/null | tail -n +$((KEEP_RUNS + 1)) | xargs -r rm -f
 
         if [ "$CHANGED" -eq 1 ]; then
-            DIFF=$(diff -u <(normalise < "$STATE_DIR/previous.txt") <(normalise < "$CURRENT") | head -100)
+            # --label: without it the ---/+++ header shows the process-substitution
+            # paths (/dev/fd/63), which is meaningless in a log row and worse in a
+            # Discord message. Named labels make both readable.
+            DIFF=$(diff -u --label 'previous scan' --label 'this scan' \
+                        <(normalise < "$STATE_DIR/previous.txt") \
+                        <(normalise < "$CURRENT") | head -100)
             echo -e "${RED}EXPOSURE CHANGED${NC}"
             printf '%s\n' "$DIFF"
             sqlite3 "$PANEL_DB" "INSERT INTO logs (source, level, message, details, user, created_at)
                 VALUES ('qsa','WARNING','External exposure changed',
                         '$(printf '%s' "$DIFF" | sed "s/'/''/g")','system', datetime('now'));" 2>/dev/null
-            sqlite3 "$PANEL_DB" "INSERT OR REPLACE INTO settings VALUES('qsa_last_change', datetime('now'));" 2>/dev/null
+            panel_set_setting qsa_last_change "$(date '+%Y-%m-%d %H:%M:%S')"
+            # Sticky until acknowledged in the panel, so a change found at 04:17
+            # is still visible the next time someone logs in.
+            panel_set_setting qsa_change_unacked 1
+            send_webhook "Exposure changed" "$DIFF" || true
         else
             [ "$QUIET" -eq 0 ] && echo -e "${GREEN}No change since the last scan.${NC}"
             sqlite3 "$PANEL_DB" "INSERT INTO logs (source, level, message, details, user, created_at)
                 VALUES ('qsa','INFO','External exposure unchanged','','system', datetime('now'));" 2>/dev/null
         fi
-        sqlite3 "$PANEL_DB" "INSERT OR REPLACE INTO settings VALUES('qsa_last_run', datetime('now'));" 2>/dev/null
+        panel_set_setting qsa_last_run "$(date '+%Y-%m-%d %H:%M:%S')"
         exit 0
+        ;;
+
+    test-webhook)
+        if [ -z "$(panel_setting qsa_webhook_url)" ]; then
+            echo "No webhook URL is configured."
+            exit 1
+        fi
+        if send_webhook "Test notification" \
+             "If you can read this, exposure-change alerts will reach you here."; then
+            echo "Test message delivered."
+            exit 0
+        fi
+        echo "Delivery failed — check the URL is a valid incoming webhook and that this server has outbound HTTPS."
+        exit 1
         ;;
 esac

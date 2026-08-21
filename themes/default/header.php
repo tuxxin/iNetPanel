@@ -1,9 +1,17 @@
 <?php
 // Update notification — check cached version from SQLite (no live request here)
 $_updateAvailable = false;
+$_qsaChanged      = false;
+$_qsaWhen         = '';
 $_latestVer = '';
 try {
     if (class_exists('DB') && class_exists('Version')) {
+        // Sticky exposure-change flag, raised by qsa_scan.sh --monitor and
+        // cleared by "Dismiss" on the Firewall page. Surfaced here because a
+        // box with no MTA has nowhere else to deliver it.
+        $_qsaChanged = DB::setting('qsa_change_unacked', '0') === '1';
+        $_qsaWhen    = DB::setting('qsa_last_change', '');
+
         $__latestVer = DB::setting('panel_latest_ver', '');
         $__checkTs   = (int) DB::setting('panel_check_ts', '0');
         if ($__latestVer && version_compare($__latestVer, Version::get(), '>')) {
@@ -67,6 +75,13 @@ try {
             <?php endif; ?>
         </a>
     </div>
+
+    <?php if ($_qsaChanged): ?>
+    <a href="/admin/firewall#tab-qsa" class="btn btn-sm btn-danger ms-3 fw-semibold"
+       title="Your server's external exposure changed<?= $_qsaWhen ? ' on ' . htmlspecialchars($_qsaWhen) : '' ?>">
+        <i class="fas fa-triangle-exclamation me-1"></i>Exposure changed
+    </a>
+    <?php endif; ?>
 
     <?php if ($_updateAvailable): ?>
     <a href="/admin/settings#tab-updates" class="btn btn-sm btn-warning ms-3 fw-semibold">

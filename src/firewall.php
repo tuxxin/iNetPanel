@@ -264,8 +264,15 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
                 <p class="text-muted small">
                     Re-scans on a schedule and compares against the previous result,
                     ignoring volatile detail like scan duration and certificate expiry
-                    dates. You are alerted only when your actual exposure changes — a
+                    dates. Nothing is reported unless your actual exposure changes — a
                     new open port, a service version change, a new finding.
+                </p>
+                <p class="text-muted small mb-3">
+                    <strong>How you find out:</strong> a change raises a red
+                    <em>Exposure changed</em> notice in the panel header until you dismiss
+                    it here, and writes a <a href="/admin/logs?source=qsa">log entry</a>.
+                    iNetPanel does not run a mail server, so there is no email alert —
+                    add a webhook below if you want to be told when you are not logged in.
                 </p>
                 <div class="row g-3 align-items-end">
                     <div class="col-md-4">
@@ -287,6 +294,31 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
                     </div>
                 </div>
                 <div class="small text-muted mt-2" id="qsa-monitor-state">—</div>
+
+                <hr class="my-3">
+                <label class="form-label small fw-semibold mb-1">
+                    Webhook notification <span class="text-muted fw-normal">(optional)</span>
+                </label>
+                <p class="text-muted small mb-2">
+                    Paste a Discord or Slack incoming webhook URL. The change diff is posted
+                    there as soon as it is detected. Any other <code>https://</code> endpoint
+                    receives the same message as JSON <code>{"text": "..."}</code>.
+                </p>
+                <div class="input-group input-group-sm mb-2">
+                    <input type="url" class="form-control" id="qsa-webhook"
+                           placeholder="https://discord.com/api/webhooks/... or https://hooks.slack.com/services/...">
+                    <button class="btn btn-outline-secondary" id="qsa-webhook-test" type="button">Send test</button>
+                </div>
+                <div class="small text-muted" id="qsa-webhook-state"></div>
+
+                <div class="alert alert-danger d-flex align-items-center mt-3 d-none" id="qsa-unacked">
+                    <i class="fas fa-triangle-exclamation me-2"></i>
+                    <div class="flex-grow-1 small">
+                        A change was detected and has not been acknowledged. The header notice
+                        stays up until you dismiss it.
+                    </div>
+                    <button class="btn btn-sm btn-outline-danger ms-2" id="qsa-ack-btn">Dismiss</button>
+                </div>
                 <div class="mt-3 d-none" id="qsa-diff-wrap">
                     <label class="form-label small fw-semibold">Last detected change</label>
                     <pre id="qsa-diff" style="background:#0d1117;color:#c9d1d9;padding:12px;border-radius:6px;
@@ -635,9 +667,57 @@ function qsaLoadSettings() {
             if (d.last_run)    st += ' Last run: ' + d.last_run + '.';
             if (d.last_change) st += ' Last change detected: ' + d.last_change + '.';
             document.getElementById('qsa-monitor-state').textContent = st;
+
+            // The URL itself is never returned by the API — only whether one is
+            // set — so show a placeholder rather than echoing a secret back.
+            const wh = document.getElementById('qsa-webhook');
+            wh.value = '';
+            wh.placeholder = d.webhook_set
+                ? '\u2022'.repeat(24) + '  (' + (d.webhook_kind || 'saved') + ' webhook saved \u2014 type to replace)'
+                : 'https://discord.com/api/webhooks/... or https://hooks.slack.com/services/...';
+            document.getElementById('qsa-webhook-state').textContent = d.webhook_set
+                ? 'Change alerts are delivered to your ' + (d.webhook_kind || '') + ' webhook.'
+                : 'No webhook set — changes appear in the panel header only.';
+
+            document.getElementById('qsa-unacked').classList.toggle('d-none', !d.unacked);
             if (d.last_change) qsaLoadDiff();
         });
 }
+
+document.getElementById('qsa-webhook-test').addEventListener('click', function () {
+    const url = document.getElementById('qsa-webhook').value.trim();
+    const btn = this;
+    btn.disabled = true; btn.textContent = 'Sending...';
+    const fd = new FormData();
+    fd.append('webhook_url', url);
+    fetch('/api/firewall?action=qsa_webhook_test', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(d => {
+            showFwToast(d.success ? (d.message || 'Test delivered.') : (d.error || 'Delivery failed.'),
+                        d.success ? 'success' : 'danger');
+            if (d.success) qsaLoadSettings();
+        })
+        .catch(() => showFwToast('Could not reach the panel API.', 'danger'))
+        .finally(() => { btn.disabled = false; btn.textContent = 'Send test'; });
+});
+
+document.getElementById('qsa-ack-btn').addEventListener('click', function () {
+    fetch('/api/firewall?action=qsa_ack', { method: 'POST' })
+        .then(r => r.json())
+        .then(() => {
+            document.getElementById('qsa-unacked').classList.add('d-none');
+            // Drop the header notice without a reload.
+            document.querySelectorAll('a[href="/admin/firewall#tab-qsa"].btn-danger')
+                    .forEach(el => el.remove());
+            showFwToast('Dismissed.', 'success');
+        });
+});
+
+// A webhook field the user emptied on purpose must be distinguishable from one
+// they never touched, otherwise the saved URL can never be removed.
+document.getElementById('qsa-webhook').addEventListener('input', function () {
+    this.dataset.cleared = this.value.trim() === '' ? '1' : '0';
+});
 
 function qsaLoadDiff() {
     fetch('/api/firewall?action=qsa_diff')
@@ -687,6 +767,12 @@ document.getElementById('qsa-save-btn').addEventListener('click', function () {
     fd.append('action', 'qsa_settings_save');
     fd.append('monitor',  document.getElementById('qsa-monitor').checked ? '1' : '0');
     fd.append('schedule', document.getElementById('qsa-schedule').value);
+    // Only send when the user typed something; an untouched field means
+    // "leave the saved webhook alone". Clearing is done by typing a space.
+    const _wh = document.getElementById('qsa-webhook').value.trim();
+    if (_wh !== '' || document.getElementById('qsa-webhook').dataset.cleared === '1') {
+        fd.append('webhook_url', _wh);
+    }
     fetch('/api/firewall', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(d => {
@@ -703,6 +789,12 @@ document.getElementById('qsa-token-save').addEventListener('click', function () 
     fd.append('qsa_token', el.value.trim());
     fd.append('monitor',  document.getElementById('qsa-monitor').checked ? '1' : '0');
     fd.append('schedule', document.getElementById('qsa-schedule').value);
+    // Only send when the user typed something; an untouched field means
+    // "leave the saved webhook alone". Clearing is done by typing a space.
+    const _wh = document.getElementById('qsa-webhook').value.trim();
+    if (_wh !== '' || document.getElementById('qsa-webhook').dataset.cleared === '1') {
+        fd.append('webhook_url', _wh);
+    }
     fetch('/api/firewall', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(d => {
