@@ -175,30 +175,35 @@ POOL
 # ----------------------------------------------------------------
 # SSL Certificate
 # ----------------------------------------------------------------
-if [ "$NO_CF" -eq 1 ]; then
-    # No Cloudflare — a real Let's Encrypt cert is required for direct access, so a
-    # failure here is fatal. Previously the result was ignored: ssl_manage would fall
-    # back to a self-signed cert, and this script carried on reporting success, so
-    # the domain went live with a certificate every browser rejects.
-    if ! bash "$SCRIPTS_DIR/ssl_manage.sh" issue "$DOMAIN"; then
-        echo -e "${RED}Certificate issuance failed for ${DOMAIN} — not adding the domain.${NC}"
-        echo -e "${YELLOW}Fix the SSL configuration, then re-run this command.${NC}"
-        exit 1
-    fi
-    # Issuance can "succeed" and still leave a self-signed cert behind. Check the
-    # issuer rather than trusting the exit code.
-    if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ] \
-       && ! openssl x509 -issuer -noout -in "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" 2>/dev/null \
-            | grep -qi "let's encrypt"; then
-        echo -e "${RED}${DOMAIN} got a self-signed certificate, not a Let's Encrypt one.${NC}"
-        echo -e "${YELLOW}Check: inetp ssl_manage status  —  and Settings → Cloudflare.${NC}"
-        exit 1
-    fi
-else
-    # CF tunnel handles public TLS; Apache only needs a cert for the local hop, so a
-    # self-signed one is correct here and its failure is not fatal.
-    bash "$SCRIPTS_DIR/ssl_manage.sh" issue "$DOMAIN" --self-signed
+# Both paths use a self-signed certificate, for different reasons:
+#
+#   --no-cf : direct access on a high port. ssl_manage only supports the DNS-01
+#             challenge through Cloudflare, so without Cloudflare a real
+#             Let's Encrypt certificate is not obtainable at all. The UI says as
+#             much on the checkbox ("Self-signed SSL only"). Requiring LE here
+#             made it impossible to add a domain before its DNS was moved —
+#             exactly when someone is staging a migration.
+#   default : the Cloudflare tunnel terminates public TLS at the edge; Apache
+#             only needs a certificate for the local hop.
+#
+# Issue a real certificate later, once DNS is in place, with:
+#     inetp ssl_manage issue <domain>
+if ! bash "$SCRIPTS_DIR/ssl_manage.sh" issue "$DOMAIN" --self-signed; then
+    echo -e "${RED}Could not create a certificate for ${DOMAIN}.${NC}"
+    echo -e "${YELLOW}The vhost needs one to start. Fix the above, then re-run.${NC}"
+    exit 1
 fi
+# A missing cert file would leave Apache unable to start this vhost, so verify
+# the file exists rather than trusting the exit code.
+if [ ! -s "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
+    echo -e "${RED}No certificate was produced for ${DOMAIN} — not adding the domain.${NC}"
+    exit 1
+fi
+if [ "$NO_CF" -eq 1 ]; then
+    echo -e "${YELLOW}Self-signed certificate in place (no Cloudflare).${NC}"
+    echo -e "${YELLOW}Once DNS points here:  inetp ssl_manage issue ${DOMAIN}${NC}"
+fi
+
 SSL_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 SSL_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 
