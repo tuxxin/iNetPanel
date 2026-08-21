@@ -7,11 +7,21 @@
 
 define('PANEL_PATH',  '/var/www/inetpanel');
 define('LOG_FILE',    '/var/log/inetpanel_update.log');
-define('TMP_ZIP',     '/tmp/inetpanel-update.zip');
-define('TMP_DIR',     '/tmp/inetpanel-update-extract');
+// Not /tmp. This script runs as root and fopen()/extractTo() follow symlinks:
+// /tmp is 1777, so any local user could pre-create these fixed names pointing at
+// a file of their choosing and have root truncate and overwrite it. WORK_DIR is
+// 0700 root, created before use.
+define('WORK_DIR',    '/var/lib/inetpanel/update');
+define('TMP_ZIP',     WORK_DIR . '/inetpanel-update.zip');
+define('TMP_DIR',     WORK_DIR . '/extract');
 define('GH_API_URL',  'https://api.github.com/repos/tuxxin/inetpanel/releases/latest');
 
 $force = in_array('--force', $argv ?? [], true);
+
+if (!is_dir(WORK_DIR)) {
+    @mkdir(WORK_DIR, 0700, true);
+}
+@chmod(WORK_DIR, 0700);
 
 function log_msg(string $msg): void
 {
@@ -358,6 +368,35 @@ if (file_exists($versionFile)) {
     }
 }
 
+// Staging directory for files handed to a privileged command (see Shell::stage).
+// These files used to live in /tmp (mode 1777), where a tenant could plant the
+// fixed names ahead of time and have the root `cp` follow a symlink or the root
+// `bash` execute their script.
+//
+// Owned by www-data at mode 0700 — deliberately NOT 0770 root:www-data. Every
+// hosting tenant on this panel is created with gid 33 (www-data), so a
+// group-writable directory would give all of them write access here and be worse
+// than the /tmp it replaces. Owner-only excludes them: they match the group, and
+// the group bits are zero. Root ignores the mode either way.
+$stageDir = '/var/lib/inetpanel/staging';
+if (!is_dir($stageDir)) {
+    @mkdir($stageDir, 0700, true);
+}
+if (is_dir($stageDir)) {
+    @chmod($stageDir, 0700);
+    $wwwUid = function_exists('posix_getpwnam') ? (posix_getpwnam('www-data')['uid'] ?? null) : null;
+    if ($wwwUid !== null) { @chown($stageDir, $wwwUid); }
+    // Clear anything left in the old, world-writable location.
+    foreach (['inetp_motd', 'inetpanel_hosts', 'inetp_tz.cnf', 'inetpanel_jail.local',
+              'inetpanel_jail.lock'] as $stale) {
+        if (@is_link('/tmp/' . $stale) || @is_file('/tmp/' . $stale)) {
+            @unlink('/tmp/' . $stale);
+        }
+    }
+    foreach (glob('/tmp/inetp_hook_*') ?: [] as $stale) { @unlink($stale); }
+    log_msg('Staging directory ready at ' . $stageDir . ' (0700 www-data)');
+}
+
 // Deploy system shell scripts to /root/scripts/
 $systemScripts = glob(PANEL_PATH . '/scripts/system/*.sh');
 if ($systemScripts) {
@@ -519,8 +558,8 @@ www-data ALL=(root) NOPASSWD: /usr/bin/wg-quick
 www-data ALL=(root) NOPASSWD: /usr/sbin/usermod
 www-data ALL=(root) NOPASSWD: /usr/bin/timedatectl
 www-data ALL=(root) NOPASSWD: /usr/bin/hostnamectl
-www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetpanel_hosts /etc/hosts
-www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetpanel_jail.local /etc/fail2ban/jail.local
+www-data ALL=(root) NOPASSWD: /bin/cp /var/lib/inetpanel/staging/inetpanel_hosts /etc/hosts
+www-data ALL=(root) NOPASSWD: /bin/cp /var/lib/inetpanel/staging/inetpanel_jail.local /etc/fail2ban/jail.local
 www-data ALL=(root) NOPASSWD: /sbin/reboot
 www-data ALL=(root) NOPASSWD: /usr/sbin/phpenmod
 www-data ALL=(root) NOPASSWD: /usr/sbin/phpdismod
@@ -530,9 +569,9 @@ www-data ALL=(root) NOPASSWD: /usr/bin/tail
 www-data ALL=(root) NOPASSWD: /usr/bin/journalctl
 www-data ALL=(root) NOPASSWD: /usr/bin/dpkg
 www-data ALL=(root) NOPASSWD: /bin/sed
-www-data ALL=(root) NOPASSWD: /bin/bash /tmp/inetp_hook_*
-www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf
-www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetp_motd /etc/motd
+www-data ALL=(root) NOPASSWD: /bin/bash /var/lib/inetpanel/staging/inetp_hook_*
+www-data ALL=(root) NOPASSWD: /bin/cp /var/lib/inetpanel/staging/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf
+www-data ALL=(root) NOPASSWD: /bin/cp /var/lib/inetpanel/staging/inetp_motd /etc/motd
 # The tenant .htaccess/.htpasswd manager. This single helper replaced eight
 # broad grants (cp/cat/chown/chmod/rm over /home/*) that let a hosting tenant
 # point root at any file by planting a symlink - GHSA-mjmx-xpqq-p2h8. It takes

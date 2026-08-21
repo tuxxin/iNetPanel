@@ -38,6 +38,86 @@ class Shell
         'list',
     ];
 
+    /** Directory for files handed to a privileged command. Never /tmp. */
+    public const STAGE_DIR = '/var/lib/inetpanel/staging';
+
+    /**
+     * Write content to a staging file that is safe to hand to a root command.
+     *
+     * The panel used to stage these in /tmp under fixed, predictable names
+     * (/tmp/inetp_motd, /tmp/inetpanel_hosts, /tmp/inetp_hook_*, ...). /tmp is
+     * mode 1777, so any local user — including an unprivileged hosting tenant —
+     * could create those names first and the privileged step would act on what
+     * they left behind:
+     *
+     *   - `sudo cp <staged> /etc/motd` follows a symlink AS ROOT, copying any
+     *     root-only file into a world-readable one. Verified: /root/.mysql_root_pass
+     *     lands in /etc/motd (0644) and every tenant can read it.
+     *   - `sudo bash <staged>` is worse. A tenant creates the name as a file they
+     *     own at mode 0444; www-data cannot overwrite it and the sticky bit stops
+     *     www-data unlinking it, so root executes the tenant's script.
+     *
+     * This is the same root cause as GHSA-mjmx-xpqq-p2h8 (attacker-influenceable
+     * path handed to a privileged file operation), in a different set of sinks.
+     *
+     * The fix is the directory, not the filename: STAGE_DIR is owned by www-data
+     * at mode 0700, so only the panel (and root) can create, replace or list
+     * entries. Note the mode carefully — every hosting tenant on this panel has
+     * gid 33 (www-data), so a group-writable 0770 root:www-data directory would
+     * hand every tenant write access and be strictly worse than /tmp. Owner-only
+     * is what excludes them: they match the group, and the group bits are zero.
+     *
+     * Writes also unlink first and create with O_EXCL, so a pre-existing entry of
+     * any kind — including a symlink — is replaced by a fresh regular file rather
+     * than followed.
+     *
+     * @param  string $name    Basename only; [A-Za-z0-9._-], no path separators.
+     * @param  string $content
+     * @param  int    $mode
+     * @return string|null     Absolute path to hand to the privileged command,
+     *                         or null if it could not be staged safely.
+     */
+    public static function stage(string $name, string $content, int $mode = 0640): ?string
+    {
+        // Reject anything that could escape the directory. No separators, no dot-dot.
+        if (!preg_match('/^[A-Za-z0-9._-]{1,96}$/', $name) || str_contains($name, '..')) {
+            self::log('ERROR', 'stage', ['name' => $name], 'illegal staging name', 1);
+            return null;
+        }
+
+        if (!is_dir(self::STAGE_DIR)) {
+            // 0700 before anything is written: never briefly group- or world-accessible.
+            if (!@mkdir(self::STAGE_DIR, 0700, true) && !is_dir(self::STAGE_DIR)) {
+                self::log('ERROR', 'stage', [], 'cannot create ' . self::STAGE_DIR, 1);
+                return null;
+            }
+            @chmod(self::STAGE_DIR, 0700);
+        }
+
+        $path = self::STAGE_DIR . '/' . $name;
+
+        // Unlink then create exclusively. O_EXCL refuses to follow a symlink, so
+        // even if something raced in between, the write cannot be redirected.
+        @unlink($path);
+        $fh = @fopen($path, 'xb');
+        if ($fh === false) {
+            self::log('ERROR', 'stage', ['name' => $name], 'could not create staging file', 1);
+            return null;
+        }
+        $written = fwrite($fh, $content);
+        fflush($fh);
+        // Set the mode on the descriptor we already hold, not on the path.
+        @chmod($path, $mode);
+        fclose($fh);
+
+        if ($written === false || $written !== strlen($content)) {
+            @unlink($path);
+            self::log('ERROR', 'stage', ['name' => $name], 'short write', 1);
+            return null;
+        }
+        return $path;
+    }
+
     /**
      * Run a whitelisted inetp command as root via sudo.
      *

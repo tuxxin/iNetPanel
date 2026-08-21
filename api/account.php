@@ -214,10 +214,15 @@ switch ($action) {
         if (file_exists($oldPool) && $currentVer !== $newVer) {
             $poolContent = file_get_contents($oldPool);
             $poolContent = str_replace("php{$currentVer}-fpm", "php{$newVer}-fpm", $poolContent);
-            file_put_contents("/tmp/inetp_pool_{$targetDomain}", $poolContent);
-            shell_exec("sudo /bin/cp " . escapeshellarg("/tmp/inetp_pool_{$targetDomain}") . " " . escapeshellarg($newPool) . " 2>/dev/null");
+            // No sudoers grant matches this cp, so it has never actually worked —
+            // but leaving the /tmp pattern here is a trap for whoever adds one.
+            // Stage it safely so a future grant cannot become the next symlink bug.
+            $poolStage = Shell::stage('inetp_pool_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $targetDomain), $poolContent);
+            if ($poolStage !== null) {
+                shell_exec("sudo /bin/cp " . escapeshellarg($poolStage) . " " . escapeshellarg($newPool) . " 2>/dev/null");
+            }
             shell_exec("sudo /bin/rm -f " . escapeshellarg($oldPool) . " 2>/dev/null");
-            @unlink("/tmp/inetp_pool_{$targetDomain}");
+            if ($poolStage !== null) { @unlink($poolStage); }
         }
 
         // Update Apache vhost socket

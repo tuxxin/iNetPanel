@@ -11,12 +11,19 @@ $stagingDir = '/backup/restore_staging';
 
 // Ensure staging directory exists and is writable by www-data
 if (!is_dir($stagingDir) || !is_writable($stagingDir)) {
-    // Use the inetp_hook sudoers rule (allows: sudo /bin/bash /tmp/inetp_hook_*)
-    $hook = '/tmp/inetp_hook_restore_staging_' . getmypid();
-    file_put_contents($hook, "#!/bin/bash\nmkdir -p {$stagingDir}\nchown www-data:www-data {$stagingDir}\nchmod 0770 {$stagingDir}\n");
-    chmod($hook, 0755);
-    exec('sudo /bin/bash ' . escapeshellarg($hook) . ' 2>/dev/null');
-    @unlink($hook);
+    // Staged in Shell::STAGE_DIR, never /tmp. This script is executed BY ROOT, and
+    // /tmp is 1777 with a sticky bit: a tenant could create this exact name (the
+    // PID is guessable) as a file they own at mode 0444, so file_put_contents
+    // could not overwrite it and the sticky bit stopped www-data unlinking it —
+    // root then executed the tenant's script. Same root cause as
+    // GHSA-mjmx-xpqq-p2h8, escalated from arbitrary read to code execution.
+    $hook = Shell::stage('inetp_hook_restore_staging_' . getmypid(),
+        "#!/bin/bash\nmkdir -p {$stagingDir}\nchown www-data:www-data {$stagingDir}\nchmod 0770 {$stagingDir}\n",
+        0750);
+    if ($hook !== null) {
+        exec('sudo /bin/bash ' . escapeshellarg($hook) . ' 2>/dev/null');
+        @unlink($hook);
+    }
 }
 
 switch ($action) {
@@ -85,9 +92,7 @@ case 'upload_status':
 // ── Return permanent restore FTP account info ────────────────────────────────
 case 'ftp_info':
     // Ensure restore user exists with root's password hash (no plaintext needed)
-    // Uses inetp_hook pattern (allowed in sudoers: sudo /bin/bash /tmp/inetp_hook_*)
     exec('id restore 2>/dev/null', $ftpIdOut, $ftpIdCode);
-    $hook = '/tmp/inetp_hook_restore_ftp_' . getmypid();
     $script = "#!/bin/bash\n";
     if ($ftpIdCode !== 0) {
         $script .= "useradd -d " . escapeshellarg($stagingDir) . " -s /bin/bash -g www-data restore\n";
@@ -100,8 +105,12 @@ case 'ftp_info':
     // Ensure in vsftpd whitelist
     $script .= "grep -qx restore /etc/vsftpd.userlist 2>/dev/null || echo restore >> /etc/vsftpd.userlist\n";
     $script .= "systemctl reload vsftpd 2>/dev/null\n";
-    file_put_contents($hook, $script);
-    chmod($hook, 0755);
+    // Root executes this — stage it where tenants cannot reach. See the note above.
+    $hook = Shell::stage('inetp_hook_restore_ftp_' . getmypid(), $script, 0750);
+    if ($hook === null) {
+        echo json_encode(['success' => false, 'error' => 'Could not stage the FTP setup script.']);
+        break;
+    }
     exec('sudo /bin/bash ' . escapeshellarg($hook) . ' 2>&1', $hookOut, $hookCode);
     @unlink($hook);
 

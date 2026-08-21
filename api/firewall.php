@@ -269,7 +269,7 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'jail.local not found.']);
             break;
         }
-        $lock = fopen('/tmp/inetpanel_jail.lock', 'w');
+        $lock = fopen(Shell::STAGE_DIR . '/inetpanel_jail.lock', 'c');
         if (flock($lock, LOCK_EX)) {
             $content = file_get_contents($jailLocal);
             if (preg_match('/^(ignoreip\s*=\s*)(.+)$/m', $content, $m)) {
@@ -282,9 +282,9 @@ switch ($action) {
                 // Add ignoreip after [DEFAULT]
                 $content = preg_replace('/^(\[DEFAULT\].*)$/m', "$1\nignoreip = 127.0.0.1/8 ::1 {$ip}", $content, 1);
             }
-            file_put_contents('/tmp/inetpanel_jail.local', $content);
-            Shell::exec('sudo /bin/cp /tmp/inetpanel_jail.local /etc/fail2ban/jail.local', 'fail2ban-whitelist-add');
-            unlink('/tmp/inetpanel_jail.local');
+            $jailStage = Shell::stage('inetpanel_jail.local', $content);
+            Shell::exec('sudo /bin/cp ' . escapeshellarg($jailStage) . ' /etc/fail2ban/jail.local', 'jail-write');
+            @unlink($jailStage);
             flock($lock, LOCK_UN);
         }
         fclose($lock);
@@ -304,16 +304,16 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'jail.local not found.']);
             break;
         }
-        $lock = fopen('/tmp/inetpanel_jail.lock', 'w');
+        $lock = fopen(Shell::STAGE_DIR . '/inetpanel_jail.lock', 'c');
         if (flock($lock, LOCK_EX)) {
             $content = file_get_contents($jailLocal);
             $content = preg_replace_callback('/^(ignoreip\s*=\s*)(.+)$/m', function($matches) use ($ip) {
                 $ips = array_filter(array_map('trim', preg_split('/[\s,]+/', $matches[2])), fn($v) => $v !== $ip);
                 return $matches[1] . implode(' ', $ips);
             }, $content);
-            file_put_contents('/tmp/inetpanel_jail.local', $content);
-            Shell::exec('sudo /bin/cp /tmp/inetpanel_jail.local /etc/fail2ban/jail.local', 'fail2ban-whitelist-remove');
-            unlink('/tmp/inetpanel_jail.local');
+            $jailStage = Shell::stage('inetpanel_jail.local', $content);
+            Shell::exec('sudo /bin/cp ' . escapeshellarg($jailStage) . ' /etc/fail2ban/jail.local', 'jail-write');
+            @unlink($jailStage);
             flock($lock, LOCK_UN);
         }
         fclose($lock);
@@ -349,15 +349,15 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'jail.local not found.']);
             break;
         }
-        $lock = fopen('/tmp/inetpanel_jail.lock', 'w');
+        $lock = fopen(Shell::STAGE_DIR . '/inetpanel_jail.lock', 'c');
         if (flock($lock, LOCK_EX)) {
             $content = file_get_contents($jailLocal);
             $content = preg_replace('/^bantime\s*=\s*\d+/m',  "bantime  = {$bantime}",  $content);
             $content = preg_replace('/^findtime\s*=\s*\d+/m', "findtime = {$findtime}", $content);
             $content = preg_replace('/^maxretry\s*=\s*\d+/m', "maxretry = {$maxretry}", $content);
-            file_put_contents('/tmp/inetpanel_jail.local', $content);
-            Shell::exec('sudo /bin/cp /tmp/inetpanel_jail.local /etc/fail2ban/jail.local', 'fail2ban-settings-save');
-            unlink('/tmp/inetpanel_jail.local');
+            $jailStage = Shell::stage('inetpanel_jail.local', $content);
+            Shell::exec('sudo /bin/cp ' . escapeshellarg($jailStage) . ' /etc/fail2ban/jail.local', 'jail-write');
+            @unlink($jailStage);
             flock($lock, LOCK_UN);
         }
         fclose($lock);

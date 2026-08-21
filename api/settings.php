@@ -70,8 +70,12 @@ switch ($action) {
                 // Update MariaDB timezone (runtime + persistent config)
                 $mysqlPass = trim(@file_get_contents('/root/.mysql_root_pass') ?: '');
                 Shell::exec('mysql -u root -p' . escapeshellarg($mysqlPass) . ' -e ' . escapeshellarg("SET GLOBAL time_zone = '{$tz}'") . ' 2>&1', 'mysql-timezone');
-                @file_put_contents('/tmp/inetp_tz.cnf', "[mysqld]\ndefault_time_zone = {$tz}\n");
-                Shell::exec('sudo /bin/cp /tmp/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf', 'mysql-tz-conf');
+                $tzStage = Shell::stage('inetp_tz.cnf', "[mysqld]\ndefault_time_zone = {$tz}\n");
+                if ($tzStage !== null) {
+                    Shell::exec('sudo /bin/cp ' . escapeshellarg($tzStage)
+                        . ' /etc/mysql/mariadb.conf.d/99-timezone.cnf', 'mysql-tz-conf');
+                    @unlink($tzStage);
+                }
             }
         }
         // If CF credentials were saved, validate them
@@ -308,9 +312,9 @@ switch ($action) {
             $hosts = file_get_contents('/etc/hosts');
             if ($hosts !== false) {
                 $hosts = str_replace($oldHostname, $hostname, $hosts);
-                file_put_contents('/tmp/inetpanel_hosts', $hosts);
-                Shell::exec('sudo /bin/cp /tmp/inetpanel_hosts /etc/hosts', 'hostname-hosts');
-                @unlink('/tmp/inetpanel_hosts');
+                $hostsStage = Shell::stage('inetpanel_hosts', $hosts);
+                if ($hostsStage !== null) { Shell::exec('sudo /bin/cp ' . escapeshellarg($hostsStage) . ' /etc/hosts', 'hosts-write'); }
+                if ($hostsStage !== null) { @unlink($hostsStage); }
             }
         }
         DB::saveSetting('server_hostname', $hostname);
@@ -335,9 +339,11 @@ switch ($action) {
             . "  ───────────────────────────────\n"
             . "  Run  inetp --help  for CLI commands\n"
             . "  ───────────────────────────────\n\n";
-        file_put_contents('/tmp/inetp_motd', $motdContent);
-        shell_exec('sudo /bin/cp /tmp/inetp_motd /etc/motd 2>/dev/null');
-        @unlink('/tmp/inetp_motd');
+        $motdStage = Shell::stage('inetp_motd', $motdContent, 0644);
+        if ($motdStage !== null) {
+            Shell::exec('sudo /bin/cp ' . escapeshellarg($motdStage) . ' /etc/motd', 'motd-write');
+            @unlink($motdStage);
+        }
 
         echo json_encode(['success' => true, 'ssl_issued' => $sslIssued]);
         break;
