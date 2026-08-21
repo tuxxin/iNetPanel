@@ -262,6 +262,29 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
                      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
                      line-height:1.5;max-height:520px;overflow:auto;white-space:pre-wrap;
                      word-break:break-word;">Ready.</pre>
+
+                <!-- Running indicator. The scan is a single blocking request with no
+                     server-side progress to read, so this reports elapsed time and a
+                     realistic duration range rather than faking a percentage. -->
+                <div class="d-none" id="qsa-progress"
+                     style="background:#0d1117;border-top:1px solid #30363d;padding:12px 16px;">
+                    <div class="d-flex align-items-center mb-2">
+                        <span class="spinner-border spinner-border-sm me-2" style="color:#27c93f;"></span>
+                        <span class="small flex-grow-1" style="color:#c9d1d9;font-family:ui-monospace,monospace;">
+                            <span id="qsa-phase">Contacting qsa.sh…</span>
+                            <span style="color:#8b949e;"> · elapsed <span id="qsa-elapsed">0s</span></span>
+                        </span>
+                    </div>
+                    <div class="progress" style="height:4px;background:#21262d;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated"
+                             style="width:100%;background:#27c93f;"></div>
+                    </div>
+                    <div class="small mt-2" style="color:#d29922;">
+                        <i class="fas fa-triangle-exclamation me-1"></i>
+                        Keep this page open. The scan runs in this request and qsa.sh stores
+                        nothing — navigating away or reloading discards the output for good.
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -746,6 +769,7 @@ document.getElementById('qsa-run-btn').addEventListener('click', function () {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Scanning…';
     out.textContent = 'Contacting qsa.sh…\n\nThe free tier takes about 30 seconds, plus a 15-second\nauthorisation countdown before the scan begins.\nA token scan can take several minutes.';
+    qsaStartProgress();
 
     const fd = new FormData();
     fd.append('action', 'qsa_scan');
@@ -769,11 +793,55 @@ document.getElementById('qsa-run-btn').addEventListener('click', function () {
         })
         .catch(e => { out.textContent = 'Request failed: ' + e; })
         .finally(() => {
+            qsaStopProgress();
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-radar me-1"></i> Run scan';
             qsaLoadSettings();
         });
 });
+
+/* Progress reporting for a request that has no readable progress.
+   qsa.sh runs a fixed pipeline, so the phase labels are keyed to its real
+   stage order and the elapsed counter is genuine. Nothing here claims a
+   percentage, because there is no percentage to report. */
+let qsaTimer = null, qsaT0 = 0;
+
+const QSA_PHASES = [
+    [0,   'Contacting qsa.sh\u2026'],
+    [3,   'Authorisation countdown (~15s) \u2014 scan has not started yet'],
+    [18,  'naabu \u2014 discovering open ports'],
+    [40,  'nmap \u2014 service and version detection'],
+    [70,  'nuclei \u2014 exposure and vulnerability checks'],
+    [150, 'Still running \u2014 token-tier scans sweep all 65,535 ports'],
+];
+
+function qsaStartProgress() {
+    qsaT0 = Date.now();
+    document.getElementById('qsa-progress').classList.remove('d-none');
+    window.addEventListener('beforeunload', qsaGuard);
+    if (qsaTimer) clearInterval(qsaTimer);
+    qsaTimer = setInterval(() => {
+        const secs = Math.floor((Date.now() - qsaT0) / 1000);
+        document.getElementById('qsa-elapsed').textContent =
+            secs < 60 ? secs + 's' : Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+        let label = QSA_PHASES[0][1];
+        for (const ph of QSA_PHASES) { if (secs >= ph[0]) label = ph[1]; }
+        document.getElementById('qsa-phase').textContent = label;
+    }, 1000);
+}
+
+function qsaStopProgress() {
+    if (qsaTimer) { clearInterval(qsaTimer); qsaTimer = null; }
+    document.getElementById('qsa-progress').classList.add('d-none');
+    window.removeEventListener('beforeunload', qsaGuard);
+}
+
+/* Browsers show their own generic wording; returnValue just has to be set. */
+function qsaGuard(e) {
+    e.preventDefault();
+    e.returnValue = 'A scan is still running. Leaving now discards the result.';
+    return e.returnValue;
+}
 
 document.getElementById('qsa-repair-btn').addEventListener('click', function () {
     const btn = this, out = document.getElementById('qsa-output');
