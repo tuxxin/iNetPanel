@@ -118,6 +118,20 @@ if (!defined('THEME_PATH'))  define('THEME_PATH',  PANEL_PATH . '/themes/default
 if (!defined('SRC_PATH'))    define('SRC_PATH',    PANEL_PATH . '/src');
 if (!defined('API_PATH'))    define('API_PATH',    PANEL_PATH . '/api');
 
+// public/index.php applies the saved timezone on every web request, but a CLI
+// script never loads it, so date() here falls back to php.ini — UTC on a stock
+// install. That is why this log read 18:33 while `stat` on the files it had
+// just written read 13:33, and it makes the log hard to correlate with
+// anything else on the box. Match the panel.
+if (class_exists('DB')) {
+    try {
+        $tz = DB::setting('timezone', '');
+        if ($tz !== '' && in_array($tz, DateTimeZone::listIdentifiers(), true)) {
+            date_default_timezone_set($tz);
+        }
+    } catch (Throwable) { /* keep the default rather than fail the update */ }
+}
+
 $currentVersion = class_exists('Version') ? Version::get() : '0.000';
 $updateChannel  = class_exists('DB') ? (DB::setting('update_channel', 'stable') ?? 'stable') : 'stable';
 log_msg("iNetPanel update check — current version: {$currentVersion}, channel: {$updateChannel}");

@@ -14,9 +14,27 @@ try {
 
         $__latestVer = DB::setting('panel_latest_ver', '');
         $__checkTs   = (int) DB::setting('panel_check_ts', '0');
-        if ($__latestVer && version_compare($__latestVer, Version::get(), '>')) {
+        $__channel   = DB::setting('update_channel', 'stable');
+
+        if ($__channel === 'beta') {
+            // Beta builds are identified by commit SHA, not by an ordered
+            // version. panel_latest_ver holds "beta-<sha>", and
+            // version_compare('beta-cdb9df2', '1.26.2', '>') is false — PHP
+            // reads "beta" as a pre-release token, so it sorts BELOW the
+            // release. The banner could therefore never appear on the beta
+            // channel however many betas shipped. Compare the SHAs instead,
+            // which is what api/settings.php and api/update_check.php do.
+            $__latestSha    = substr(DB::setting('panel_latest_beta_sha', ''), 0, 7);
+            $__installedSha = substr(DB::setting('panel_installed_beta_sha', ''), 0, 7);
+            if ($__latestSha !== '' && $__latestSha !== $__installedSha) {
+                $_updateAvailable = true;
+                // Carries its own prefix: the template no longer forces a "v",
+                // which would render "vbeta cdb9df2".
+                $_latestVer = 'beta ' . $__latestSha;
+            }
+        } elseif ($__latestVer && version_compare($__latestVer, Version::get(), '>')) {
             $_updateAvailable = true;
-            $_latestVer = $__latestVer;
+            $_latestVer = 'v' . ltrim($__latestVer, 'v');
         }
         // If cache is stale (>24h) trigger a background refresh — fire-and-forget
         if (time() - $__checkTs > 86400) {
@@ -85,7 +103,7 @@ try {
 
     <?php if ($_updateAvailable): ?>
     <a href="/admin/settings#tab-updates" class="btn btn-sm btn-warning ms-3 fw-semibold">
-        <i class="fas fa-arrow-up me-1"></i>Update available: v<?= htmlspecialchars($_latestVer) ?>
+        <i class="fas fa-arrow-up me-1"></i>Update available: <?= htmlspecialchars($_latestVer) ?>
     </a>
     <?php endif; ?>
 

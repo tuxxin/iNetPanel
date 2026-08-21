@@ -103,6 +103,7 @@ function s(string $key, string $default = ''): string {
                                     <a class="small text-muted" data-bs-toggle="collapse" href="#update-output-wrap" role="button">
                                         <i class="fas fa-terminal me-1"></i>Show update log
                                     </a>
+                                    <div class="alert d-none mt-2 mb-2" id="update-verdict"></div>
                                     <div class="collapse mt-2" id="update-output-wrap">
                                         <pre id="update-output" class="bg-dark text-light p-3 rounded small" style="max-height:250px;overflow-y:auto"></pre>
                                     </div>
@@ -879,6 +880,30 @@ if (updateNowBtn) {
                 spinner.classList.add('d-none');
                 this.disabled = false;
                 document.getElementById('update-output').textContent = data.output || '(no output)';
+
+                /* The API used to report success unconditionally, and this handler
+                   never looked at it — so an update that never ran looked identical
+                   to one that worked. State the outcome plainly. */
+                const verdict = document.getElementById('update-verdict');
+                verdict.classList.remove('d-none', 'alert-success', 'alert-danger', 'alert-warning');
+                if (data.success) {
+                    verdict.classList.add('alert-success');
+                    verdict.innerHTML = '<i class="fas fa-check me-1"></i>Update completed.';
+                } else {
+                    verdict.classList.add('alert-danger');
+                    let msg = '<i class="fas fa-triangle-exclamation me-1"></i><strong>Update did not complete.</strong>';
+                    if (data.errors && data.errors.length) {
+                        msg += '<ul class="mb-0 mt-2 small">'
+                             + data.errors.slice(0, 5).map(e =>
+                                 '<li>' + e.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) + '</li>').join('')
+                             + '</ul>';
+                    } else if (data.error) {
+                        msg += '<div class="small mt-1">' + data.error.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) + '</div>';
+                    }
+                    verdict.innerHTML = msg;
+                    // Open the raw output automatically when something went wrong.
+                    document.getElementById('update-output-wrap')?.classList.add('show');
+                }
                 // Render changelog if available
                 const clSection = document.getElementById('changelog-section');
                 const clDiv = document.getElementById('update-changelog');

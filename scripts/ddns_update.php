@@ -15,6 +15,17 @@ require_once TICORE_PATH . '/CloudflareAPI.php';
 
 $app = App::getInstance();
 
+// CLI entry point: public/index.php applies the saved timezone on every web
+// request, but a CLI script never loads it and falls back to php.ini (UTC on a
+// stock install). Apply it here too, before the first date() call below, so
+// this log agrees with the panel instead of being offset by the UTC delta.
+try {
+    $__tz = DB::setting('timezone', '');
+    if ($__tz !== '' && in_array($__tz, DateTimeZone::listIdentifiers(), true)) {
+        date_default_timezone_set($__tz);
+    }
+} catch (Throwable) { /* keep the default rather than fail the DDNS run */ }
+
 $lastIpFile = ROOT_PATH . '/db/last_ip.txt';
 $logPrefix  = '[' . date('Y-m-d H:i:s') . '] DDNS: ';
 

@@ -87,7 +87,7 @@ switch ($action) {
             $enabled  = DB::setting('cf_ddns_enabled', '0');
             $interval = (int)DB::setting('cf_ddns_interval', '5');
             if ($enabled === '1' && $interval > 0) {
-                $phpBin = 'php' . DB::setting('php_default_version', '8.4');
+                $phpBin = 'php' . DB::setting('php_default_version', PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION);
                 $cron = "*/{$interval} * * * * www-data {$phpBin} /var/www/inetpanel/scripts/ddns_update.php >> /var/log/inetpanel_ddns.log 2>&1\n";
                 $writeCron('inetpanel_ddns', $cron);
             } else {
@@ -126,7 +126,7 @@ switch ($action) {
             $autoTime    = DB::setting('auto_update_time', '02:00');
             [$aHour, $aMin] = array_pad(explode(':', $autoTime), 2, '00');
             if ($autoEnabled === '1') {
-                $phpBin2  = 'php' . DB::setting('php_default_version', '8.4');
+                $phpBin2  = 'php' . DB::setting('php_default_version', PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION);
                 $autoCron = "# iNetPanel managed — panel auto-update\n"
                     . "{$aMin} {$aHour} * * * root {$phpBin2} /var/www/inetpanel/scripts/panel_update.php >> /var/log/inetpanel_update.log 2>&1\n";
                 $writeCron('inetpanel_autoupdate', $autoCron);
@@ -150,11 +150,44 @@ switch ($action) {
 
     case 'update_now':
         Auth::requireAdmin();
-        $phpBin = 'php' . DB::setting('php_default_version', '8.4');
-        $updateResult = Shell::exec('sudo ' . escapeshellarg($phpBin) . ' /var/www/inetpanel/scripts/panel_update.php --force', 'panel-update');
-        $output = $updateResult['output'];
-        $changelog = DB::setting('panel_latest_changelog', '');
-        echo json_encode(['success' => true, 'output' => trim($output ?: 'No output.'), 'changelog' => $changelog]);
+        // Fall back to the version actually running this request, not a literal
+        // '8.4'. On a box where php_default_version is unset that literal names
+        // an uninstalled binary, sudo refuses to match it against the sudoers
+        // rule, and the update silently does nothing.
+        $phpBin = 'php' . DB::setting('php_default_version',
+                                      PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION);
+        if (!preg_match('/^php\d+\.\d+$/', $phpBin)) {
+            $phpBin = 'php' . PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+        }
+
+        $updateResult = Shell::exec('sudo ' . escapeshellarg($phpBin)
+            . ' /var/www/inetpanel/scripts/panel_update.php --force', 'panel-update');
+        $output = trim($updateResult['output'] ?? '');
+
+        // The exit status alone is not enough. panel_update.php can complete
+        // successfully overall while individual deploy steps fail and log an
+        // ERROR line — that is exactly how a failed inetp deploy went unnoticed.
+        // Surface those, and never report a bare success when any appeared.
+        $errors = [];
+        foreach (explode("\n", $output) as $line) {
+            if (stripos($line, 'ERROR') !== false) {
+                $errors[] = trim(preg_replace('/^\[[^\]]*\]\s*/', '', $line));
+            }
+        }
+
+        // 'success' was previously hardcoded true, so an update that never ran
+        // at all still reported success to the browser.
+        $ok = ($updateResult['success'] ?? false) && !$errors;
+
+        echo json_encode([
+            'success'   => $ok,
+            'output'    => $output ?: 'No output — the updater produced nothing, which means it did not run.',
+            'errors'    => $errors,
+            'error'     => $ok ? '' : ($errors
+                            ? implode(' | ', array_slice($errors, 0, 3))
+                            : 'The updater exited with status ' . ($updateResult['code'] ?? '?') . '.'),
+            'changelog' => DB::setting('panel_latest_changelog', ''),
+        ]);
         break;
 
     case 'check_updates':
@@ -380,7 +413,7 @@ switch ($action) {
     case 'ddns_test':
         Auth::requireAdmin();
         // Force an immediate DDNS update attempt
-        $phpBin = 'php' . DB::setting('php_default_version', '8.4');
+        $phpBin = 'php' . DB::setting('php_default_version', PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION);
         if (!preg_match('/^php\d+\.\d+$/', $phpBin)) {
             echo json_encode(['success' => false, 'error' => 'Invalid PHP version in settings.']);
             break;
