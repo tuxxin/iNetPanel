@@ -23,6 +23,54 @@ function qsa_webhook_kind(string $url): string
     return 'generic';
 }
 
+/**
+ * Scan archive on disk (root:www-data 0750), written by qsa_scan.sh.
+ * Filenames are scan-YYYYMMDDTHHMMSSz.txt, always UTC.
+ */
+function qsa_scan_dir(): string { return '/var/lib/inetpanel/qsa'; }
+
+/** Parse a scan filename back to a UTC timestamp, or null if it is not one. */
+function qsa_stamp_from(string $name): ?int
+{
+    if (!preg_match('/^scan-(\d{8})T(\d{6})z\.txt$/', $name, $m)) return null;
+    $dt = DateTime::createFromFormat('Ymd His', $m[1] . ' ' . $m[2], new DateTimeZone('UTC'));
+    return $dt ? $dt->getTimestamp() : null;
+}
+
+/**
+ * List archived scans, newest first. Reads only the summary line rather than
+ * each whole file, so the list stays cheap with KEEP_RUNS=30 on disk.
+ */
+function qsa_history(int $limit = 15): array
+{
+    $out = [];
+    foreach (glob(qsa_scan_dir() . '/scan-*.txt') ?: [] as $path) {
+        $ts = qsa_stamp_from(basename($path));
+        if ($ts === null) continue;
+        $ports = null;
+        $fh = @fopen($path, 'r');
+        if ($fh) {
+            while (($line = fgets($fh)) !== false) {
+                if (preg_match('/^\s*Open ports:\s*(\d+)/i', $line, $m)) { $ports = (int) $m[1]; break; }
+            }
+            fclose($fh);
+        }
+        $out[] = [
+            'id'    => basename($path, '.txt'),
+            'ts'    => $ts,
+            // Show the zone. PHP's date.timezone is commonly UTC while the host
+            // is not, so a bare timestamp here reads as local time and is off by
+            // the offset — the same trap that makes update logs hard to correlate
+            // with `ls` output.
+            'when'  => date('Y-m-d H:i T', $ts),
+            'ports' => $ports,
+            'size'  => filesize($path) ?: 0,
+        ];
+    }
+    usort($out, fn($a, $b) => $b['ts'] <=> $a['ts']);
+    return array_slice($out, 0, $limit);
+}
+
 switch ($action) {
 
     // -------------------------------------------------------------------------
@@ -457,6 +505,32 @@ switch ($action) {
         }
         @unlink($tmp);
         echo json_encode(['success' => true, 'monitor' => $monitor && file_exists($cron)]);
+        break;
+
+    case 'qsa_history':
+        echo json_encode(['success' => true, 'scans' => qsa_history()]);
+        break;
+
+    case 'qsa_view':
+        // Resolve strictly from the archive listing rather than trusting the id:
+        // no path is ever built from user input, so traversal is impossible.
+        $want = (string) ($_GET['id'] ?? $_POST['id'] ?? '');
+        $hit  = null;
+        foreach (qsa_history(100) as $row) {
+            if ($row['id'] === $want) { $hit = $row; break; }
+        }
+        if ($hit === null) {
+            echo json_encode(['success' => false, 'error' => 'No such scan in the archive.']);
+            break;
+        }
+        $body = @file_get_contents(qsa_scan_dir() . '/' . $hit['id'] . '.txt');
+        if ($body === false) {
+            echo json_encode(['success' => false,
+                'error' => 'Scan file is not readable by the panel. Run: sudo inetp qsa_scan --quiet once to repair permissions.']);
+            break;
+        }
+        echo json_encode(['success' => true, 'id' => $hit['id'], 'when' => $hit['when'],
+                          'ports' => $hit['ports'], 'output' => $body]);
         break;
 
     case 'qsa_repair_cli':

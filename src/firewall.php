@@ -279,12 +279,25 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
                         <div class="progress-bar progress-bar-striped progress-bar-animated"
                              style="width:100%;background:#27c93f;"></div>
                     </div>
-                    <div class="small mt-2" style="color:#d29922;">
-                        <i class="fas fa-triangle-exclamation me-1"></i>
-                        Keep this page open. The scan runs in this request and qsa.sh stores
-                        nothing — navigating away or reloading discards the output for good.
+                    <div class="small mt-2" style="color:#8b949e;">
+                        <i class="fas fa-circle-info me-1"></i>
+                        You can leave this page — the result is saved to this server and
+                        reloads here. Staying just lets you watch it finish.
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Scan history. qsa.sh keeps nothing server-side, so this is the panel's
+             own archive (/var/lib/inetpanel/qsa, 30 runs) covering both manual
+             scans and monitored ones. -->
+        <div class="card border-0 shadow-sm mb-3 d-none" id="qsa-history-card">
+            <div class="card-body">
+                <h6 class="mb-1">Previous scans</h6>
+                <p class="text-muted small mb-2">
+                    The last 30 scans are kept on this server. Select one to load it above.
+                </p>
+                <div class="list-group list-group-flush" id="qsa-history-list"></div>
             </div>
         </div>
 
@@ -797,6 +810,7 @@ document.getElementById('qsa-run-btn').addEventListener('click', function () {
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-radar me-1"></i> Run scan';
             qsaLoadSettings();
+            qsaLoadHistory(false);
         });
 });
 
@@ -818,7 +832,6 @@ const QSA_PHASES = [
 function qsaStartProgress() {
     qsaT0 = Date.now();
     document.getElementById('qsa-progress').classList.remove('d-none');
-    window.addEventListener('beforeunload', qsaGuard);
     if (qsaTimer) clearInterval(qsaTimer);
     qsaTimer = setInterval(() => {
         const secs = Math.floor((Date.now() - qsaT0) / 1000);
@@ -833,14 +846,49 @@ function qsaStartProgress() {
 function qsaStopProgress() {
     if (qsaTimer) { clearInterval(qsaTimer); qsaTimer = null; }
     document.getElementById('qsa-progress').classList.add('d-none');
-    window.removeEventListener('beforeunload', qsaGuard);
 }
 
-/* Browsers show their own generic wording; returnValue just has to be set. */
-function qsaGuard(e) {
-    e.preventDefault();
-    e.returnValue = 'A scan is still running. Leaving now discards the result.';
-    return e.returnValue;
+/* Scan archive. qsa.sh stores nothing, so the panel keeps its own copy and a
+   result is no longer lost by navigating away mid-scan. */
+function qsaLoadHistory(autoOpenLatest) {
+    fetch('/api/firewall?action=qsa_history')
+        .then(r => r.json())
+        .then(d => {
+            const card = document.getElementById('qsa-history-card');
+            const list = document.getElementById('qsa-history-list');
+            if (!d.success || !d.scans || !d.scans.length) { card.classList.add('d-none'); return; }
+            list.innerHTML = '';
+            d.scans.forEach((sc, i) => {
+                const a = document.createElement('a');
+                a.href = '#';
+                a.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2';
+                const ports = (sc.ports === null || sc.ports === undefined)
+                    ? '<span class="text-muted">—</span>'
+                    : (sc.ports === 0
+                        ? '<span class="badge bg-success">0 open ports</span>'
+                        : '<span class="badge bg-warning text-dark">' + sc.ports + ' open port' + (sc.ports === 1 ? '' : 's') + '</span>');
+                a.innerHTML = '<span class="small"><i class="fas fa-clock me-2 text-muted"></i>'
+                            + sc.when + (i === 0 ? ' <span class="badge bg-secondary ms-1">latest</span>' : '')
+                            + '</span>' + ports;
+                a.addEventListener('click', ev => { ev.preventDefault(); qsaOpenScan(sc.id); });
+                list.appendChild(a);
+            });
+            card.classList.remove('d-none');
+            if (autoOpenLatest) qsaOpenScan(d.scans[0].id, true);
+        })
+        .catch(() => {});
+}
+
+function qsaOpenScan(id, quiet) {
+    fetch('/api/firewall?action=qsa_view&id=' + encodeURIComponent(id))
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) { if (!quiet) showFwToast(d.error || 'Could not load that scan.', 'danger'); return; }
+            document.getElementById('qsa-output-card').classList.remove('d-none');
+            document.getElementById('qsa-output').textContent =
+                '# saved scan from ' + d.when + '\n\n' + qsaClean(d.output);
+        })
+        .catch(() => { if (!quiet) showFwToast('Could not load that scan.', 'danger'); });
 }
 
 document.getElementById('qsa-repair-btn').addEventListener('click', function () {
@@ -904,5 +952,6 @@ document.getElementById('qsa-token-save').addEventListener('click', function () 
 });
 
 qsaLoadSettings();
+qsaLoadHistory(true);   // restores the last scan into the pane on page load
 
 </script>

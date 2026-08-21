@@ -178,11 +178,56 @@ panel_set_setting() {
         || echo "warning: could not record '$1' in the panel database" >&2
 }
 
+# Archive of scan results.
+#
+# The panel reads these directly, so the directory is root:www-data 0750 rather
+# than the old 0700: readable by the web user, still closed to the unprivileged
+# hosting accounts that share this box — a scan report is a map of the server's
+# open ports and has no business being world-readable.
+init_state_dir() {
+    mkdir -p "$STATE_DIR"
+    chown root:www-data "$STATE_DIR" 2>/dev/null || true
+    chmod 750 "$STATE_DIR"
+}
+
+# Keep a scan and prune the archive. Used by both manual and monitored scans so
+# a result is never lost just because it was run from the panel button.
+archive_scan() {
+    local file="$1"
+    chown root:www-data "$file" 2>/dev/null || true
+    chmod 640 "$file"
+    cp "$file" "$STATE_DIR/latest.txt"
+    chown root:www-data "$STATE_DIR/latest.txt" 2>/dev/null || true
+    chmod 640 "$STATE_DIR/latest.txt"
+    # Prune old runs, newest first.
+    # shellcheck disable=SC2012
+    ls -1t "$STATE_DIR"/scan-*.txt 2>/dev/null | tail -n +$((KEEP_RUNS + 1)) | xargs -r rm -f
+}
+
+# A rate-limit notice or usage page is not a scan result. Storing one would both
+# pollute the history and produce a spurious "everything changed" next run.
+is_real_scan() {
+    [ -s "$1" ] && ! grep -qiE "rate.?limit|try again in|usage:" "$1"
+}
+
 case "$MODE" in
     scan)
         [ "$QUIET" -eq 0 ] && echo -e "${BOLD}Scanning this server's public exposure via qsa.sh (${TIER} tier)...${NC}" >&2
-        run_scan
-        exit $?
+        init_state_dir
+        NOW=$(date -u +%Y%m%dT%H%M%Sz)
+        CURRENT="$STATE_DIR/scan-${NOW}.txt"
+        run_scan > "$CURRENT" 2>&1
+        RC=$?
+        cat "$CURRENT"
+        # Only keep results worth keeping; a failed or rate-limited run is shown
+        # to the caller but must not enter the history.
+        if [ "$RC" -eq 0 ] && is_real_scan "$CURRENT"; then
+            archive_scan "$CURRENT"
+            panel_set_setting qsa_last_run "$(date '+%Y-%m-%d %H:%M:%S')"
+        else
+            rm -f "$CURRENT"
+        fi
+        exit "$RC"
         ;;
 
     diff)
@@ -195,7 +240,7 @@ case "$MODE" in
         ;;
 
     monitor)
-        mkdir -p "$STATE_DIR"; chmod 700 "$STATE_DIR"
+        init_state_dir
         NOW=$(date -u +%Y%m%dT%H%M%Sz)
         CURRENT="$STATE_DIR/scan-${NOW}.txt"
 
@@ -207,7 +252,7 @@ case "$MODE" in
         fi
         # A rate-limit or usage page is not a scan result; storing it would
         # produce a spurious "everything changed" on the next run.
-        if [ ! -s "$CURRENT" ] || grep -qiE "rate.?limit|try again in|usage:" "$CURRENT"; then
+        if ! is_real_scan "$CURRENT"; then
             echo -e "${YELLOW}qsa.sh did not return a scan (rate limited?). Keeping previous state.${NC}" >&2
             head -5 "$CURRENT" | sed 's/^/  /' >&2
             rm -f "$CURRENT"
@@ -221,11 +266,7 @@ case "$MODE" in
                 cp "$STATE_DIR/latest.txt" "$STATE_DIR/previous.txt"
             fi
         fi
-        cp "$CURRENT" "$STATE_DIR/latest.txt"
-
-        # Prune old runs, newest first.
-        # shellcheck disable=SC2012
-        ls -1t "$STATE_DIR"/scan-*.txt 2>/dev/null | tail -n +$((KEEP_RUNS + 1)) | xargs -r rm -f
+        archive_scan "$CURRENT"
 
         if [ "$CHANGED" -eq 1 ]; then
             # --label: without it the ---/+++ header shows the process-substitution
