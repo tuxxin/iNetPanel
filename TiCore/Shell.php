@@ -35,6 +35,7 @@ class Shell
         'cf_remoteip',
         'session_reaper',
         'qsa_scan',
+        'restore_helper',
         'list',
     ];
 

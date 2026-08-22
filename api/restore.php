@@ -11,19 +11,9 @@ $stagingDir = '/backup/restore_staging';
 
 // Ensure staging directory exists and is writable by www-data
 if (!is_dir($stagingDir) || !is_writable($stagingDir)) {
-    // Staged in Shell::STAGE_DIR, never /tmp. This script is executed BY ROOT, and
-    // /tmp is 1777 with a sticky bit: a tenant could create this exact name (the
-    // PID is guessable) as a file they own at mode 0444, so file_put_contents
-    // could not overwrite it and the sticky bit stopped www-data unlinking it —
-    // root then executed the tenant's script. Same root cause as
-    // GHSA-mjmx-xpqq-p2h8, escalated from arbitrary read to code execution.
-    $hook = Shell::stage('inetp_hook_restore_staging_' . getmypid(),
-        "#!/bin/bash\nmkdir -p {$stagingDir}\nchown www-data:www-data {$stagingDir}\nchmod 0770 {$stagingDir}\n",
-        0750);
-    if ($hook !== null) {
-        exec('sudo /bin/bash ' . escapeshellarg($hook) . ' 2>/dev/null');
-        @unlink($hook);
-    }
+    // A fixed-purpose root subcommand, not a generated script run through a
+    // wildcard sudo grant. Nothing here is caller-controlled.
+    Shell::run('restore_helper', ['prepare_staging']);
 }
 
 switch ($action) {
@@ -92,27 +82,14 @@ case 'upload_status':
 // ── Return permanent restore FTP account info ────────────────────────────────
 case 'ftp_info':
     // Ensure restore user exists with root's password hash (no plaintext needed)
-    exec('id restore 2>/dev/null', $ftpIdOut, $ftpIdCode);
-    $script = "#!/bin/bash\n";
-    if ($ftpIdCode !== 0) {
-        $script .= "useradd -d " . escapeshellarg($stagingDir) . " -s /bin/bash -g www-data restore\n";
-    } else {
-        $script .= "usermod -s /bin/bash -d " . escapeshellarg($stagingDir) . " restore\n";
-    }
-    // Copy root's password hash directly — no plaintext password needed
-    $script .= "ROOT_HASH=\$(getent shadow root | cut -d: -f2)\n";
-    $script .= "usermod -p \"\$ROOT_HASH\" restore\n";
-    // Ensure in vsftpd whitelist
-    $script .= "grep -qx restore /etc/vsftpd.userlist 2>/dev/null || echo restore >> /etc/vsftpd.userlist\n";
-    $script .= "systemctl reload vsftpd 2>/dev/null\n";
-    // Root executes this — stage it where tenants cannot reach. See the note above.
-    $hook = Shell::stage('inetp_hook_restore_ftp_' . getmypid(), $script, 0750);
-    if ($hook === null) {
-        echo json_encode(['success' => false, 'error' => 'Could not stage the FTP setup script.']);
+    // The user name, home directory, shell and vsftpd list are all fixed inside
+    // the helper — the panel supplies nothing, so there is no argument to abuse.
+    $ftpSetup = Shell::run('restore_helper', ['setup_ftp_user']);
+    if (!$ftpSetup['success']) {
+        echo json_encode(['success' => false,
+            'error' => 'Could not prepare the restore FTP account: ' . $ftpSetup['error']]);
         break;
     }
-    exec('sudo /bin/bash ' . escapeshellarg($hook) . ' 2>&1', $hookOut, $hookCode);
-    @unlink($hook);
 
     // Detect server IP
     $serverIp = trim(shell_exec("ip route get 1.1.1.1 2>/dev/null | awk '{print \$7; exit}'") ?: '');

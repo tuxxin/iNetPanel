@@ -139,6 +139,7 @@ case "$COMMAND" in
     cf_remoteip)       bash "$SCRIPTS_DIR/cf_remoteip.sh"      "$@" ;;
     session_reaper)    bash "$SCRIPTS_DIR/session_reaper.sh"   "$@" ;;
     qsa_scan)          bash "$SCRIPTS_DIR/qsa_scan.sh"         "$@" ;;
+    restore_helper)    bash "$SCRIPTS_DIR/restore_helper.sh"    "$@" ;;
     malware_scan)      bash "$SCRIPTS_DIR/malware_scan.sh"     "$@" ;;
 
     # Maintenance
@@ -218,6 +219,7 @@ case "$COMMAND" in
         echo -e "    ${GREEN}cf_remoteip${NC}       Restore real client IPs behind Cloudflare Tunnel"
         echo -e "    ${GREEN}session_reaper${NC}    Expire PHP session files the distro reaper cannot see"
         echo -e "    ${GREEN}qsa_scan${NC}          External exposure scan of this server via qsa.sh"
+        echo -e "    ${GREEN}restore_helper${NC}    Privileged steps for the backup-restore workflow (used by the panel)"
         echo -e "    ${GREEN}malware_scan${NC}      Scan PHP files for backdoors and webshells"
         echo ""
         echo -e "  ${BOLD}Tools:${NC}"

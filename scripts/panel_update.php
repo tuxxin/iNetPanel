@@ -569,6 +569,11 @@ www-data ALL=(root) NOPASSWD: /usr/bin/tail
 www-data ALL=(root) NOPASSWD: /usr/bin/journalctl
 www-data ALL=(root) NOPASSWD: /usr/bin/dpkg
 www-data ALL=(root) NOPASSWD: /bin/sed
+# Admin-authored hook scripts (Accounts -> Hook Scripts) run as root by design:
+# the feature is "execute this bash on account create/delete". The path is
+# confined to the staging directory, which is 0700 www-data, so no hosting tenant
+# can place or alter a file here. This grant does not widen what a compromised
+# panel can do — it could equally write a hook into the database and trigger it.
 www-data ALL=(root) NOPASSWD: /bin/bash /var/lib/inetpanel/staging/inetp_hook_*
 www-data ALL=(root) NOPASSWD: /bin/cp /var/lib/inetpanel/staging/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf
 www-data ALL=(root) NOPASSWD: /bin/cp /var/lib/inetpanel/staging/inetp_motd /etc/motd
