@@ -135,7 +135,7 @@ function executeHook(string $hookType, array $vars): void
         }
         $script .= $code;
 
-        $tmp = tempnam('/tmp', 'inetp_hook_');
+        $tmp = tempnam(Shell::STAGE_DIR, 'inetp_hook_');
         file_put_contents($tmp, $script);
         chmod($tmp, 0700);
 

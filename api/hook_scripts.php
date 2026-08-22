@@ -53,13 +53,13 @@ switch ($action) {
 
         // Validate bash syntax before saving
         if (trim($code) !== '') {
-            $tmp = tempnam('/tmp', 'inetp_hook_');
+            $tmp = tempnam(Shell::STAGE_DIR, 'inetp_hook_');
             file_put_contents($tmp, "#!/bin/bash\n" . $code);
             $check = Shell::exec('bash -n ' . escapeshellarg($tmp) . ' 2>&1', 'hook-validate');
             @unlink($tmp);
 
             if (!$check['success']) {
-                $errors = preg_replace('/\/tmp\/inetp_hook_\w+/', 'script', $check['output']);
+                $errors = preg_replace('#' . preg_quote(Shell::STAGE_DIR, '#') . '/inetp_hook_\w+#', 'script', $check['output']);
                 echo json_encode(['success' => false, 'error' => 'Bash syntax error:', 'details' => $errors]);
                 break;
             }
@@ -77,7 +77,7 @@ switch ($action) {
             break;
         }
 
-        $tmp = tempnam('/tmp', 'inetp_hook_');
+        $tmp = tempnam(Shell::STAGE_DIR, 'inetp_hook_');
         file_put_contents($tmp, "#!/bin/bash\n" . $code);
         $check = Shell::exec('bash -n ' . escapeshellarg($tmp) . ' 2>&1', 'hook-validate');
         @unlink($tmp);
@@ -85,7 +85,7 @@ switch ($action) {
         if ($check['success']) {
             echo json_encode(['success' => true, 'valid' => true]);
         } else {
-            $errors = preg_replace('/\/tmp\/inetp_hook_\w+/', 'script', $check['output']);
+            $errors = preg_replace('#' . preg_quote(Shell::STAGE_DIR, '#') . '/inetp_hook_\w+#', 'script', $check['output']);
             echo json_encode(['success' => true, 'valid' => false, 'errors' => $errors]);
         }
         break;
