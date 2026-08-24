@@ -136,6 +136,34 @@ Not features. Known issues and debt, recorded so they are not rediscovered.
 
   Do not attempt this as a hotfix. It changes request handling for every hosted
   site and needs a maintenance window.
+- **mod_remoteip DELETES the header hosted apps read first, pushing them onto an
+  attacker-controlled one.** This is the more serious half and it is REMOTE, not
+  local. mod_remoteip consumes the header named by `RemoteIPHeader`, so once it
+  accepts a request `HTTP_CF_CONNECTING_IP` is absent from `$_SERVER`. The common
+  app idiom is
+  `$_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR']`
+  followed by taking the left-most comma-separated element. With the first branch
+  always unset, apps land on `X-Forwarded-For` — and Cloudflare *appends* to XFF
+  rather than replacing it, so an attacker-supplied value stays left-most all the
+  way to the origin. Any internet visitor gets a fresh rate-limit bucket per
+  request by rotating one header.
+
+  Measured on web01: **42 files** under `/home/*/*/www` and `/home/*/*/TiCore`
+  use that idiom, including `discountinvictas` contact and review handlers
+  (5/900s and 3/3600s limits) and `infil.io`'s `Request::ip()`. Stored
+  `ip_address` columns become attacker-chosen.
+
+  The irony is that `cf_remoteip.sh`'s own header comment warns about the
+  XFF-left-most bug and claims mod_remoteip "fixes all of it centrally, so hosted
+  apps need no special code". By deleting the header those apps check first, it
+  pushes them off the good value onto the bad one. **These apps are correct when
+  mod_remoteip is inactive and wrong when it is active.**
+
+  Candidate mitigation: add `RequestHeader unset X-Forwarded-For` to the
+  generated config so the fall-through lands on `REMOTE_ADDR`, which
+  mod_remoteip has already set correctly. Cheap and targeted, but it changes
+  request handling for every hosted site, so it needs testing against real
+  tenant apps rather than shipping blind.
 - Audit whether any other privileged call site still builds a path from
   caller-supplied input. The `.htaccess` finding and the `/tmp` staging fixes
   were the same root cause in two different places; assume there is a third.
