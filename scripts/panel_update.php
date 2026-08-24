@@ -514,8 +514,16 @@ log_msg('Installed session reaper cron');
 // client IP silently reverts to Cloudflare edge addresses.
 if (file_exists('/root/scripts/cf_remoteip.sh')) {
     $cfCron = "/etc/cron.d/inetpanel_remoteip";
+    // PATH is mandatory here. A /etc/cron.d file does NOT inherit the PATH from
+    // /etc/crontab; cron's built-in default is just /usr/bin:/bin, which excludes
+    // /usr/sbin where apache2ctl and the a2* helpers live. Without this the weekly
+    // run deleted its own config every Monday. The script now sets PATH itself as
+    // well — both, because either alone is one edit away from regressing.
+    // Output goes to a log rather than /dev/null: this failed silently for a week
+    // precisely because nothing was recorded anywhere.
     file_put_contents($cfCron, "# iNetPanel Cloudflare RemoteIP refresh — auto-managed by panel_update.php\n"
-        . "43 4 * * 1 root /root/scripts/cf_remoteip.sh >/dev/null 2>&1\n");
+        . "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
+        . "43 4 * * 1 root /root/scripts/cf_remoteip.sh >> /var/log/inetpanel_remoteip.log 2>&1\n");
     chmod($cfCron, 0644);
     log_msg('Installed Cloudflare RemoteIP refresh cron');
 }

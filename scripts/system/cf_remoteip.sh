@@ -27,6 +27,19 @@
 # IPs, so this refreshes on a timer and NEVER installs a partial list.
 # ==============================================================================
 
+# cron runs with PATH=/usr/bin:/bin — /etc/cron.d entries do NOT inherit the PATH
+# set in /etc/crontab — and apache2ctl, a2enconf, a2disconf and a2enmod all live in
+# /usr/sbin. Under cron they were therefore "command not found", silently, because
+# every call site suppressed output. The success test below is
+# `apache2ctl configtest | grep -q "Syntax OK"`, which can never match when
+# apache2ctl does not resolve, so the script concluded its OWN config was invalid
+# and took the revert path: a2disconf silently failed (leaving the symlink) while
+# rm -f removed the target. Result: a dangling symlink every Monday, with Apache
+# still applying the deleted directives from memory until the next reload.
+# Set PATH explicitly so this does not depend on how we were invoked.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
 CONF=/etc/apache2/conf-available/inetpanel-remoteip.conf
 V4=https://www.cloudflare.com/ips-v4
 V6=https://www.cloudflare.com/ips-v6
@@ -49,6 +62,18 @@ if [ "$1" = "--check" ]; then
         echo -e "  ${RED}${CONF} missing${NC}"
     fi
     exit 0
+fi
+
+# Verify every external tool up front. A missing tool must never be able to send
+# this script down a path where it deletes a working configuration.
+MISSING=""
+for _t in apache2ctl a2enconf a2disconf a2enmod install curl systemctl; do
+    command -v "$_t" >/dev/null 2>&1 || MISSING="${MISSING} ${_t}"
+done
+if [ -n "$MISSING" ]; then
+    echo -e "${RED}Required tool(s) not found:${MISSING}${NC}" >&2
+    echo "Leaving the existing configuration untouched." >&2
+    exit 1
 fi
 
 TMP=$(mktemp)
@@ -85,7 +110,10 @@ COUNT=$(printf '%s' "$RANGES" | grep -c .)
     echo "</IfModule>"
 } > "$TMP"
 
-install -m 0644 "$TMP" "$CONF"
+if ! install -m 0644 "$TMP" "$CONF"; then
+    echo -e "${RED}Could not write ${CONF} — leaving the previous configuration in place.${NC}" >&2
+    exit 1
+fi
 a2enmod remoteip   >/dev/null 2>&1
 a2enconf inetpanel-remoteip >/dev/null 2>&1
 
@@ -95,8 +123,22 @@ if apache2ctl configtest 2>&1 | grep -q "Syntax OK"; then
     exit 0
 fi
 
-echo -e "${RED}Apache config invalid — reverting.${NC}" >&2
+# configtest failed. That does not prove THIS config is at fault — an unrelated
+# error elsewhere in the Apache tree fails the same test, and the old code then
+# deleted a perfectly good file because of someone else's mistake. Disable ours
+# and re-test: only if Apache becomes valid without it is the fault actually ours.
 a2disconf inetpanel-remoteip >/dev/null 2>&1
-rm -f "$CONF"
+
+if apache2ctl configtest 2>&1 | grep -q "Syntax OK"; then
+    rm -f "$CONF"
+    echo -e "${RED}This RemoteIP config is invalid — removed it and left Apache as it was.${NC}" >&2
+    exit 1
+fi
+
+# Still invalid without us: the breakage is pre-existing. Put ours back exactly as
+# it was and report the real error rather than silently discarding our own config.
+a2enconf inetpanel-remoteip >/dev/null 2>&1
+echo -e "${RED}Apache config was already invalid before this change — RemoteIP config left in place.${NC}" >&2
+echo -e "${YELLOW}Fix the error below, then re-run: inetp cf_remoteip${NC}" >&2
 apache2ctl configtest 2>&1 | sed 's/^/    /' >&2
 exit 1
