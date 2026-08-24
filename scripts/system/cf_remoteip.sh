@@ -103,7 +103,12 @@ COUNT=$(printf '%s' "$RANGES" | grep -c .)
     echo "# Refreshed on a timer; regenerate with: inetp cf_remoteip"
     echo "<IfModule mod_remoteip.c>"
     echo "    RemoteIPHeader CF-Connecting-IP"
-    echo "    # cloudflared hands off over loopback."
+    echo "    # cloudflared hands off over loopback, so loopback must be trusted."
+    echo "    # KNOWN LIMITATION: every local user reaches loopback too, so any local"
+    echo "    # account can set CF-Connecting-IP and have Apache believe it. Apache"
+    echo "    # cannot tell the tunnel from a local process by address alone. On a"
+    echo "    # server with untrusted shell/FTP tenants, treat client IPs as advisory"
+    echo "    # for anything security-critical. Tracked in ROADMAP.md."
     echo "    RemoteIPTrustedProxy 127.0.0.1"
     echo "    RemoteIPTrustedProxy ::1"
     printf '%s\n' "$RANGES" | grep . | sed 's/^/    RemoteIPTrustedProxy /'
