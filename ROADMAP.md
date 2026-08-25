@@ -8,6 +8,47 @@ Current release: **1.27.1**
 
 ---
 
+## DO THIS FIRST (next session)
+
+**Decide what mod_remoteip should actually do, then make the config match.**
+
+State on web01 as of 2026-08-24, verified:
+
+- `remoteip_module (shared)` **is loaded** (`apache2ctl -M`), and
+  `mods-enabled/remoteip.load` is intact.
+- Its config is **gone**. `conf-available/inetpanel-remoteip.conf` was deleted by
+  the cron bug fixed in 1.27.3, and the dangling `conf-enabled` symlink has been
+  removed.
+- `conf-available/inetpanel-origin.conf` contains exactly one directive:
+  `Protocols http/1.1`. It has nothing to do with client IPs.
+- Nothing anywhere under `/etc/apache2` now references `RemoteIP` or
+  `CF-Connecting-IP`.
+
+So the module is loaded but inert — **a loaded module with no configuration**,
+not an unloaded one. The distinction decides the fix: the module does not need
+enabling, the configuration needs restoring, and that is exactly what Monday's
+04:43 cron will do on its own now that 1.27.3 has landed.
+
+Consequences of leaving it inert:
+
+- Every tunnelled request appears to come from `127.0.0.1`, and fail2ban's
+  `ignoreip = 127.0.0.1/8` means **all tunnelled traffic is invisible to every
+  jail**. No brute-force protection against remote attackers.
+- Hosted apps fall back to `CF-Connecting-IP`, which is present and trustworthy
+  while the module is inert. Those 42 files are *correct* in this state.
+
+Consequences of restoring it (what the cron will do Monday):
+
+- fail2ban sees real client IPs again.
+- The loopback spoof returns (any local tenant forges `CF-Connecting-IP`).
+- The XFF fall-through returns, and that one is **remote**.
+
+Both are documented under Queued engineering work below. Pick a direction before
+Monday 04:43, or `rm /etc/cron.d/inetpanel_remoteip` to hold it off. Restoring
+manually is `inetp cf_remoteip`.
+
+---
+
 ## Planned features
 
 ### ClamAV integration
