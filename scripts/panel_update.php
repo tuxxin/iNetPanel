@@ -16,6 +16,17 @@ define('TMP_ZIP',     WORK_DIR . '/inetpanel-update.zip');
 define('TMP_DIR',     WORK_DIR . '/extract');
 define('GH_API_URL',  'https://api.github.com/repos/tuxxin/inetpanel/releases/latest');
 
+// cron runs with PATH=/usr/bin:/bin, and /etc/cron.d entries do NOT inherit the
+// PATH from /etc/crontab. a2enconf, a2disconf and apache2ctl all live in /usr/sbin,
+// so under cron they resolved to nothing — silently, because every call site here
+// redirects its own output. The origin-hardening block below then read an empty
+// `apache2ctl configtest` as "not Syntax OK", took its revert path, and DELETED the
+// conf it had just written, on every nightly run. Same root cause as the
+// cf_remoteip cron bug fixed in 1.27.3. Set PATH explicitly rather than depending
+// on how we were invoked.
+putenv('PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin');
+$_ENV['PATH'] = getenv('PATH');
+
 $force = in_array('--force', $argv ?? [], true);
 
 if (!is_dir(WORK_DIR)) {
@@ -512,6 +523,18 @@ log_msg('Installed session reaper cron');
 
 // Refresh the Cloudflare trusted-proxy ranges weekly. If they go stale the real
 // client IP silently reverts to Cloudflare edge addresses.
+// Self-heal: if the RemoteIP config is absent, run it now rather than waiting up
+// to a week for the Monday cron. Covers boxes installed before the installer ran
+// it, and boxes where a previous run failed. Non-fatal either way.
+if (file_exists('/root/scripts/cf_remoteip.sh')
+    && !file_exists('/etc/apache2/conf-available/inetpanel-remoteip.conf')) {
+    $rc = 0; $ro = [];
+    exec('/root/scripts/cf_remoteip.sh 2>&1', $ro, $rc);
+    log_msg($rc === 0
+        ? 'Configured mod_remoteip (was missing) — hosted sites now see real client IPs'
+        : 'WARNING: mod_remoteip config missing and could not be created: ' . trim(implode(' ', array_slice($ro, -2))));
+}
+
 if (file_exists('/root/scripts/cf_remoteip.sh')) {
     $cfCron = "/etc/cron.d/inetpanel_remoteip";
     // PATH is mandatory here. A /etc/cron.d file does NOT inherit the PATH from
@@ -748,6 +771,99 @@ if (file_exists($lightyConf)) {
 // from Cloudflare's edge; only the origin hop changes. The directive lives in its
 // own conf-available file (inherited by every vhost, server scope) so that
 // optimize_server.sh, multiphp version switches, and SSL reissue can't clobber it.
+// Hosted-site hardening: no dot-files (.git, .env) and no directory listing.
+// Maintained here as well as in the installer so existing installs pick it up on
+// their next update - rebuild_vhosts.sh deliberately never rewrites an existing
+// vhost, so a template-only change would reach new domains only.
+// Existing vhosts were generated with "Options Indexes FollowSymLinks", so every
+// directory without an index file lists publicly. A global <Directory /home> cannot
+// fix that - a vhost's own <Directory docroot> is more specific and wins - and
+// rebuild_vhosts.sh never rewrites an existing vhost. So migrate them in place,
+// once, idempotently. A tenant who wants a listing can still set Options +Indexes
+// in .htaccess, since AllowOverride All is in effect.
+$vhostDir = '/etc/apache2/sites-available';
+if (is_dir($vhostDir)) {
+    $migrated = [];
+    foreach (glob($vhostDir . '/*.conf') ?: [] as $vh) {
+        $body = @file_get_contents($vh);
+        if ($body === false || strpos($body, 'Options Indexes FollowSymLinks') === false) {
+            continue;
+        }
+        $new = str_replace('Options Indexes FollowSymLinks',
+                           'Options -Indexes FollowSymLinks', $body);
+        if ($new !== $body && @file_put_contents($vh, $new) !== false) {
+            $migrated[] = basename($vh);
+        }
+    }
+    if ($migrated) {
+        $vt = (string) shell_exec('apache2ctl configtest 2>&1');
+        if (stripos($vt, 'Syntax OK') !== false) {
+            shell_exec('systemctl reload apache2 2>/dev/null');
+            log_msg('Disabled directory listing on ' . count($migrated) . ' existing vhost(s): '
+                  . implode(', ', array_slice($migrated, 0, 8))
+                  . (count($migrated) > 8 ? ' ...' : ''));
+        } else {
+            // Put them back rather than leave Apache unable to reload.
+            foreach ($migrated as $name) {
+                $vh = $vhostDir . '/' . $name;
+                $b = @file_get_contents($vh);
+                if ($b !== false) {
+                    @file_put_contents($vh, str_replace('Options -Indexes FollowSymLinks',
+                                                        'Options Indexes FollowSymLinks', $b));
+                }
+            }
+            log_msg('WARNING: directory-listing migration failed configtest - reverted. ' . trim($vt));
+        }
+    }
+}
+
+$hardenConf = '/etc/apache2/conf-available/inetpanel-hardening.conf';
+$hardenWant = '# iNetPanel hosted-site hardening - auto-managed (install + panel_update).
+# Do not edit; this file is overwritten on panel updates.
+#
+# Dot-files and VCS metadata under /home are not served. A tenant deploying via
+# git otherwise exposes .git/ (full source history) and .env (database and API
+# credentials) to anyone who asks for them - among the most-scanned-for paths on
+# the internet.
+#
+# .well-known is deliberately exempt. This panel issues certificates over DNS-01
+# through Cloudflare, so ACME does not need it, but tenants legitimately use it
+# for security.txt, assetlinks.json and Matrix delegation.
+#
+# Scoped to /home so the panel, phpMyAdmin and system paths are untouched.
+
+<FilesMatch "^\\.">
+    Require all denied
+</FilesMatch>
+
+<DirectoryMatch "^/home/[^/]+/[^/]+/.*/\\.(?!well-known)[^/]*/">
+    Require all denied
+</DirectoryMatch>
+
+<Directory /home>
+    # Belt and braces: new vhosts are generated with -Indexes, but a vhost\'s own
+    # <Directory> block is more specific and wins, so this only covers paths a
+    # vhost does not name explicitly.
+    Options -Indexes
+</Directory>
+';
+if (is_dir('/etc/apache2/conf-available')
+    && (!file_exists($hardenConf) || file_get_contents($hardenConf) !== $hardenWant)) {
+    file_put_contents($hardenConf, $hardenWant);
+    chmod($hardenConf, 0644);
+    shell_exec('a2enconf inetpanel-hardening >/dev/null 2>&1');
+    $ht = (string) shell_exec('apache2ctl configtest 2>&1');
+    if (stripos($ht, 'Syntax OK') !== false) {
+        shell_exec('systemctl reload apache2 2>/dev/null');
+        log_msg('Applied hosted-site hardening (dotfiles denied, directory listing off)');
+    } else {
+        shell_exec('a2disconf inetpanel-hardening >/dev/null 2>&1');
+        @unlink($hardenConf);
+        shell_exec('systemctl reload apache2 2>/dev/null');
+        log_msg('WARNING: hosted-site hardening failed configtest - reverted. ' . trim($ht));
+    }
+}
+
 $originConf = '/etc/apache2/conf-available/inetpanel-origin.conf';
 $originWant = "# iNetPanel origin-hop hardening - auto-managed (install + panel_update).\n"
     . "# Forces the Cloudflare->Apache origin hop to HTTP/1.1 so HTTP/2 connection\n"

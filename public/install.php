@@ -10,6 +10,56 @@ header('Referrer-Policy: strict-origin-when-cross-origin');
 // --- LOCK FILE CHECK: redirect to login if already installed ---
 $projectRoot = dirname(__DIR__);
 $lockFile    = $projectRoot . '/db/.installed';
+
+/**
+ * Stage a file for a privileged `sudo cp`, safely.
+ *
+ * Fixes GHSA-mcpc-fxm3-3973. These files used to be written to fixed, predictable
+ * paths in /tmp, which is mode 1777: any local unprivileged user could pre-create
+ * the path as a symlink, and the root `cp` would dereference it and copy a
+ * root-only file's contents into a world-readable destination (/etc/hosts,
+ * /etc/motd). The equivalent runtime sinks in api/settings.php were fixed in
+ * 1.27.1 via Shell::stage(); this is the same fix for the setup wizard.
+ *
+ * Deliberately self-contained rather than requiring TiCore/Shell.php: the wizard
+ * runs before the panel is fully bootstrapped, and Shell::stage() logs through
+ * DB/Auth, which may not be usable yet.
+ *
+ * The directory, not the filename, is what makes this safe — it is owned by the
+ * web user at mode 0700, so no other unprivileged account can create, replace or
+ * even list entries in it. Writes additionally unlink first and create with
+ * O_EXCL, so a pre-existing entry of any kind is replaced rather than followed.
+ *
+ * @return string|null Absolute path to hand to the privileged command, or null.
+ */
+function inetp_stage_file(string $name, string $content, int $mode = 0640): ?string
+{
+    if (!preg_match('/^[A-Za-z0-9._-]{1,96}$/', $name) || str_contains($name, '..')) {
+        return null;
+    }
+    $dir = '/var/lib/inetpanel/staging';
+    if (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir)) {
+        return null;
+    }
+    @chmod($dir, 0700);
+
+    $path = $dir . '/' . $name;
+    @unlink($path);                 // drop any pre-existing entry, including a symlink
+    $fh = @fopen($path, 'xb');      // O_CREAT|O_EXCL — refuses to follow a symlink
+    if ($fh === false) {
+        return null;
+    }
+    $written = fwrite($fh, $content);
+    fflush($fh);
+    @chmod($path, $mode);
+    fclose($fh);
+
+    if ($written === false || $written !== strlen($content)) {
+        @unlink($path);
+        return null;
+    }
+    return $path;
+}
 if (file_exists($lockFile)) {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Content-Type: application/json');
@@ -466,8 +516,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             exec('mysql_tzinfo_to_sql /usr/share/zoneinfo 2>/dev/null | mysql -u root -p' . escapeshellarg($mysqlPass) . ' mysql 2>&1');
             exec('mysql -u root -p' . escapeshellarg($mysqlPass) . ' -e ' . escapeshellarg("SET GLOBAL time_zone = '{$tz}'") . ' 2>&1', $mtzOut, $mtzExit);
             if ($mtzExit === 0) {
-                @file_put_contents('/tmp/inetp_tz.cnf', "[mysqld]\ndefault_time_zone = {$tz}\n");
-                exec('sudo /bin/cp /tmp/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf 2>&1');
+                $tzStage = inetp_stage_file('inetp_tz.cnf', "[mysqld]\ndefault_time_zone = {$tz}\n");
+                if ($tzStage !== null) {
+                    exec('sudo /bin/cp ' . escapeshellarg($tzStage)
+                        . ' /etc/mysql/mariadb.conf.d/99-timezone.cnf 2>&1');
+                    @unlink($tzStage);
+                }
             }
 
             // Apply system hostname (prefer server_hostname_dns, then DDNS hostname)
@@ -483,9 +537,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $hosts = file_get_contents('/etc/hosts');
                     if ($hosts !== false) {
                         $hosts = str_replace($oldHostname, $sysHostname, $hosts);
-                        file_put_contents('/tmp/inetpanel_hosts', $hosts);
-                        exec('sudo /bin/cp /tmp/inetpanel_hosts /etc/hosts 2>&1');
-                        @unlink('/tmp/inetpanel_hosts');
+                        $hostsStage = inetp_stage_file('inetpanel_hosts', $hosts, 0644);
+                        if ($hostsStage !== null) {
+                            exec('sudo /bin/cp ' . escapeshellarg($hostsStage) . ' /etc/hosts 2>&1');
+                            @unlink($hostsStage);
+                        }
                     }
                 }
             }
@@ -503,9 +559,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 . "  ───────────────────────────────\n"
                 . "  Run  inetp --help  for CLI commands\n"
                 . "  ───────────────────────────────\n\n";
-            file_put_contents('/tmp/inetp_motd', $motdContent);
-            shell_exec('sudo /bin/cp /tmp/inetp_motd /etc/motd 2>/dev/null');
-            @unlink('/tmp/inetp_motd');
+            $motdStage = inetp_stage_file('inetp_motd', $motdContent, 0644);
+            if ($motdStage !== null) {
+                shell_exec('sudo /bin/cp ' . escapeshellarg($motdStage) . ' /etc/motd 2>/dev/null');
+                @unlink($motdStage);
+            }
 
             // Create Cloudflare Zero Trust Tunnel if CF is enabled + account ID provided
             if ($cfEnabled && $cfAccountId) {
@@ -566,7 +624,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             // Set up panel auto-update cron (daily at 2am by default)
             $phpBin2 = 'php' . $detectedPhpVer;
             $autoUpdateCron = "# iNetPanel managed — panel auto-update\n"
-                . "00 02 * * * root {$phpBin2} /var/www/inetpanel/scripts/panel_update.php >> /var/log/inetpanel_update.log 2>&1\n";
+                . "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
+                    . "00 02 * * * root {$phpBin2} /var/www/inetpanel/scripts/panel_update.php >> /var/log/inetpanel_update.log 2>&1\n";
             $writeCron('inetpanel_autoupdate', $autoUpdateCron);
 
             // Stats collector — populates dashboard graph (every minute)

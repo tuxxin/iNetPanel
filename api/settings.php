@@ -132,6 +132,7 @@ switch ($action) {
             if ($autoEnabled === '1') {
                 $phpBin2  = 'php' . DB::setting('php_default_version', PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION);
                 $autoCron = "# iNetPanel managed — panel auto-update\n"
+                    . "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
                     . "{$aMin} {$aHour} * * * root {$phpBin2} /var/www/inetpanel/scripts/panel_update.php >> /var/log/inetpanel_update.log 2>&1\n";
                 $writeCron('inetpanel_autoupdate', $autoCron);
             } else {

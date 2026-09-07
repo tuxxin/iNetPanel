@@ -240,7 +240,10 @@ ${SERVER_ALIAS}
     </FilesMatch>
 
     <Directory ${DOC_ROOT}>
-        Options Indexes FollowSymLinks
+        # -Indexes: without it any directory lacking an index file lists its
+        # contents publicly. A tenant who genuinely wants a listing can set
+        # Options +Indexes in their own .htaccess (AllowOverride All is on).
+        Options -Indexes FollowSymLinks
         AllowOverride All
         Require all granted
         LimitRequestBody 104857600

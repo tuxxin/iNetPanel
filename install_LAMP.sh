@@ -316,6 +316,41 @@ Protocols http/1.1
 OCONF
     /usr/sbin/a2enconf inetpanel-origin
 }
+harden_hosted_sites() {
+    cat > /etc/apache2/conf-available/inetpanel-hardening.conf << 'HCONF'
+# iNetPanel hosted-site hardening - auto-managed (install + panel_update).
+# Do not edit; this file is overwritten on panel updates.
+#
+# Dot-files and VCS metadata under /home are not served. A tenant deploying via
+# git otherwise exposes .git/ (full source history) and .env (database and API
+# credentials) to anyone who asks for them - among the most-scanned-for paths on
+# the internet.
+#
+# .well-known is deliberately exempt. This panel issues certificates over DNS-01
+# through Cloudflare, so ACME does not need it, but tenants legitimately use it
+# for security.txt, assetlinks.json and Matrix delegation.
+#
+# Scoped to /home so the panel, phpMyAdmin and system paths are untouched.
+
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+<DirectoryMatch "^/home/[^/]+/[^/]+/.*/\.(?!well-known)[^/]*/">
+    Require all denied
+</DirectoryMatch>
+
+<Directory /home>
+    # Belt and braces: new vhosts are generated with -Indexes, but a vhost's own
+    # <Directory> block is more specific and wins, so this only covers paths a
+    # vhost does not name explicitly.
+    Options -Indexes
+</Directory>
+HCONF
+    /usr/sbin/a2enconf inetpanel-hardening
+}
+exec_cmd "Hardening hosted sites (no dotfiles, no directory listing)" harden_hosted_sites
+
 exec_cmd "Hardening Apache origin (force HTTP/1.1, stop HTTP/2 vhost coalescing)" harden_apache_origin
 
 if [ ! -f "$CUSTOM_PORTS_CONF" ]; then
@@ -918,6 +953,17 @@ exec_cmd "Deploying system scripts from repo" deploy_scripts
 # 11c. SUDO RULES — www-data can run inetp scripts as root (for iNetPanel)
 # ==============================================================================
 setup_sudoers() {
+    # Staging directory for files handed to a privileged cp. Created here so the
+    # parent stays root-owned; the wizard would otherwise create /var/lib/inetpanel
+    # itself as www-data. 0700 www-data is what excludes other local accounts —
+    # note that hosting tenants share gid 33, so a group-writable mode would let
+    # every tenant plant files in the exact directory root copies from.
+    mkdir -p /var/lib/inetpanel/staging
+    chown root:root /var/lib/inetpanel
+    chmod 0755 /var/lib/inetpanel
+    chown www-data:www-data /var/lib/inetpanel/staging
+    chmod 0700 /var/lib/inetpanel/staging
+
     mkdir -p /etc/sudoers.d
     cat << 'SUDOERS' > /etc/sudoers.d/inetpanel
 # iNetPanel web panel privilege escalation
@@ -936,8 +982,14 @@ www-data ALL=(root) NOPASSWD: /usr/bin/wg-quick
 www-data ALL=(root) NOPASSWD: /usr/sbin/usermod
 www-data ALL=(root) NOPASSWD: /usr/bin/timedatectl
 www-data ALL=(root) NOPASSWD: /usr/bin/hostnamectl
-www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetpanel_hosts /etc/hosts
-www-data ALL=(root) NOPASSWD: /bin/cp /tmp/inetpanel_jail.local /etc/fail2ban/jail.local
+# Staged files for privileged copies live in /var/lib/inetpanel/staging, owned by
+# www-data at 0700 — never /tmp (mode 1777), where any local user could pre-create
+# the path as a symlink and have this root cp dereference it (GHSA-mcpc-fxm3-3973).
+# These three must stay in step with the runtime set panel_update.php writes.
+www-data ALL=(root) NOPASSWD: /bin/cp /var/lib/inetpanel/staging/inetpanel_hosts /etc/hosts
+www-data ALL=(root) NOPASSWD: /bin/cp /var/lib/inetpanel/staging/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf
+www-data ALL=(root) NOPASSWD: /bin/cp /var/lib/inetpanel/staging/inetp_motd /etc/motd
+www-data ALL=(root) NOPASSWD: /bin/cp /var/lib/inetpanel/staging/inetpanel_jail.local /etc/fail2ban/jail.local
 www-data ALL=(root) NOPASSWD: /sbin/reboot
 www-data ALL=(root) NOPASSWD: /usr/sbin/phpenmod
 www-data ALL=(root) NOPASSWD: /usr/sbin/phpdismod
@@ -1045,6 +1097,34 @@ SUSPENDED_HTML
     fi
 }
 exec_cmd "Deploying iNetPanel to /var/www/inetpanel" deploy_inetpanel
+
+# ==============================================================================
+# mod_remoteip — enable and configure NOW, not on the weekly timer.
+#
+# panel_update.php installs a cron that runs cf_remoteip weekly (Mondays 04:43).
+# Without this call, a box installed on a Tuesday has no real client IPs until
+# the following Monday: every tunnelled request logs as 127.0.0.1/::1, and since
+# fail2ban's ignoreip covers 127.0.0.1/8, NO jail can ban anything for the whole
+# window. Run it once here so the box is correct from first boot.
+#
+# Deliberately non-fatal. cf_remoteip fetches Cloudflare's published ranges over
+# the network and exits non-zero if that fails; a transient DNS or egress problem
+# must not abort an otherwise good install. The weekly cron retries either way.
+# ==============================================================================
+configure_remoteip() {
+    if [ ! -x /root/scripts/cf_remoteip.sh ]; then
+        echo "  cf_remoteip.sh not deployed — skipping (weekly cron will handle it)"
+        return 0
+    fi
+    if /root/scripts/cf_remoteip.sh; then
+        return 0
+    fi
+    echo "  Could not configure mod_remoteip now (usually a transient network issue)."
+    echo "  Hosted sites will see Cloudflare edge IPs until this succeeds."
+    echo "  Retry any time with:  inetp cf_remoteip"
+    return 0
+}
+exec_cmd "Configuring mod_remoteip (real client IPs behind Cloudflare)" configure_remoteip
 
 # ==============================================================================
 # 12. CRONJOBS
