@@ -208,27 +208,23 @@ switch ($action) {
         // Update domain record
         DB::query('UPDATE domains SET php_version = ? WHERE domain_name = ?', [$newVer, $targetDomain]);
 
-        // Move FPM pool config
-        $oldPool = "/etc/php/{$currentVer}/fpm/pool.d/{$targetDomain}.conf";
-        $newPool = "/etc/php/{$newVer}/fpm/pool.d/{$targetDomain}.conf";
-        if (file_exists($oldPool) && $currentVer !== $newVer) {
-            $poolContent = file_get_contents($oldPool);
-            $poolContent = str_replace("php{$currentVer}-fpm", "php{$newVer}-fpm", $poolContent);
-            // No sudoers grant matches this cp, so it has never actually worked —
-            // but leaving the /tmp pattern here is a trap for whoever adds one.
-            // Stage it safely so a future grant cannot become the next symlink bug.
-            $poolStage = Shell::stage('inetp_pool_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $targetDomain), $poolContent);
-            if ($poolStage !== null) {
-                shell_exec("sudo /bin/cp " . escapeshellarg($poolStage) . " " . escapeshellarg($newPool) . " 2>/dev/null");
-            }
-            shell_exec("sudo /bin/rm -f " . escapeshellarg($oldPool) . " 2>/dev/null");
-            if ($poolStage !== null) { @unlink($poolStage); }
-        }
-
-        // Update Apache vhost socket
-        $vhost = "/etc/apache2/sites-available/{$targetDomain}.conf";
-        if (file_exists($vhost)) {
-            shell_exec("sudo /bin/sed -i 's|php{$currentVer}-fpm|php{$newVer}-fpm|g' " . escapeshellarg($vhost) . " 2>/dev/null");
+        // Delegate the privileged pool move + vhost handler rewrite to the root
+        // multiphp_manage script, exactly as api/multiphp.php does. The inline
+        // version here could not work: its `sudo /bin/cp` to /etc/php/*/pool.d and
+        // its `sudo /bin/rm` of the old pool match no sudoers rule, so the pool
+        // never moved while the vhost DID get repointed — leaving the site served
+        // from a socket that does not exist. It also needed `sudo /bin/sed -i` on
+        // an arbitrary path, which is an arbitrary root file rewrite; dropping this
+        // call is what lets that grant be removed.
+        $res = Shell::run('multiphp_manage', [
+            '--action'  => 'set_domain',
+            '--domain'  => $targetDomain,
+            '--version' => $newVer,
+        ]);
+        if (!$res['success']) {
+            echo json_encode(['success' => false,
+                'error' => $res['error'] ?: 'PHP version switch failed.']);
+            break;
         }
 
         // Send response BEFORE reloading — FPM reload kills the current PHP process

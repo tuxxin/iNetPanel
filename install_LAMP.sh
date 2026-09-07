@@ -1011,7 +1011,11 @@ setup_sudoers() {
     chmod 0700 /var/lib/inetpanel/staging
 
     mkdir -p /etc/sudoers.d
-    cat << 'SUDOERS' > /etc/sudoers.d/inetpanel
+    # Staged and validated before install: sudo refuses to parse a malformed
+    # drop-in, which would break every privileged operation on the box including
+    # the ones needed to fix it. The staging name contains a dot, which sudo
+    # deliberately ignores, so a half-written file is never read.
+    cat << 'SUDOERS' > /etc/sudoers.d/.inetpanel.new
 # iNetPanel web panel privilege escalation
 # Allows www-data (lighttpd/PHP-FPM) to run server management scripts as root
 www-data ALL=(root) NOPASSWD: /usr/local/bin/inetp *
@@ -1019,13 +1023,11 @@ www-data ALL=(root) NOPASSWD: /root/scripts/manage_cron.sh
 www-data ALL=(root) NOPASSWD: /root/scripts/cloudflared_setup.sh
 www-data ALL=(root) NOPASSWD: /root/scripts/update_ssh_port.sh
 www-data ALL=(root) NOPASSWD: /root/scripts/manage_ssh_keys.sh
-www-data ALL=(root) NOPASSWD: /usr/bin/apt-get
 www-data ALL=(root) NOPASSWD: /bin/systemctl
 www-data ALL=(root) NOPASSWD: /usr/sbin/a2ensite
 www-data ALL=(root) NOPASSWD: /usr/sbin/a2dissite
 www-data ALL=(root) NOPASSWD: /usr/bin/wg
 www-data ALL=(root) NOPASSWD: /usr/bin/wg-quick
-www-data ALL=(root) NOPASSWD: /usr/sbin/usermod
 www-data ALL=(root) NOPASSWD: /usr/bin/timedatectl
 www-data ALL=(root) NOPASSWD: /usr/bin/hostnamectl
 # Staged files for privileged copies live in /var/lib/inetpanel/staging, owned by
@@ -1043,10 +1045,18 @@ www-data ALL=(root) NOPASSWD: /usr/bin/firewall-cmd
 www-data ALL=(root) NOPASSWD: /usr/bin/fail2ban-client
 www-data ALL=(root) NOPASSWD: /usr/bin/tail
 www-data ALL=(root) NOPASSWD: /usr/bin/journalctl
-www-data ALL=(root) NOPASSWD: /usr/bin/dpkg
-www-data ALL=(root) NOPASSWD: /bin/sed
 www-data ALL=(root) NOPASSWD: /usr/bin/php* /var/www/inetpanel/scripts/panel_update.php *
 SUDOERS
+    chmod 0440 /etc/sudoers.d/.inetpanel.new
+    if visudo -c -f /etc/sudoers.d/.inetpanel.new >/dev/null 2>&1; then
+        mv /etc/sudoers.d/.inetpanel.new /etc/sudoers.d/inetpanel
+        chmod 0440 /etc/sudoers.d/inetpanel
+    else
+        rm -f /etc/sudoers.d/.inetpanel.new
+        echo "ERROR: generated sudoers file failed validation — not installed." >&2
+        visudo -c -f /etc/sudoers.d/.inetpanel.new 2>&1 | sed 's/^/    /' >&2
+        return 1
+    fi
     chmod 440 /etc/sudoers.d/inetpanel
 }
 exec_cmd "Creating sudo rules for iNetPanel (www-data → inetp)" setup_sudoers

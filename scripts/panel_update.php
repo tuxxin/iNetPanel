@@ -580,13 +580,15 @@ www-data ALL=(root) NOPASSWD: /root/scripts/manage_cron.sh
 www-data ALL=(root) NOPASSWD: /root/scripts/cloudflared_setup.sh
 www-data ALL=(root) NOPASSWD: /root/scripts/update_ssh_port.sh
 www-data ALL=(root) NOPASSWD: /root/scripts/manage_ssh_keys.sh
-www-data ALL=(root) NOPASSWD: /usr/bin/apt-get
+# apt-get and dpkg removed: their only callers run inside `sudo systemd-run ...
+# bash -c`, i.e. already as root, so the individual grants were never exercised.
 www-data ALL=(root) NOPASSWD: /bin/systemctl
 www-data ALL=(root) NOPASSWD: /usr/sbin/a2ensite
 www-data ALL=(root) NOPASSWD: /usr/sbin/a2dissite
 www-data ALL=(root) NOPASSWD: /usr/bin/wg
 www-data ALL=(root) NOPASSWD: /usr/bin/wg-quick
-www-data ALL=(root) NOPASSWD: /usr/sbin/usermod
+# /usr/sbin/usermod removed: the only usermod calls are inside root-executed
+# hook scripts (api/restore.php), which already run as root and need no grant.
 www-data ALL=(root) NOPASSWD: /usr/bin/timedatectl
 www-data ALL=(root) NOPASSWD: /usr/bin/hostnamectl
 www-data ALL=(root) NOPASSWD: /bin/cp /var/lib/inetpanel/staging/inetpanel_hosts /etc/hosts
@@ -598,8 +600,9 @@ www-data ALL=(root) NOPASSWD: /usr/bin/firewall-cmd
 www-data ALL=(root) NOPASSWD: /usr/bin/fail2ban-client
 www-data ALL=(root) NOPASSWD: /usr/bin/tail
 www-data ALL=(root) NOPASSWD: /usr/bin/journalctl
-www-data ALL=(root) NOPASSWD: /usr/bin/dpkg
-www-data ALL=(root) NOPASSWD: /bin/sed
+# /bin/sed removed: an unrestricted `sudo sed -i <path>` is an arbitrary root
+# file rewrite. Its only caller (api/account.php's PHP version switch) now goes
+# through multiphp_manage, which does the same work as root with validation.
 www-data ALL=(root) NOPASSWD: /bin/bash /var/lib/inetpanel/staging/inetp_hook_*
 www-data ALL=(root) NOPASSWD: /bin/cp /var/lib/inetpanel/staging/inetp_tz.cnf /etc/mysql/mariadb.conf.d/99-timezone.cnf
 www-data ALL=(root) NOPASSWD: /bin/cp /var/lib/inetpanel/staging/inetp_motd /etc/motd
@@ -612,11 +615,31 @@ www-data ALL=(root) NOPASSWD: /bin/cat /root/.mysql_root_pass
 www-data ALL=(root) NOPASSWD: /usr/bin/php* /var/www/inetpanel/scripts/panel_update.php *
 SUDOERS;
 
-if (file_put_contents($sudoersFile, $sudoersContent . "\n") === false) {
-    log_msg('CRITICAL: Failed to write sudoers file — panel may lose sudo access on next boot');
+// Validate before installing. A malformed file here does not just break this
+// panel: sudo refuses to parse a bad drop-in, so EVERY privileged operation on
+// the box stops, including the ones needed to repair it. Stage under a name sudo
+// deliberately ignores (it skips filenames containing a dot), check it with
+// visudo, and only then move it into place.
+$sudoersTmp = '/etc/sudoers.d/.inetpanel.new';
+if (file_put_contents($sudoersTmp, $sudoersContent . "\n") === false) {
+    log_msg('CRITICAL: Failed to stage sudoers file — existing rules left untouched');
 } else {
-    chmod($sudoersFile, 0440);
-    log_msg('Sudoers file rebuilt with current rules.');
+    chmod($sudoersTmp, 0440);
+    $vOut = []; $vRc = 0;
+    exec('visudo -c -f ' . escapeshellarg($sudoersTmp) . ' 2>&1', $vOut, $vRc);
+    if ($vRc === 0) {
+        if (rename($sudoersTmp, $sudoersFile)) {
+            chmod($sudoersFile, 0440);
+            log_msg('Sudoers file rebuilt with current rules.');
+        } else {
+            @unlink($sudoersTmp);
+            log_msg('CRITICAL: Could not install validated sudoers file — existing rules left in place');
+        }
+    } else {
+        @unlink($sudoersTmp);
+        log_msg('CRITICAL: Generated sudoers file is INVALID — refused to install it. '
+              . 'Existing rules left untouched. visudo: ' . trim(implode(' ', $vOut)));
+    }
 }
 
 // Deploy phpMyAdmin signon.php for auto-login from client portal
