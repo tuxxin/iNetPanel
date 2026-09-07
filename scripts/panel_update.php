@@ -790,7 +790,7 @@ if (is_dir($vhostDir)) {
             continue;
         }
         $new = str_replace('Options Indexes FollowSymLinks',
-                           'Options -Indexes FollowSymLinks', $body);
+                           'Options -Indexes +FollowSymLinks', $body);
         if ($new !== $body && @file_put_contents($vh, $new) !== false) {
             $migrated[] = basename($vh);
         }
@@ -808,7 +808,7 @@ if (is_dir($vhostDir)) {
                 $vh = $vhostDir . '/' . $name;
                 $b = @file_get_contents($vh);
                 if ($b !== false) {
-                    @file_put_contents($vh, str_replace('Options -Indexes FollowSymLinks',
+                    @file_put_contents($vh, str_replace('Options -Indexes +FollowSymLinks',
                                                         'Options Indexes FollowSymLinks', $b));
                 }
             }

@@ -133,7 +133,7 @@ ${SERVER_ALIAS}
     </FilesMatch>
 
     <Directory ${DOC_ROOT}>
-        Options Indexes FollowSymLinks
+        Options -Indexes +FollowSymLinks
         AllowOverride All
         Require all granted
         LimitRequestBody 104857600

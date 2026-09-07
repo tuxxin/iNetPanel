@@ -243,7 +243,10 @@ ${SERVER_ALIAS}
         # -Indexes: without it any directory lacking an index file lists its
         # contents publicly. A tenant who genuinely wants a listing can set
         # Options +Indexes in their own .htaccess (AllowOverride All is on).
-        Options -Indexes FollowSymLinks
+        # Every option must carry a +/- prefix or none may: mixing them is a
+        # hard Apache syntax error (AH00526), which would make the vhost
+        # unloadable and block every reload on the box.
+        Options -Indexes +FollowSymLinks
         AllowOverride All
         Require all granted
         LimitRequestBody 104857600
