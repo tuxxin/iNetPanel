@@ -121,6 +121,17 @@ while IFS="|" read -r DOMAIN USERNAME DOC_ROOT PHP_VER PORT; do
 ${SERVER_ALIAS}
     DocumentRoot ${DOC_ROOT}
 
+
+    # Protocols must live in the VHOST, not server scope. Apache's set_protocols()
+    # is AP_INIT_ITERATE and apr_array_push()es with no reset, so two server-scope
+    # Protocols lines CONCATENATE — conf-available/inetpanel-origin.conf appending
+    # "http/1.1" to mod_http2's "h2 h2c http/1.1" leaves h2 in the list and the
+    # hardening silently does nothing. Only merge_core_server_configs() replaces,
+    # and only for a vhost. Keeps the Cloudflare->Apache hop on HTTP/1.1 so
+    # coalescing cannot serve one vhost's content under another domain; visitors
+    # still get HTTP/2 and HTTP/3 from Cloudflare's edge.
+    Protocols http/1.1
+
     SSLEngine on
     SSLCertificateFile    ${SSL_CERT}
     SSLCertificateKeyFile ${SSL_KEY}

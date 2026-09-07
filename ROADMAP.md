@@ -209,6 +209,39 @@ Not features. Known issues and debt, recorded so they are not rediscovered.
   caller-supplied input. The `.htaccess` finding and the `/tmp` staging fixes
   were the same root cause in two different places; assume there is a third.
 
+### Performance — the real ceiling is PHP-FPM, not Apache
+
+Apache MPM tuning was investigated and **deliberately not changed**. The numbers,
+derived from Debian packaging rather than from any running box:
+
+- Debian's default MPM is `mpm_event` (`apache2.postinst: enable_default_mpm`),
+  and iNetPanel never installs `libapache2-mod-php`, so nothing switches it to
+  prefork. Stock values from the `.deb`: `ThreadsPerChild 25`,
+  `MaxRequestWorkers 150`, `ServerLimit` unset (compiled default 16).
+- Every pool writer — `add_domain.sh`, `rebuild_pools.sh`,
+  `restore_account.sh`, `panel_update.php` — sets `pm.max_children 5`, and there
+  is **one pool per domain**. So each site is capped at 5 concurrent PHP requests
+  permanently, whatever Apache is set to.
+
+Therefore aggregate PHP concurrency is `5 x domains`. Below ~30 domains FPM is
+the binding limit and Apache has spare threads; above it, 150 concurrent PHP
+children at 35-48 MB each is 5-7 GB of PHP alone, so the box is RAM-bound before
+it is worker-bound. **Raising `MaxRequestWorkers` there makes OOM more likely,
+not less.**
+
+The unfixed problem, which neither MPM nor pool tuning solves on its own:
+`mod_proxy_fcgi` is blocking, so an Apache worker thread is held for the entire
+backend request *including* time queued in the FPM socket backlog
+(`listen.backlog` defaults to 511 and the panel never sets it). One saturated
+tenant can therefore absorb every Apache thread and starve every other site on
+the box. That is the noisy-neighbour bug worth fixing, and it needs a real design
+— per-pool backlog limits, or a non-blocking handler — not a bigger number.
+
+Note also that raising `pm.max_children` raises `pm.start_servers` with it, and
+those children are forked per pool the moment `php-fpm` starts: a 60-domain box
+could fork hundreds of children on `systemctl restart php8.5-fpm` and OOM during
+a restart that used to be safe.
+
 ### Correctness
 
 - **The `'8.4'` literals.** `api/settings.php` now falls back to the running PHP

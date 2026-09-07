@@ -817,6 +817,64 @@ if (is_dir($vhostDir)) {
     }
 }
 
+// Static-asset cache headers. Existing installs get these on their next update;
+// mod_expires is enabled here too because the installer only started enabling it
+// after this change, so older boxes would otherwise have an inert conf.
+shell_exec('a2enmod expires deflate filter >/dev/null 2>&1');
+$cacheConf = '/etc/apache2/conf-available/inetpanel-cache.conf';
+$cacheWant = '# iNetPanel static-asset caching - auto-managed (install + panel_update).
+# Do not edit; this file is overwritten on panel updates.
+#
+# TTLs are deliberately conservative. A tenant cannot purge Cloudflare\'s cache
+# from this panel, so anything set too long becomes a support ticket the operator
+# cannot resolve. Fonts and images are effectively immutable and usually
+# fingerprinted; CSS and JS frequently are not, so they get an hour rather than
+# a day. HTML is left alone entirely so applications keep control of their own
+# freshness. A tenant can override any of this from .htaccess (AllowOverride All).
+
+<IfModule mod_expires.c>
+    ExpiresActive On
+
+    # Immutable in practice, and almost always versioned in the URL.
+    ExpiresByType font/woff2                     "access plus 30 days"
+    ExpiresByType font/woff                      "access plus 30 days"
+    ExpiresByType application/font-woff2         "access plus 30 days"
+
+    # Replaced by uploading a new file, so a week is the sensible ceiling.
+    ExpiresByType image/webp                     "access plus 7 days"
+    ExpiresByType image/avif                     "access plus 7 days"
+    ExpiresByType image/jpeg                     "access plus 7 days"
+    ExpiresByType image/png                      "access plus 7 days"
+    ExpiresByType image/gif                      "access plus 7 days"
+    ExpiresByType image/svg+xml                  "access plus 7 days"
+    ExpiresByType image/x-icon                   "access plus 7 days"
+
+    # Edited in place far more often than tenants expect. One hour keeps the
+    # benefit while bounding how long a stale asset can be served.
+    ExpiresByType text/css                       "access plus 1 hour"
+    ExpiresByType application/javascript         "access plus 1 hour"
+    ExpiresByType text/javascript                "access plus 1 hour"
+
+    # Deliberately no rule for text/html, application/json or XML.
+</IfModule>
+';
+if (is_dir('/etc/apache2/conf-available')
+    && (!file_exists($cacheConf) || file_get_contents($cacheConf) !== $cacheWant)) {
+    file_put_contents($cacheConf, $cacheWant);
+    chmod($cacheConf, 0644);
+    shell_exec('a2enconf inetpanel-cache >/dev/null 2>&1');
+    $ct = (string) shell_exec('apache2ctl configtest 2>&1');
+    if (stripos($ct, 'Syntax OK') !== false) {
+        shell_exec('systemctl reload apache2 2>/dev/null');
+        log_msg('Applied static-asset cache headers');
+    } else {
+        shell_exec('a2disconf inetpanel-cache >/dev/null 2>&1');
+        @unlink($cacheConf);
+        shell_exec('systemctl reload apache2 2>/dev/null');
+        log_msg('WARNING: cache headers failed configtest - reverted. ' . trim($ct));
+    }
+}
+
 $hardenConf = '/etc/apache2/conf-available/inetpanel-hardening.conf';
 $hardenWant = '# iNetPanel hosted-site hardening - auto-managed (install + panel_update).
 # Do not edit; this file is overwritten on panel updates.

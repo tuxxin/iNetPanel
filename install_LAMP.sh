@@ -296,7 +296,11 @@ unset _v
 exec_cmd "Installing Apache2" apt-get install -y -qq apache2
 
 enable_apache_modules() {
-    /usr/sbin/a2enmod rewrite proxy proxy_fcgi setenvif headers ssl
+    # expires: static-asset cache headers (inetpanel-cache.conf is inert without it);
+    #          Debian does not enable it.
+    # deflate/filter: Debian's postinst only enables these on a FIRST install, so a
+    #          box where apache2 was already present can lack them. Enable explicitly.
+    /usr/sbin/a2enmod rewrite proxy proxy_fcgi setenvif headers ssl expires deflate filter
 }
 exec_cmd "Enabling Apache Modules (rewrite, proxy, proxy_fcgi, headers)" enable_apache_modules
 
@@ -349,6 +353,48 @@ harden_hosted_sites() {
 HCONF
     /usr/sbin/a2enconf inetpanel-hardening
 }
+setup_cache_headers() {
+    cat > /etc/apache2/conf-available/inetpanel-cache.conf << 'CCONF'
+# iNetPanel static-asset caching - auto-managed (install + panel_update).
+# Do not edit; this file is overwritten on panel updates.
+#
+# TTLs are deliberately conservative. A tenant cannot purge Cloudflare's cache
+# from this panel, so anything set too long becomes a support ticket the operator
+# cannot resolve. Fonts and images are effectively immutable and usually
+# fingerprinted; CSS and JS frequently are not, so they get an hour rather than
+# a day. HTML is left alone entirely so applications keep control of their own
+# freshness. A tenant can override any of this from .htaccess (AllowOverride All).
+
+<IfModule mod_expires.c>
+    ExpiresActive On
+
+    # Immutable in practice, and almost always versioned in the URL.
+    ExpiresByType font/woff2                     "access plus 30 days"
+    ExpiresByType font/woff                      "access plus 30 days"
+    ExpiresByType application/font-woff2         "access plus 30 days"
+
+    # Replaced by uploading a new file, so a week is the sensible ceiling.
+    ExpiresByType image/webp                     "access plus 7 days"
+    ExpiresByType image/avif                     "access plus 7 days"
+    ExpiresByType image/jpeg                     "access plus 7 days"
+    ExpiresByType image/png                      "access plus 7 days"
+    ExpiresByType image/gif                      "access plus 7 days"
+    ExpiresByType image/svg+xml                  "access plus 7 days"
+    ExpiresByType image/x-icon                   "access plus 7 days"
+
+    # Edited in place far more often than tenants expect. One hour keeps the
+    # benefit while bounding how long a stale asset can be served.
+    ExpiresByType text/css                       "access plus 1 hour"
+    ExpiresByType application/javascript         "access plus 1 hour"
+    ExpiresByType text/javascript                "access plus 1 hour"
+
+    # Deliberately no rule for text/html, application/json or XML.
+</IfModule>
+CCONF
+    /usr/sbin/a2enconf inetpanel-cache
+}
+exec_cmd "Configuring static-asset cache headers" setup_cache_headers
+
 exec_cmd "Hardening hosted sites (no dotfiles, no directory listing)" harden_hosted_sites
 
 exec_cmd "Hardening Apache origin (force HTTP/1.1, stop HTTP/2 vhost coalescing)" harden_apache_origin
