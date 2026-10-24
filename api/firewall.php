@@ -7,70 +7,6 @@ Auth::requireAdmin();
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
-/**
- * Classify a webhook URL. Returns 'discord', 'slack', 'generic', or '' if the
- * URL is unusable. Used for validation only — the actual POST is done by
- * qsa_scan.sh so there is exactly one delivery implementation.
- */
-function qsa_webhook_kind(string $url): string
-{
-    if (!preg_match('~^https://~i', $url)) return '';   // plaintext would leak the report
-    if (filter_var($url, FILTER_VALIDATE_URL) === false) return '';
-    $host = strtolower((string) parse_url($url, PHP_URL_HOST));
-    if ($host === '') return '';
-    if (preg_match('/(^|\.)discord(app)?\.com$/', $host))  return 'discord';
-    if (preg_match('/(^|\.)slack\.com$/', $host))          return 'slack';
-    return 'generic';
-}
-
-/**
- * Scan archive on disk (root:www-data 0750), written by qsa_scan.sh.
- * Filenames are scan-YYYYMMDDTHHMMSSz.txt, always UTC.
- */
-function qsa_scan_dir(): string { return '/var/lib/inetpanel/qsa'; }
-
-/** Parse a scan filename back to a UTC timestamp, or null if it is not one. */
-function qsa_stamp_from(string $name): ?int
-{
-    if (!preg_match('/^scan-(\d{8})T(\d{6})z\.txt$/', $name, $m)) return null;
-    $dt = DateTime::createFromFormat('Ymd His', $m[1] . ' ' . $m[2], new DateTimeZone('UTC'));
-    return $dt ? $dt->getTimestamp() : null;
-}
-
-/**
- * List archived scans, newest first. Reads only the summary line rather than
- * each whole file, so the list stays cheap with KEEP_RUNS=30 on disk.
- */
-function qsa_history(int $limit = 15): array
-{
-    $out = [];
-    foreach (glob(qsa_scan_dir() . '/scan-*.txt') ?: [] as $path) {
-        $ts = qsa_stamp_from(basename($path));
-        if ($ts === null) continue;
-        $ports = null;
-        $fh = @fopen($path, 'r');
-        if ($fh) {
-            while (($line = fgets($fh)) !== false) {
-                if (preg_match('/^\s*Open ports:\s*(\d+)/i', $line, $m)) { $ports = (int) $m[1]; break; }
-            }
-            fclose($fh);
-        }
-        $out[] = [
-            'id'    => basename($path, '.txt'),
-            'ts'    => $ts,
-            // Show the zone. PHP's date.timezone is commonly UTC while the host
-            // is not, so a bare timestamp here reads as local time and is off by
-            // the offset — the same trap that makes update logs hard to correlate
-            // with `ls` output.
-            'when'  => date('Y-m-d H:i T', $ts),
-            'ports' => $ports,
-            'size'  => filesize($path) ?: 0,
-        ];
-    }
-    usort($out, fn($a, $b) => $b['ts'] <=> $a['ts']);
-    return array_slice($out, 0, $limit);
-}
-
 switch ($action) {
 
     // -------------------------------------------------------------------------
@@ -369,84 +305,54 @@ switch ($action) {
     // ===================== qsa.sh exposure scan =====================
     // qsa.sh scans the public IP that calls it, so running it from this server
     // shows what the internet actually sees of this box — a different question
-    // from what firewalld was told to open. A port exposed by a container or
-    // upstream of this host only shows up here.
+    // from what firewalld was told to open. The work is done by `inetp tsvc qsa`
+    // (scripts/system/tuxxin_services.py): the scan runs in its own systemd unit,
+    // and the archive is root-only, so every read goes through the helper too.
     case 'qsa_scan':
-        // The free tier takes ~30s and paid tiers minutes, so give PHP room. The
-        // script enforces its own per-tier curl deadline; this is just the outer
-        // bound so a hung request cannot pin an FPM worker indefinitely.
-        @set_time_limit(1260);
-        $r = Shell::run('qsa_scan', ['--quiet']);
-        $out = $r['output'] ?? '';
-
-        // A server whose /usr/local/bin/inetp predates this feature has no
-        // qsa_scan case, so the dispatcher falls through to *) and prints its
-        // whole usage listing. Echoing that verbatim dumps the inetp help into
-        // the terminal pane and looks like the scan "worked". Detect it and say
-        // what is actually wrong instead.
-        if (preg_match('/^\s*inetp\s+[-—]\s+Server Account Manager|Usage:\s*inetp\s+<command>/mi', $out)) {
-            // Two different faults produce identical symptoms, and they need
-            // opposite fixes, so distinguish them instead of guessing. The
-            // deploy step copies PANEL_PATH/scripts/system/inetp over
-            // /usr/local/bin/inetp — so compare the two directly.
-            $src     = '/var/www/inetpanel/scripts/system/inetp';
-            $srcHas  = is_readable($src)
-                       && strpos((string) file_get_contents($src), 'qsa_scan)') !== false;
-
-            if ($srcHas) {
-                $msg = "This server's inetp command is out of date.\n\n"
-                     . "The panel files are current — /var/www/inetpanel/scripts/system/inetp\n"
-                     . "does support qsa_scan — but the copy of it at /usr/local/bin/inetp was\n"
-                     . "never replaced, so the scan request fell through to the usage text you\n"
-                     . "would otherwise be reading here.\n\n"
-                     . "Use \"Repair CLI\" below to re-run just the file-deployment step.";
-                $repair = true;
-            } else {
-                $msg = "This server's panel files are older than they appear.\n\n"
-                     . "/var/www/inetpanel/scripts/system/inetp has no qsa_scan support, so the\n"
-                     . "update that added this feature has not fully landed. Repairing the CLI\n"
-                     . "would only redeploy the same old file.\n\n"
-                     . "Run a full update first:\n"
-                     . "    sudo php /var/www/inetpanel/scripts/panel_update.php --force";
-                $repair = false;
-            }
-            echo json_encode([
-                'success'   => false,
-                'stale_cli' => true,
-                'repairable'=> $repair,
-                'output'    => $msg,
-            ]);
+        if (!TuxxinServices::requireWrite()) break;
+        if (!TuxxinServices::enabled('qsa')) {
+            echo json_encode(['success' => false, 'disabled' => true,
+                'error' => 'The External Security Audit is turned off in Settings → Tuxxin Services.']);
             break;
         }
+        $r = TuxxinServices::helper(['qsa', 'start'], null, true);
+        if (!empty($r['stale_cli'])) {
+            // The deploy step copies PANEL_PATH/scripts/system/inetp over
+            // /usr/local/bin/inetp. If the panel's copy knows tsvc, only the
+            // deploy step needs re-running; otherwise the update never landed.
+            $src = '/var/www/inetpanel/scripts/system/inetp';
+            $r['repairable'] = is_readable($src) && strpos((string) file_get_contents($src), 'tsvc)') !== false;
+        }
+        echo json_encode($r);
+        break;
 
-        // Rate limiting is the common case on the free tier (1 scan / 24h), so
-        // surface qsa.sh's own wording rather than a generic failure.
-        $limited = (bool) preg_match('/daily scan allowance|rate.?limit|try again in/i', $out);
-        echo json_encode([
-            'success'      => $r['success'] || $limited,
-            'rate_limited' => $limited,
-            'output'       => $out,
-            'tier'         => DB::setting('qsa_token', '') !== '' ? 'token' : 'free',
-        ]);
+    case 'qsa_status':
+        // Polled every two seconds while a scan runs: Shell::query(), which does
+        // not copy each answer — live scan output — into the logs table.
+        echo json_encode(TuxxinServices::helper(['qsa', 'status']));
         break;
 
     case 'qsa_settings_get':
-        $cron = '/etc/cron.d/inetpanel_qsa_monitor';
+        TuxxinServices::ensureMigrated();
         echo json_encode([
             'success'      => true,
-            // Never return the token itself — only whether one is set.
-            'has_token'    => DB::setting('qsa_token', '') !== '',
-            'monitor'      => file_exists($cron),
+            'enabled'      => TuxxinServices::enabled('qsa'),
+            // Never the token or the URL — only whether one is saved.
+            'has_token'    => TuxxinServices::hasSecret('qsa_token'),
+            'token_tier'   => (string) DB::setting('qsa_token_tier', ''),
+            'monitor'      => DB::setting('qsa_monitor', '0') === '1',
+            'monitor_active' => file_exists('/etc/cron.d/inetpanel_qsa_monitor'),
             'schedule'     => DB::setting('qsa_monitor_schedule', 'daily'),
             'last_run'     => DB::setting('qsa_last_run', ''),
             'last_change'  => DB::setting('qsa_last_change', ''),
-            'webhook_set'  => DB::setting('qsa_webhook_url', '') !== '',
-            'webhook_kind' => DB::setting('qsa_webhook_kind', ''),
+            'webhook_set'  => TuxxinServices::hasSecret('webhook_url'),
+            'webhook_kind' => DB::setting('tsvc_webhook_kind', ''),
             'unacked'      => DB::setting('qsa_change_unacked', '0') === '1',
         ]);
         break;
 
     case 'qsa_settings_save':
+        if (!TuxxinServices::requireWrite()) break;
         $token    = trim($_POST['qsa_token'] ?? '');
         $monitor  = ($_POST['monitor'] ?? '0') === '1';
         $schedule = in_array($_POST['schedule'] ?? 'daily', ['hourly', 'daily', 'weekly'], true)
@@ -455,85 +361,58 @@ switch ($action) {
         // An empty field means "leave as-is", so a saved token is not wiped by
         // saving the form back with the masked placeholder still in it.
         if ($token !== '' && $token !== '********') {
-            if (!preg_match('/^[A-Za-z0-9._-]{8,128}$/', $token)) {
-                echo json_encode(['success' => false, 'error' => 'That does not look like a qsa.sh token.']);
+            $r = TuxxinServices::helper(['set-secret', 'qsa_token'], $token);
+            if (!$r['success']) {
+                echo json_encode(['success' => false, 'error' => $r['error'] ?? 'Could not save the token.']);
                 break;
             }
-            DB::saveSetting('qsa_token', $token);
         }
-        DB::saveSetting('qsa_monitor_schedule', $schedule);
-
-        // Webhook delivery. There is no MTA on a stock iNetPanel box, so a
-        // webhook is the only way a change notice reaches you when you are not
-        // looking at the panel. Empty string clears it.
         if (array_key_exists('webhook_url', $_POST)) {
             $hook = trim($_POST['webhook_url']);
-            if ($hook === '') {
-                DB::saveSetting('qsa_webhook_url', '');
-                DB::saveSetting('qsa_webhook_kind', '');
-            } else {
-                $kind = qsa_webhook_kind($hook);
-                if ($kind === '') {
-                    echo json_encode(['success' => false,
-                        'error' => 'Webhook must be an https:// Discord, Slack, or generic JSON endpoint.']);
-                    break;
-                }
-                DB::saveSetting('qsa_webhook_url', $hook);
-                DB::saveSetting('qsa_webhook_kind', $kind);
+            $r = $hook === ''
+                ? TuxxinServices::helper(['clear-secret', 'webhook_url'], null, true)
+                : TuxxinServices::helper(['set-secret', 'webhook_url'], $hook);
+            if (!$r['success']) {
+                echo json_encode(['success' => false, 'error' => $r['error'] ?? 'Could not save the webhook.']);
+                break;
             }
         }
 
-        // The diff checker is just a cron entry around `qsa_scan --monitor`.
-        // Free tier is 1 scan/24h, so refuse a schedule the tier cannot sustain —
-        // otherwise every run 429s and the monitor silently never has a baseline.
-        $hasToken = DB::setting('qsa_token', '') !== '';
-        if ($monitor && $schedule === 'hourly' && !$hasToken) {
-            echo json_encode(['success' => false,
-                'error' => 'Hourly monitoring needs a qsa.sh token — the free tier allows one scan per 24h.']);
-            break;
-        }
-        $spec = ['hourly' => '17 * * * *', 'daily' => '17 4 * * *', 'weekly' => '17 4 * * 1'][$schedule];
-        $cron = '/etc/cron.d/inetpanel_qsa_monitor';
-        $tmp  = tempnam('/tmp', 'inetp_cron_');
-        if ($monitor) {
-            file_put_contents($tmp,
-                "# iNetPanel qsa.sh exposure monitor — auto-managed by the Firewall page\n"
-              . "{$spec} root /root/scripts/qsa_scan.sh --monitor --quiet >> /var/log/qsa-monitor.log 2>&1\n");
-            Shell::exec('sudo /root/scripts/manage_cron.sh write inetpanel_qsa_monitor < ' . escapeshellarg($tmp), 'qsa-cron-write');
-        } else {
-            Shell::exec('sudo /root/scripts/manage_cron.sh remove inetpanel_qsa_monitor', 'qsa-cron-remove');
-        }
-        @unlink($tmp);
-        echo json_encode(['success' => true, 'monitor' => $monitor && file_exists($cron)]);
+        // Which schedules a token can sustain (free: 1 scan / 24h; a Deep token
+        // spends a credit per scan; an unconfirmed token might be Deep) is decided
+        // in one place, the helper's sync-cron. The admin's choice is saved either
+        // way and the page shows why it is not scheduled.
+        DB::query("INSERT INTO settings (key, value, category, updated_at) VALUES ('qsa_monitor', ?, 'security', datetime('now'))
+                   ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at", [$monitor ? '1' : '0']);
+        DB::query("INSERT INTO settings (key, value, category, updated_at) VALUES ('qsa_monitor_schedule', ?, 'security', datetime('now'))
+                   ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at", [$schedule]);
+        $c = TuxxinServices::helper(['qsa', 'sync-cron'], null, true);
+        echo json_encode(['success' => true, 'monitor' => !empty($c['active']), 'reason' => $c['reason'] ?? '']);
+        break;
+
+    case 'qsa_clear_token':
+        if (!TuxxinServices::requireWrite()) break;
+        $r = TuxxinServices::helper(['clear-secret', 'qsa_token'], null, true);
+        echo json_encode(['success' => $r['success'], 'error' => $r['error'] ?? '']);
         break;
 
     case 'qsa_history':
-        echo json_encode(['success' => true, 'scans' => qsa_history()]);
+        echo json_encode(TuxxinServices::helper(['qsa', 'history']));
         break;
 
     case 'qsa_view':
-        // Resolve strictly from the archive listing rather than trusting the id:
-        // no path is ever built from user input, so traversal is impossible.
+        // The helper validates the id against its own archive listing; no path
+        // is ever built from user input.
         $want = (string) ($_GET['id'] ?? $_POST['id'] ?? '');
-        $hit  = null;
-        foreach (qsa_history(100) as $row) {
-            if ($row['id'] === $want) { $hit = $row; break; }
-        }
-        if ($hit === null) {
+        if (!preg_match('/^scan-\d{8}T\d{6}z$/', $want)) {
             echo json_encode(['success' => false, 'error' => 'No such scan in the archive.']);
             break;
         }
-        $body = @file_get_contents(qsa_scan_dir() . '/' . $hit['id'] . '.txt');
-        if ($body === false) {
-            echo json_encode(['success' => false,
-                'error' => 'Scan file is not readable by the panel. Run: sudo inetp qsa_scan --quiet once to repair permissions.']);
-            break;
-        }
-        echo json_encode(['success' => true, 'id' => $hit['id'], 'when' => $hit['when'],
-                          'ports' => $hit['ports'], 'output' => $body]);
+        echo json_encode(TuxxinServices::helper(['qsa', 'show', $want]));
         break;
 
     case 'qsa_repair_cli':
+        if (!TuxxinServices::requireWrite()) break;
         // Re-runs only the deployment phase of panel_update.php — no download,
         // no rsync, no migrations. Already covered by the existing sudoers
         // grant for panel_update.php, so this adds no new privilege.
@@ -550,54 +429,42 @@ switch ($action) {
         $r = Shell::exec('sudo ' . escapeshellarg($phpBin)
              . ' /var/www/inetpanel/scripts/panel_update.php --deploy-only', 'qsa-repair-cli');
         $now = shell_exec('/usr/local/bin/inetp 2>&1');
-        $fixed = strpos((string) $now, 'qsa_scan') !== false;
+        $fixed = strpos((string) $now, 'tsvc') !== false;
         echo json_encode([
             'success' => $fixed,
             'message' => $fixed
                 ? 'CLI redeployed — run the scan again.'
-                : 'Redeploy ran but the CLI still lacks qsa_scan. Check /var/log/inetpanel_update.log.',
+                : 'Redeploy ran but the CLI still lacks tsvc. Check /var/log/inetpanel_update.log.',
             'log'     => implode("\n", array_slice(explode("\n", trim((string) $r['output'])), -8)),
         ]);
         break;
 
     case 'qsa_webhook_test':
+        if (!TuxxinServices::requireWrite()) break;
+        // Delivered by the same helper the monitor uses, so the test exercises the
+        // real path. A URL typed into the field is saved first.
         $hook = trim($_POST['webhook_url'] ?? '');
-        if ($hook === '') { $hook = DB::setting('qsa_webhook_url', ''); }
-        if ($hook === '') {
-            echo json_encode(['success' => false, 'error' => 'No webhook URL configured.']);
-            break;
+        if ($hook !== '') {
+            $r = TuxxinServices::helper(['set-secret', 'webhook_url'], $hook);
+            if (!$r['success']) {
+                echo json_encode(['success' => false, 'error' => $r['error'] ?? 'Not a usable webhook URL.']);
+                break;
+            }
         }
-        if (qsa_webhook_kind($hook) === '') {
-            echo json_encode(['success' => false, 'error' => 'Not a recognised webhook URL.']);
-            break;
-        }
-        // Deliberately delivered by qsa_scan.sh rather than re-implemented here:
-        // the monitor runs from cron as root and posts from bash, so a PHP-side
-        // lookalike could pass while the real notification path is broken. The
-        // URL is persisted first so the script reads the same value cron will.
-        DB::saveSetting('qsa_webhook_url', $hook);
-        DB::saveSetting('qsa_webhook_kind', qsa_webhook_kind($hook));
-        $r = Shell::run('qsa_scan', ['--test-webhook']);
-        echo json_encode([
-            'success' => $r['success'],
-            'message' => trim($r['output'] ?: 'Test message delivered.'),
-            'error'   => $r['success'] ? '' : trim($r['output'] ?: 'Delivery failed.'),
-        ]);
+        $r = TuxxinServices::helper(['notify-test'], null, true);
+        echo json_encode(['success' => $r['success'], 'message' => $r['message'] ?? '', 'error' => $r['error'] ?? '']);
         break;
 
     case 'qsa_ack':
+        if (!TuxxinServices::requireWrite()) break;
         // Dismiss the panel-wide banner. The logs row stays for the audit trail.
         DB::saveSetting('qsa_change_unacked', '0');
         echo json_encode(['success' => true]);
         break;
 
     case 'qsa_diff':
-        $r = Shell::run('qsa_scan', ['--diff']);
-        echo json_encode([
-            'success' => true,
-            'diff'    => $r['output'] ?? '',
-            'has_history' => $r['success'],
-        ]);
+        $r = TuxxinServices::helper(['qsa', 'diff']);
+        echo json_encode(['success' => true, 'diff' => $r['diff'] ?? '', 'has_history' => !empty($r['has_history'])]);
         break;
 
     case 'set_ssh_port':

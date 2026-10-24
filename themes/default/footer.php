@@ -1,6 +1,9 @@
 </div> </div> <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="/assets/js/main.js?v=<?= @filemtime(__DIR__ . '/../../public/assets/js/main.js') ?: time() ?>"></script>
 <script src="/assets/js/tablekit.js?v=<?= @filemtime(__DIR__ . '/../../public/assets/js/tablekit.js') ?: time() ?>"></script>
+<?php if (class_exists('TuxxinServices') && Auth::hasFullAccess() && TuxxinServices::enabled('worldip')): ?>
+<script src="/assets/js/tsvc.js?v=<?= @filemtime(__DIR__ . '/../../public/assets/js/tsvc.js') ?: time() ?>"></script>
+<?php endif; ?>
 <script>
 (function () {
     var menu = document.querySelector('.sidebar-menu');

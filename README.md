@@ -98,8 +98,26 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
   kept on the server.
 - **Exposure change monitoring** — scheduled re-scans that report only genuine changes (a
   new open port, a changed service version, a new finding). Alerts surface in the panel
-  header and can be delivered to a Discord or Slack webhook — no mail server required.
+  header and can be delivered to a Discord, Slack or ntfy webhook — no mail server required.
 - [Security details →](https://inetpanel.info/features)
+
+### Tuxxin Services (optional)
+Integrations with services from [Tuxxin](https://tuxxin.com), the company behind iNetPanel.
+Each one works on its free tier with no account; a key adds coverage or raises its limits.
+Turn them on or off individually in **Settings → Tuxxin Services** — a module that is off
+never runs and sends nothing anywhere. New installs start with them on (except the whack.sh
+scan, which needs a key first); an upgrade leaves the new ones off until you turn them on.
+
+| Module | Service | What it adds | What it sends |
+|---|---|---|---|
+| External Security Audit | [qsa.sh](https://qsa.sh/) | The exposure scan and monitoring above | Only the request itself |
+| IP Intelligence | [worldip.io](https://worldip.io/) | Country, network and reverse DNS for banned IPs, log entries and this server | The IP you click to look up |
+| Domain & Certificate Watch | [issued.live](https://issued.live/) | Domain-registration and certificate expiry per hosted site | Hosted domain names, about daily |
+| Site Screenshots | [webshot.site](https://webshot.site/) | A weekly thumbnail of each hosted site | Hosted site URLs, about weekly |
+| Malware & Phishing Scan | [whack.sh](https://whack.sh/) | On-demand scan of a hosted site (needs a free whack.sh key) | The site URL, when a scan is asked for |
+
+Keys, the qsa.sh token and the webhook URL are kept in `/root/.inetpanel_tsvc/` (root-only),
+never in the panel database. CLI: `inetp tsvc status`, `inetp tsvc qsa run`, `inetp tsvc worldip <ip>`.
 
 ### Cloudflare Integration
 - Full DNS record management (A, AAAA, CNAME, MX, TXT, SRV)
@@ -152,6 +170,7 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 | Site databases | MariaDB (localhost) | 3306 |
 | VPN | WireGuard | 1443/UDP |
 | External scanning | [qsa.sh](https://qsa.sh/) (outbound HTTPS) | — |
+| Tuxxin Services (optional) | worldip.io, issued.live, webshot.site, whack.sh (outbound HTTPS) | — |
 
 ---
 

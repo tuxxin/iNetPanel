@@ -471,6 +471,26 @@ if ($pyScripts) {
     log_msg('Deployed ' . count($pyScripts) . ' Python script(s) to /root/scripts/');
 }
 
+// Tuxxin Services: move the qsa.sh token and webhook URL into
+// /root/.inetpanel_tsvc/, make the qsa.sh report archive root-only, and bring the
+// worker and monitoring crons in line with the module switches. Idempotent; the
+// helper also runs it on its own first use (an update is run by the previous
+// panel_update.php, which does not have this step).
+if (is_file('/root/scripts/tuxxin_services.py')) {
+    $tsvcOut = [];
+    exec('/usr/bin/python3 -I /root/scripts/tuxxin_services.py migrate --json 2>&1', $tsvcOut, $tsvcRc);
+    $tsvcRes = json_decode((string) end($tsvcOut), true);
+    if ($tsvcRc === 0 && is_array($tsvcRes) && !empty($tsvcRes['success'])) {
+        $moved = $tsvcRes['moved'] ?? [];
+        log_msg('Tuxxin Services: '
+              . ($moved ? 'moved ' . implode(', ', $moved) . ' out of the panel database; ' : '')
+              . 're-permissioned ' . (int) ($tsvcRes['permissions_fixed'] ?? 0) . ' qsa.sh report file(s).');
+    } else {
+        log_msg('WARNING: Tuxxin Services migration failed (rc ' . $tsvcRc . '): '
+              . mb_substr(implode(' | ', $tsvcOut), 0, 400));
+    }
+}
+
 // Deletion tombstone directory. A deletion records its intent here BEFORE
 // destroying anything, and clears it only once every step has verified its own
 // post-condition — so an interrupted delete leaves a findable record instead of

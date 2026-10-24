@@ -655,6 +655,88 @@ switch ($action) {
         echo json_encode(['success' => true]);
         break;
 
+    // ===================== Tuxxin Services (site details) =====================
+    // Scoped like everything above: $domain is one of this account's own domains.
+    // Each module answers only while it is on. A client can refresh a screenshot
+    // or start a malware scan, but at most once a day / once an hour per domain,
+    // so one account cannot spend the server's shared allowance.
+    case 'site_insights':
+        if (TuxxinServices::enabled('issued') && !TuxxinServices::cached('issued', $domain, false)) {
+            TuxxinServices::helper(['issued', $domain]);
+        }
+        echo json_encode(['success' => true, 'data' => TuxxinServices::siteInsights($domain)]);
+        break;
+
+    case 'site_shot':
+        TuxxinServices::serveShot($domain);
+        break;
+
+    case 'site_shot_refresh':
+        if (!TuxxinServices::requireWrite()) break;
+        if (!TuxxinServices::enabled('webshot')) {
+            echo json_encode(['success' => false, 'error' => 'Screenshots are not enabled on this server.']);
+            break;
+        }
+        $c = TuxxinServices::cached('webshot', $domain);
+        if ($c && !empty($c['data']['captured_at']) && time() - (int) $c['data']['captured_at'] < 86400) {
+            echo json_encode(['success' => false, 'error' => 'This screenshot was taken in the last 24 hours. Try again tomorrow.']);
+            break;
+        }
+        echo json_encode(TuxxinServices::helper(['webshot', 'queue', $domain, '--portal']));
+        break;
+
+    case 'site_scan':
+        if (!TuxxinServices::requireWrite()) break;
+        if (!TuxxinServices::enabled('whack')) {
+            echo json_encode(['success' => false, 'error' => 'Site scanning is not enabled on this server.']);
+            break;
+        }
+        // One scan per domain per hour, whether or not the last one has finished:
+        // a scan nobody polls stays "running", and must not reset the clock.
+        $c = TuxxinServices::cached('whack', $domain);
+        if ($c && !empty($c['data']['started_at']) && time() - (int) $c['data']['started_at'] < 3600) {
+            echo json_encode(($c['data']['state'] ?? '') === 'running'
+                ? ['success' => true, 'data' => $c['data']]
+                : ['success' => false, 'error' => 'This site was scanned in the last hour. Try again later.']);
+            break;
+        }
+        echo json_encode(TuxxinServices::helper(['whack', 'start', $domain, '--portal'], null, true));
+        break;
+
+    case 'site_scan_status':
+        if (!TuxxinServices::enabled('whack')) {
+            echo json_encode(['success' => false, 'error' => 'Site scanning is not enabled on this server.']);
+            break;
+        }
+        echo json_encode(TuxxinServices::helper(['whack', 'status', $domain]));
+        break;
+
+    case 'server_security':
+        // What every site on this server shares: its public IPv4 and its external
+        // exposure. A summary only — the full qsa.sh report stays admin-only.
+        $out = ['success' => true];
+        if (TuxxinServices::enabled('qsa')) {
+            $out['qsa'] = [
+                'last_complete' => (string) DB::setting('qsa_last_complete', ''),
+                'open_ports'    => (string) DB::setting('qsa_last_complete_ports', ''),
+                'ip'            => (string) DB::setting('qsa_last_ip', ''),
+            ];
+        }
+        if (TuxxinServices::enabled('worldip')) {
+            $c = TuxxinServices::cached('worldip', 'self', false);
+            if (!$c) {
+                TuxxinServices::helper(['worldip', 'self']);    // at most once a day (an hour after a failure)
+                $c = TuxxinServices::cached('worldip', 'self');
+            }
+            $w = $c['data'] ?? null;
+            if (is_array($w) && empty($w['error'])) {
+                $out['network'] = ['ip' => $w['ip'] ?? '', 'asn' => $w['asn'] ?? null, 'asn_name' => $w['asn_name'] ?? '',
+                                   'city' => $w['city'] ?? '', 'region' => $w['region'] ?? '', 'country' => $w['country'] ?? ''];
+            }
+        }
+        echo json_encode($out);
+        break;
+
     default:
         echo json_encode(['success' => false, 'error' => 'Unknown action.']);
 }

@@ -485,6 +485,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $stmt->execute([':k' => $key, ':v' => $val]);
             }
 
+            // Tuxxin Services: a new install starts with the modules on (an
+            // upgrade gets the new ones off — see db/migrations/004), except the
+            // whack.sh scan, which has no keyless tier and stays off until a key
+            // is added. Each can be switched in Settings -> Tuxxin Services; "off"
+            // means it never runs.
+            $tsvc = $db->prepare("INSERT OR REPLACE INTO settings (key, value, category) VALUES (:k, :v, 'tuxxin')");
+            foreach (['tsvc_master' => '1', 'tsvc_qsa' => '1', 'tsvc_worldip' => '1', 'tsvc_issued' => '1',
+                      'tsvc_webshot' => '1', 'tsvc_whack' => '0'] as $key => $val) {
+                $tsvc->execute([':k' => $key, ':v' => $val]);
+            }
+
             // Commit all DB writes atomically — lock file written only on success
             $db->commit();
             file_put_contents($lockFile, date('Y-m-d H:i:s'));
@@ -502,6 +513,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     error_log("iNetPanel install: cron write for {$name} exited with {$exit}");
                 }
             };
+
+            // Background worker for the Tuxxin Services modules that queue work
+            // (screenshots, domain-expiry refreshes). The helper writes the cron
+            // itself, and only while one of those modules is on.
+            exec('sudo /usr/local/bin/inetp tsvc migrate --json 2>&1', $tsvcOut, $tsvcExit);
+            if ($tsvcExit !== 0) {
+                error_log('iNetPanel install: tsvc migrate failed: ' . implode("\n", $tsvcOut));
+            }
 
             // Apply timezone to PHP runtime and OS
             $tz = $_POST['timezone'] ?? 'UTC';

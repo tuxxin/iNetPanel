@@ -105,6 +105,31 @@ $internalIp = trim(explode(' ', shell_exec("hostname -I 2>/dev/null") ?: '')[0])
                     </div>
                 </div>
 
+<?php
+                // Tuxxin Services: only modules the host has turned on appear here.
+                $tsvcSite = [
+                    'issued'  => TuxxinServices::enabled('issued'),
+                    'webshot' => TuxxinServices::enabled('webshot'),
+                    'whack'   => TuxxinServices::enabled('whack'),
+                ];
+                $tsvcSecurity = TuxxinServices::enabled('qsa') || TuxxinServices::enabled('worldip');
+                if (in_array(true, $tsvcSite, true)): ?>
+                <div class="card border shadow-sm mb-4">
+                    <div class="card-header bg-transparent fw-bold small">
+                        <i class="fas fa-magnifying-glass-chart me-1"></i> Site details — <?= htmlspecialchars($domain) ?>
+                    </div>
+                    <div class="card-body" id="tsvc-site-details"></div>
+                </div>
+                <?php endif; ?>
+                <?php if ($tsvcSecurity): ?>
+                <div class="card border shadow-sm mb-4 d-none" id="tsvc-server-card">
+                    <div class="card-header bg-transparent fw-bold small">
+                        <i class="fas fa-shield-halved me-1"></i> Server security
+                    </div>
+                    <div class="card-body small" id="tsvc-server-body"></div>
+                </div>
+                <?php endif; ?>
+
                 <!-- FTP / SSH Access -->
                 <div class="card border shadow-sm mb-4">
                     <div class="card-header bg-transparent fw-bold small">
@@ -650,7 +675,12 @@ $internalIp = trim(explode(' ', shell_exec("hostname -I 2>/dev/null") ?: '')[0])
 
 </div><!-- /tab-content -->
 
+<?php if (in_array(true, $tsvcSite, true)): ?>
+<script src="/assets/js/tsvc-site.js?v=<?= @filemtime(ROOT_PATH . '/public/assets/js/tsvc-site.js') ?: time() ?>"></script>
+<?php endif; ?>
 <script>
+const TSVC_SITE = <?= json_encode($tsvcSite) ?>;
+const TSVC_SECURITY = <?= $tsvcSecurity ? 'true' : 'false' ?>;
 let DOMAIN = <?= json_encode($domain) ?>;
 const USERNAME = <?= json_encode($username) ?>;
 let DOC_ROOT = <?= json_encode($docRoot) ?>;
@@ -1425,6 +1455,50 @@ function deleteEmailRule(ruleId) {
 }
 <?php endif; ?>
 
+// ── Tuxxin Services: site details and server security ───────────────────────
+function loadTuxxinServices() {
+    const site = document.getElementById('tsvc-site-details');
+    if (site && window.TsvcSite) {
+        TsvcSite.render(site, DOMAIN, {
+            api: '/api/account', modules: TSVC_SITE, portal: true,
+            shotAction: 'site_shot', shotRefreshAction: 'site_shot_refresh',
+            whackStartAction: 'site_scan', whackStatusAction: 'site_scan_status',
+        });
+    }
+    if (!TSVC_SECURITY) return;
+    fetch('/api/account?action=server_security&domain=' + encodeURIComponent(DOMAIN))
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) return;
+            const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+            let h = '';
+            if (d.qsa) {
+                if (!d.qsa.last_complete) {
+                    h += '<div class="text-muted">Your host has not run an external security audit yet.</div>';
+                } else if (d.qsa.open_ports === '0') {
+                    h += '<div><span class="badge bg-success me-1"><i class="fas fa-circle-check me-1"></i>No exposed ports</span>'
+                       + 'Last external audit ' + esc(d.qsa.last_complete) + ': nothing on this server is reachable except through '
+                       + 'Cloudflare.</div>';
+                } else {
+                    h += '<div><span class="badge bg-warning text-dark me-1">' + esc(d.qsa.open_ports) + ' exposed port(s)</span>'
+                       + 'Last external audit ' + esc(d.qsa.last_complete) + '. Your host can see the details in the admin panel.</div>';
+                }
+                h += '<div class="text-muted mt-1" style="font-size:.75rem;">Scanned from the outside by '
+                   + '<a href="https://qsa.sh" target="_blank" rel="noopener">qsa.sh</a>.</div>';
+            }
+            if (d.network) {
+                const n = d.network, place = [n.city, n.region, n.country].filter(Boolean).join(', ');
+                h += '<div class="mt-2">Hosted on ' + (n.asn ? 'AS' + esc(n.asn) + ' ' + esc(n.asn_name) : 'this server') + (place ? ', ' + esc(place) : '') + '.'
+                   + ' <span class="text-muted" style="font-size:.75rem;">Network data: <a href="https://worldip.io" target="_blank" rel="noopener">worldip.io</a></span></div>';
+            }
+            if (h) {
+                document.getElementById('tsvc-server-body').innerHTML = h;
+                document.getElementById('tsvc-server-card').classList.remove('d-none');
+            }
+        })
+        .catch(() => {});
+}
+
 // ── Init (after Bootstrap loads) ────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
     // Hash-based section deep linking
@@ -1441,6 +1515,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     loadDomains();
+    loadTuxxinServices();
     loadDatabases();
     loadKeys();
     loadDirs();

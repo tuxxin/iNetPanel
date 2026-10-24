@@ -18,6 +18,8 @@ users, so a broken release costs them confidence — treat every push that way.
 | `src/` | Page templates |
 | `scripts/system/` | Root shell scripts, deployed to `/root/scripts/` |
 | `scripts/system/inetp` | CLI dispatcher, deployed to `/usr/local/bin/inetp` |
+| `scripts/system/tuxxin_services.py` | `inetp tsvc`: qsa.sh, worldip.io, issued.live, webshot.site, whack.sh (keys, cache, job queue, worker). Self-check: `inetp tsvc selftest` |
+| `TiCore/TuxxinServices.php` | Panel side of `inetp tsvc`: module switches, cache reads, port map |
 | `scripts/panel_update.php` | The self-updater. Also writes sudoers and all crons. |
 | `install_LAMP.sh` | Installer. Also published to inetpanel.info. |
 | `release.sh` | Build + tag + publish. |
@@ -77,6 +79,15 @@ These each cost real debugging time. Do not rediscover them.
 - **Every hosting tenant is `gid 33 (www-data)`.** A `0770 root:www-data`
   directory is therefore writable by all of them. Owner-only `0700` is what
   excludes them.
+- **`Shell::run()` copies every command's output into the `logs` table.** The
+  logs table is for audit lines, not data: anything that returns data rather
+  than performing an action (a scan report, a status poll) must use
+  `Shell::query()`, which logs failures only. Tuxxin Services
+  (`TuxxinServices::helper()`) does this by default.
+- **Tuxxin Services keys never touch the database.** `inetp tsvc set-secret <name>`
+  reads stdin and writes `/root/.inetpanel_tsvc/<name>` (0600); the database only
+  gets `<name>_set = 1`. A module that is off must not run at all — check
+  `TuxxinServices::enabled()` in the panel; the helper re-checks.
 - **Never stage files for a privileged command in `/tmp`** (mode 1777). Use
   `Shell::stage()`.
 - **Hosted sites run as their own tenant uid, not `www-data`.** A compromised

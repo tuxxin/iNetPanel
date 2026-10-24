@@ -7,10 +7,12 @@ $_s3Failing       = false;
 $_latestVer = '';
 try {
     if (class_exists('DB') && class_exists('Version')) {
-        // Sticky exposure-change flag, raised by qsa_scan.sh --monitor and
+        // Sticky exposure-change flag, raised by `inetp tsvc qsa monitor` and
         // cleared by "Dismiss" on the Firewall page. Surfaced here because a
-        // box with no MTA has nowhere else to deliver it.
-        $_qsaChanged = DB::setting('qsa_change_unacked', '0') === '1';
+        // box with no MTA has nowhere else to deliver it. Not shown while the
+        // External Security Audit module is off: an off module shows nothing.
+        $_qsaChanged = DB::setting('qsa_change_unacked', '0') === '1'
+                    && class_exists('TuxxinServices') && TuxxinServices::enabled('qsa');
         $_qsaWhen    = DB::setting('qsa_last_change', '');
 
         // Remote (S3) backup failing. A failed off-site upload is silent

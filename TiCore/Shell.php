@@ -37,6 +37,7 @@ class Shell
         'qsa_scan',
         'restore_helper',
         's3_backup',
+        'tsvc',
         'list',
     ];
 
@@ -175,6 +176,41 @@ class Shell
             'error'   => $success ? '' : $outputStr,
             'code'    => $exitCode,
         ];
+    }
+
+    /**
+     * Like run(), but logs only failures.
+     *
+     * For read-only calls whose answer is data rather than an action — a scan
+     * report, a status poll every two seconds. run() copies every answer into
+     * the logs table, which holds audit lines, not data; a report fetched
+     * through run() would end up stored there.
+     *
+     * @return array{success: bool, output: string, error: string, code: int}
+     */
+    public static function query(string $command, array $args = []): array
+    {
+        if (!in_array($command, self::$allowedCommands, true)) {
+            self::log('ERROR', $command, $args, 'Command not whitelisted', 1);
+            return ['success' => false, 'output' => '', 'error' => "Command '{$command}' is not allowed.", 'code' => 1];
+        }
+        $argString = '';
+        foreach ($args as $flag => $value) {
+            if (is_int($flag)) {
+                $argString .= ' ' . escapeshellarg($value);
+            } else {
+                $argString .= ' ' . escapeshellarg($flag) . ' ' . escapeshellarg((string) $value);
+            }
+        }
+        $output   = [];
+        $exitCode = 0;
+        exec('sudo /usr/local/bin/inetp ' . escapeshellarg($command) . $argString . ' 2>&1', $output, $exitCode);
+        $outputStr = preg_replace('/\x1B\[[0-9;]*[mGKHF]/', '', implode("\n", $output));
+        $success   = ($exitCode === 0);
+        if (!$success) {
+            self::log('ERROR', $command, $args, mb_substr($outputStr, 0, 300), $exitCode);
+        }
+        return ['success' => $success, 'output' => $outputStr, 'error' => $success ? '' : $outputStr, 'code' => $exitCode];
     }
 
     /**

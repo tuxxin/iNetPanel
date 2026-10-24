@@ -103,6 +103,7 @@ case "$COMMAND" in
     optimize_images)  bash "$SCRIPTS_DIR/optimize_images.sh"  "$@" ;;
     backup_accounts)  bash "$SCRIPTS_DIR/backup_accounts.sh"  "$@" ;;
     s3_backup)        python3 -I "$SCRIPTS_DIR/s3_backup.py"  "$@" ;;
+    tsvc)             python3 -I "$SCRIPTS_DIR/tuxxin_services.py" "$@" ;;
     restore_account)  bash "$SCRIPTS_DIR/restore_account.sh" "$@" ;;
     update)           bash "$SCRIPTS_DIR/inetp-update.sh"     "$@" ;;
     panel_update)     php /var/www/inetpanel/scripts/panel_update.php "$@" ;;
@@ -221,6 +222,7 @@ case "$COMMAND" in
         echo -e "    ${GREEN}cf_remoteip${NC}       Restore real client IPs behind Cloudflare Tunnel"
         echo -e "    ${GREEN}session_reaper${NC}    Expire PHP session files the distro reaper cannot see"
         echo -e "    ${GREEN}qsa_scan${NC}          External exposure scan of this server via qsa.sh"
+        echo -e "    ${GREEN}tsvc${NC}              Tuxxin Services: qsa.sh, worldip.io, issued.live, webshot.site, whack.sh"
         echo -e "    ${GREEN}restore_helper${NC}    Privileged steps for the backup-restore workflow (used by the panel)"
         echo -e "    ${GREEN}malware_scan${NC}      Scan PHP files for backdoors and webshells"
         echo ""

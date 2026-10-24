@@ -41,6 +41,7 @@ require_once TICORE_PATH . '/AccountAuth.php';
 require_once TICORE_PATH . '/Shell.php';
 require_once TICORE_PATH . '/View.php';
 require_once TICORE_PATH . '/CloudflareAPI.php';
+require_once TICORE_PATH . '/TuxxinServices.php';
 require_once TICORE_PATH . '/Version.php';
 require_once TICORE_PATH . '/App.php';
 
@@ -335,6 +336,7 @@ foreach ([
     '/api/stats'          => 'stats.php',
     '/api/profile'        => 'profile.php',
     '/api/hook-scripts'   => 'hook_scripts.php',
+    '/api/tuxxin'         => 'tuxxin.php',
 ] as $route => $file) {
     $router->add($route, function () use ($file) {
         Auth::check();

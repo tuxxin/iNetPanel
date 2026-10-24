@@ -159,6 +159,80 @@ $cpuClass = $cpuLoad > 2 ? 'danger' : ($cpuLoad > 1 ? 'warning' : 'success');
     </div>
 </div>
 
+<?php
+// This server as the internet sees it (Tuxxin Services). The worldip.io half
+// loads from a daily cache; the audit half is read from settings — nothing here
+// contacts a service on page load except a once-a-day refresh of the IP profile.
+$_tsWorld = Auth::hasFullAccess() && TuxxinServices::enabled('worldip');
+$_tsQsa   = Auth::hasFullAccess() && TuxxinServices::enabled('qsa');
+if ($_tsWorld || $_tsQsa):
+    $qLast   = (string) DB::setting('qsa_last_complete', '');
+    $qPorts  = (string) DB::setting('qsa_last_complete_ports', '');
+    $qStatus = (string) DB::setting('qsa_last_status', '');
+?>
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="fas fa-globe me-2 text-primary"></i>This Server on the Internet</h6>
+        <a href="/admin/settings#tuxxin" class="small text-muted">Tuxxin Services</a>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <?php if ($_tsWorld): ?>
+            <div class="col-md-<?= $_tsQsa ? '7' : '12' ?>" id="dash-ip">
+                <div class="text-muted small">Looking up this server's public address…</div>
+            </div>
+            <?php endif; ?>
+            <?php if ($_tsQsa): ?>
+            <div class="col-md-<?= $_tsWorld ? '5' : '12' ?>">
+                <div class="text-muted small mb-1">External exposure (qsa.sh)</div>
+                <?php if ($qLast === ''): ?>
+                    <div class="small">Not scanned yet. <a href="/admin/firewall#tab-qsa">Run a scan</a> to see what the internet can reach.</div>
+                <?php elseif ($qPorts === '0'): ?>
+                    <div class="fw-semibold text-success"><i class="fas fa-circle-check me-1"></i>0 open TCP ports</div>
+                    <div class="small text-muted">Last complete scan <?= htmlspecialchars($qLast) ?> — as designed: everything comes in through the tunnel.</div>
+                <?php else: ?>
+                    <div class="fw-semibold text-danger"><i class="fas fa-triangle-exclamation me-1"></i><?= htmlspecialchars($qPorts) ?> open TCP port<?= $qPorts === '1' ? '' : 's' ?></div>
+                    <div class="small text-muted">Last complete scan <?= htmlspecialchars($qLast) ?>. iNetPanel needs none — check for a router port-forward or DMZ.</div>
+                <?php endif; ?>
+                <?php if ($qStatus !== '' && $qStatus !== 'complete' && $qLast !== ''): ?>
+                    <div class="small text-muted mt-1">The most recent attempt did not complete (<?= htmlspecialchars($qStatus) ?>).</div>
+                <?php endif; ?>
+                <a href="/admin/firewall#tab-qsa" class="btn btn-sm btn-outline-primary mt-2">Exposure Scan</a>
+            </div>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+<?php if ($_tsWorld): ?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const box = document.getElementById('dash-ip');
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    fetch('/api/tuxxin?action=server_ip').then(r => r.json()).then(r => {
+        if (!r.success) { box.innerHTML = '<div class="small text-muted">' + esc(r.error || 'Lookup unavailable.') + '</div>'; return; }
+        const d = r.data, place = [d.city, d.region, d.country].filter(Boolean).join(', ');
+        let h = '<div class="text-muted small mb-1">Public IPv4</div>'
+              + '<div class="fw-semibold font-monospace">' + esc(d.ip) + '</div>'
+              + '<div class="small">' + esc(place) + (d.asn ? ' · AS' + esc(d.asn) + ' ' + esc(d.asn_name || d.org) : '') + '</div>';
+        if (d.ptr) {
+            h += '<div class="small mt-1">Reverse DNS: <code>' + esc(d.ptr) + '</code> ';
+            h += d.forward_confirmed
+                ? '<span class="text-success">&#10003; forward-confirmed</span>'
+                : '<span class="text-warning" title="Mail servers check that reverse DNS resolves back to the sending address">not forward-confirmed — outbound mail may be filtered</span>';
+            h += '</div>';
+        } else {
+            h += '<div class="small mt-1 text-muted">No reverse DNS (PTR) record — set one with your provider if this server sends mail.</div>';
+        }
+        h += '<div class="text-muted mt-2" style="font-size:.7rem;">Data: <a href="https://worldip.io/' + encodeURIComponent(d.ip)
+           + '" target="_blank" rel="noopener">worldip.io</a> — includes GeoLite2 data created by MaxMind and IPinfo Lite. '
+           + '<a href="https://worldip.io/data-sources" target="_blank" rel="noopener">Sources</a></div>';
+        box.innerHTML = h;
+    }).catch(() => { box.innerHTML = '<div class="small text-muted">Lookup unavailable.</div>'; });
+});
+</script>
+<?php endif; ?>
+<?php endif; ?>
+
 <!-- Resource history chart -->
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">

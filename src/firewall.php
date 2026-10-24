@@ -208,16 +208,31 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
 
     <!-- ===================== Exposure Scan (qsa.sh) ===================== -->
     <div class="tab-pane fade" id="tab-qsa">
+        <?php if (!TuxxinServices::enabled('qsa')): ?>
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h5 class="mb-1">External exposure scan</h5>
+                <p class="text-muted small mb-3" style="max-width:62ch;">
+                    The External Security Audit (qsa.sh) is turned off, so this server is not being scanned
+                    and nothing is sent to qsa.sh.
+                </p>
+                <a href="/admin/settings#tuxxin" class="btn btn-outline-primary btn-sm">
+                    <i class="fas fa-plug me-1"></i> Settings &rarr; Tuxxin Services
+                </a>
+            </div>
+        </div>
+        <?php else: ?>
         <div class="card border-0 shadow-sm mb-3">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
                     <div>
                         <h5 class="mb-1">External exposure scan</h5>
-                        <p class="text-muted small mb-0" style="max-width:60ch;">
+                        <p class="text-muted small mb-0" style="max-width:62ch;">
                             Everything else on this page describes what the firewall was
                             <em>told</em> to do. This scans your public IP from the outside
-                            and reports what the internet can actually reach — including
-                            anything exposed by a container or upstream of this server.
+                            and reports what the internet can actually reach. iNetPanel needs
+                            <strong>no open ports</strong> — sites come in through the Cloudflare Tunnel —
+                            so anything found here is usually a router port-forward or DMZ.
                             Powered by <a href="https://qsa.sh" target="_blank" rel="noopener">qsa.sh</a>.
                         </p>
                     </div>
@@ -228,16 +243,21 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
 
                 <div class="alert alert-warning mt-3 mb-0 small" id="qsa-consent">
                     <strong>This performs a real external port and vulnerability scan</strong>
-                    of <code id="qsa-target">this server's public IP</code>.
+                    of <code id="qsa-target">this server's public IPv4</code>.
                     By running it you confirm you are authorised to scan that address.
                     See <a href="https://qsa.sh/terms" target="_blank" rel="noopener">qsa.sh/terms</a>.
                 </div>
             </div>
         </div>
 
+        <!-- What the latest scan means. Filled from the scan's own summary. -->
+        <div class="card border-0 shadow-sm mb-3 d-none" id="qsa-summary-card">
+            <div class="card-body" id="qsa-summary"></div>
+        </div>
+
         <!-- Terminal-style output. qsa.sh is a CLI tool first; showing its real
              output rather than reformatting it keeps the result verifiable against
-             running `curl qsa.sh` by hand. -->
+             running `curl -4 qsa.sh` by hand. -->
         <div class="card border-0 shadow-sm mb-3 d-none" id="qsa-output-card">
             <div class="card-header d-flex justify-content-between align-items-center py-2"
                  style="background:#0d1117;border-bottom:1px solid #30363d;">
@@ -245,27 +265,25 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
                     <span style="color:#ff5f56;">&#9679;</span>
                     <span style="color:#ffbd2e;">&#9679;</span>
                     <span style="color:#27c93f;">&#9679;</span>
-                    &nbsp; curl qsa.sh
+                    &nbsp; curl -4 qsa.sh
                 </span>
                 <span class="badge bg-secondary" id="qsa-tier-badge">free tier</span>
             </div>
             <div class="card-body p-0">
                 <div class="alert alert-warning d-flex align-items-center m-3 d-none" id="qsa-repair-wrap">
-        <i class="fas fa-wrench me-2"></i>
-        <div class="flex-grow-1 small">
-            The panel can redeploy <code>/usr/local/bin/inetp</code> from the files it
-            already has. No download, no restart.
-        </div>
-        <button class="btn btn-sm btn-warning ms-2" id="qsa-repair-btn">Repair CLI</button>
-    </div>
-    <pre id="qsa-output" style="margin:0;padding:16px;background:#0d1117;color:#c9d1d9;
+                    <i class="fas fa-wrench me-2"></i>
+                    <div class="flex-grow-1 small">
+                        The panel can redeploy <code>/usr/local/bin/inetp</code> from the files it
+                        already has. No download, no restart.
+                    </div>
+                    <button class="btn btn-sm btn-warning ms-2" id="qsa-repair-btn">Repair CLI</button>
+                </div>
+                <pre id="qsa-output" style="margin:0;padding:16px;background:#0d1117;color:#c9d1d9;
                      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
                      line-height:1.5;max-height:520px;overflow:auto;white-space:pre-wrap;
                      word-break:break-word;">Ready.</pre>
 
-                <!-- Running indicator. The scan is a single blocking request with no
-                     server-side progress to read, so this reports elapsed time and a
-                     realistic duration range rather than faking a percentage. -->
+                <!-- Running indicator. The phase comes from the scan's own output. -->
                 <div class="d-none" id="qsa-progress"
                      style="background:#0d1117;border-top:1px solid #30363d;padding:12px 16px;">
                     <div class="d-flex align-items-center mb-2">
@@ -281,16 +299,13 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
                     </div>
                     <div class="small mt-2" style="color:#8b949e;">
                         <i class="fas fa-circle-info me-1"></i>
-                        You can leave this page — the result is saved to this server and
-                        reloads here. Staying just lets you watch it finish.
+                        The scan runs on the server, not in this page — you can leave and come back.
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Scan history. qsa.sh keeps nothing server-side, so this is the panel's
-             own archive (/var/lib/inetpanel/qsa, 30 runs) covering both manual
-             scans and monitored ones. -->
+        <!-- Scan history: the panel's own archive (root-only, last 30 runs). -->
         <div class="card border-0 shadow-sm mb-3 d-none" id="qsa-history-card">
             <div class="card-body">
                 <h6 class="mb-1">Previous scans</h6>
@@ -306,17 +321,16 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
             <div class="card-body">
                 <h6 class="mb-1">Change monitoring</h6>
                 <p class="text-muted small">
-                    Re-scans on a schedule and compares against the previous result,
-                    ignoring volatile detail like scan duration and certificate expiry
-                    dates. Nothing is reported unless your actual exposure changes — a
-                    new open port, a service version change, a new finding.
+                    Re-scans on a schedule and compares the open ports, service versions and findings
+                    with the last complete scan. Timing, countdowns and certificate dates are ignored,
+                    and a scan that was cut off is never compared — so nothing is reported unless your
+                    actual exposure changes.
                 </p>
                 <p class="text-muted small mb-3">
                     <strong>How you find out:</strong> a change raises a red
                     <em>Exposure changed</em> notice in the panel header until you dismiss
-                    it here, and writes a <a href="/admin/logs?source=qsa">log entry</a>.
-                    iNetPanel does not run a mail server, so there is no email alert —
-                    add a webhook below if you want to be told when you are not logged in.
+                    it here, writes a <a href="/admin/logs?source=qsa">log entry</a>, and posts to
+                    the webhook below if you set one.
                 </p>
                 <div class="row g-3 align-items-end">
                     <div class="col-md-4">
@@ -330,7 +344,7 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
                         <select class="form-select form-select-sm" id="qsa-schedule">
                             <option value="daily">Daily</option>
                             <option value="weekly">Weekly</option>
-                            <option value="hourly">Hourly (needs a token)</option>
+                            <option value="hourly">Hourly (needs a Full token)</option>
                         </select>
                     </div>
                     <div class="col-md-4">
@@ -341,15 +355,14 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
 
                 <hr class="my-3">
                 <label class="form-label small fw-semibold mb-1">
-                    Webhook notification <span class="text-muted fw-normal">(optional)</span>
+                    Webhook notification <span class="text-muted fw-normal">(optional — shared with all Tuxxin Services alerts)</span>
                 </label>
                 <p class="text-muted small mb-2">
-                    Paste a Discord or Slack incoming webhook URL. The change diff is posted
-                    there as soon as it is detected. Any other <code>https://</code> endpoint
-                    receives the same message as JSON <code>{"text": "..."}</code>.
+                    A Discord or Slack incoming webhook, an <code>https://ntfy.sh/&lt;topic&gt;</code> URL,
+                    or any other <code>https://</code> endpoint (it receives JSON with a <code>text</code> field).
                 </p>
                 <div class="input-group input-group-sm mb-2">
-                    <input type="url" class="form-control" id="qsa-webhook"
+                    <input type="password" class="form-control" id="qsa-webhook" autocomplete="off"
                            placeholder="https://discord.com/api/webhooks/... or https://hooks.slack.com/services/...">
                     <button class="btn btn-outline-secondary" id="qsa-webhook-test" type="button">Send test</button>
                 </div>
@@ -377,11 +390,17 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
                 <h6 class="mb-1">qsa.sh token <span class="text-muted fw-normal small">(optional)</span></h6>
                 <p class="text-muted small mb-2">
                     Without a token you get the free tier: the top 1,000 TCP ports and one
-                    scan per 24 hours. A token unlocks all 65,535 ports and more frequent scans.
+                    scan per 24 hours. A Full token sweeps all 65,535 ports and allows a scan an hour;
+                    a Deep token adds the complete check set, one credit per scan. The panel learns which
+                    kind a token is from qsa.sh on its first scan, and never schedules a Deep token.
                 </p>
-                <div class="input-group input-group-sm" style="max-width:520px;">
-                    <input type="password" class="form-control" id="qsa-token" placeholder="Paste your qsa.sh token">
+                <div class="input-group input-group-sm" style="max-width:560px;">
+                    <input type="password" class="form-control" id="qsa-token" autocomplete="off"
+                           placeholder="Paste your qsa.sh token (32 hexadecimal characters)">
                     <button class="btn btn-outline-secondary" id="qsa-token-save">Save token</button>
+                    <button class="btn btn-outline-danger d-none" id="qsa-token-clear" title="Remove the token">
+                        <i class="fas fa-trash"></i>
+                    </button>
                 </div>
                 <div class="small text-muted mt-1" id="qsa-token-state">No token set — using the free tier.</div>
             </div>
@@ -432,6 +451,7 @@ if (str_contains($clientIp, ',')) $clientIp = trim(explode(',', $clientIp)[0]);
                 </p>
             </div>
         </div>
+        <?php endif; ?>
     </div>
 
 </div>
@@ -539,7 +559,7 @@ function renderFail2Ban(d) {
             html += '<div class="mt-2">';
             info.banned_ips.forEach(ip => {
                 html += `<span class="badge bg-light text-dark border me-1 mb-1">
-                    ${ip}
+                    ${window.tsvcIp ? window.tsvcIp(ip) : ip}
                     <button class="btn btn-sm p-0 ms-1 text-danger" onclick="f2bUnban('${ip}','${name}')" title="Unban">
                         <i class="fas fa-times" style="font-size:0.7rem;"></i>
                     </button>
@@ -682,15 +702,100 @@ function fwAutoConfigure() {
 document.addEventListener('DOMContentLoaded', loadFirewallStatus);
 
 /* ===================== Exposure Scan (qsa.sh) ===================== */
+<?php if (TuxxinServices::enabled('qsa')): ?>
+const QSA_PORTS = <?= json_encode(TuxxinServices::portMap(), JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+const QSA_PHASE_LABEL = {
+    contacting: 'Contacting qsa.sh…',
+    countdown:  'Authorisation countdown (15s) — nothing is scanned yet',
+    naabu:      'naabu — discovering open ports',
+    nmap:       'nmap — service and version detection',
+    nuclei:     'nuclei — exposure and vulnerability checks',
+    queued:     'Token scan queued — waiting for qsa.sh',
+    polling:    'Token scan running on qsa.sh — checking every 20s',
+};
+const QSA_STATUS = {
+    complete:     ['success', 'Complete'],
+    partial:      ['warning text-dark', 'Partial results'],
+    capped:       ['warning text-dark', 'Reached the time limit'],
+    interrupted:  ['secondary', 'Did not finish'],
+    rate_limited: ['secondary', 'Rate limited'],
+    refused:      ['danger', 'Refused by qsa.sh'],
+    token_rejected: ['danger', 'Token not accepted'],
+    no_credits:   ['danger', 'No Deep credits left'],
+    failed:       ['danger', 'Failed'],
+};
+const qsaEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-/* The free scan streams a 15-second authorisation countdown before it starts,
-   which is meaningful in a terminal and pure noise in a browser. Strip those
-   frames but keep everything else verbatim, so what is shown here matches what
-   `curl qsa.sh` prints. */
+function qsaBadge(status) {
+    const b = QSA_STATUS[status] || ['secondary', status || 'unknown'];
+    return '<span class="badge bg-' + b[0] + '">' + qsaEsc(b[1]) + '</span>';
+}
+
+function qsaDescribePort(port) {
+    if (QSA_PORTS[port]) return QSA_PORTS[port];
+    if (port >= 40000 && port <= 50000) return {label: 'FTP passive range', kind: 'panel'};
+    return {label: 'Not opened by iNetPanel', kind: 'unknown'};
+}
+
+/* What a scan means for an iNetPanel server, which needs no open TCP ports. */
+function qsaRenderSummary(meta) {
+    const card = document.getElementById('qsa-summary-card');
+    const box  = document.getElementById('qsa-summary');
+    if (!meta) { card.classList.add('d-none'); return; }
+    const when = meta.ts ? new Date(meta.ts * 1000).toLocaleString() : '';
+    const ip   = meta.ip ? ' of <code>' + qsaEsc(meta.ip) + '</code>' : '';
+    let html = '<div class="d-flex justify-content-between flex-wrap gap-2 mb-2"><div class="fw-semibold">'
+             + 'Latest scan' + ip + ' ' + qsaBadge(meta.status) + '</div><div class="small text-muted">'
+             + qsaEsc(when) + (meta.tier ? ' · ' + qsaEsc(meta.tier) + ' tier' : '') + '</div></div>';
+    const ports = meta.ports || [];
+    if (meta.status === 'complete' && meta.open_ports === 0) {
+        html += '<div class="alert alert-success small mb-0"><i class="fas fa-circle-check me-1"></i>'
+              + '<strong>0 open TCP ports.</strong> This is what iNetPanel is built for: hosted sites are served through '
+              + 'the Cloudflare Tunnel, so nothing on this server needs to be reachable directly.'
+              + (meta.tier === 'free' ? ' The free scan covers the top 1,000 ports; a Full scan checks all 65,535.' : '')
+              + '</div>';
+    } else if (ports.length) {
+        const rows = ports.map(p => {
+            const d = qsaDescribePort(p.port);
+            const cls = d.kind === 'site' ? 'danger' : 'warning';
+            return '<tr><td class="font-monospace">' + p.port + '/tcp</td><td>' + qsaEsc(p.service)
+                 + (p.version ? ' <span class="text-muted">' + qsaEsc(p.version) + '</span>' : '') + '</td>'
+                 + '<td><span class="badge bg-' + cls + (cls === 'warning' ? ' text-dark' : '') + '">' + qsaEsc(d.label) + '</span></td></tr>';
+        }).join('');
+        html += '<div class="alert alert-danger small mb-2"><i class="fas fa-triangle-exclamation me-1"></i>'
+              + '<strong>' + ports.length + ' open TCP port' + (ports.length === 1 ? '' : 's') + ' reachable from the internet.</strong> '
+              + 'iNetPanel needs none: sites come in through the Cloudflare Tunnel. An open port almost always means a '
+              + 'port-forward or DMZ on your router or host. Remove it there; then re-scan.</div>'
+              + '<div class="table-responsive"><table class="table table-sm small align-middle mb-0"><thead><tr><th>Port</th>'
+              + '<th>Service</th><th>What it is</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    }
+    if (meta.status === 'capped') {
+        html += '<div class="alert alert-warning small mt-2 mb-0"><i class="fas fa-hourglass-end me-1"></i>'
+              + 'This scan reached qsa.sh\'s time limit before it finished, so the results above are only what it saw first. '
+              + 'A server with this much exposure needs a <a href="https://qsa.sh/pricing" target="_blank" rel="noopener">Full or Deep scan</a> '
+              + 'to be covered completely.</div>';
+    } else if (meta.status === 'partial') {
+        html += '<div class="alert alert-warning small mt-2 mb-0">qsa.sh reports that some checks did not run. '
+              + 'Do not read this as a clean result; run it again.</div>';
+    } else if (meta.status === 'interrupted') {
+        html += '<div class="alert alert-secondary small mt-2 mb-0">The scan stopped before it finished '
+              + '(connection lost). Its partial output is kept below; run it again for a complete result.</div>';
+    }
+    if (meta.findings_total) {
+        const sev = meta.severity || {};
+        const parts = Object.keys(sev).map(k => sev[k] + ' ' + k);
+        html += '<div class="small text-muted mt-2">Findings: ' + meta.findings_total
+              + (parts.length ? ' (' + qsaEsc(parts.join(', ')) + ')' : '') + ' — details in the report below.</div>';
+    }
+    box.innerHTML = html;
+    card.classList.remove('d-none');
+}
+
+/* The terminal shows qsa.sh's own output, minus the countdown frames. */
 function qsaClean(t) {
     return (t || '')
         .split('\n')
-        .filter(l => !/Starting scan of .* in \d+s/.test(l))
+        .filter(l => !/Starting scan of .* in \d+s/.test(l) && !/^\s*scanning…?\s*$/.test(l))
         .join('\n')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
@@ -703,21 +808,24 @@ function qsaLoadSettings() {
             if (!d.success) return;
             document.getElementById('qsa-monitor').checked = !!d.monitor;
             document.getElementById('qsa-schedule').value  = d.schedule || 'daily';
-            document.getElementById('qsa-tier-badge').textContent = d.has_token ? 'token tier' : 'free tier';
+            const tierName = d.token_tier === 'deep' ? 'Deep token' : (d.token_tier === 'full' ? 'Full token' : 'token');
+            document.getElementById('qsa-tier-badge').textContent = d.has_token ? tierName : 'free tier';
             document.getElementById('qsa-token-state').textContent = d.has_token
-                ? 'Token saved — all 65,535 ports available.'
+                ? (d.token_tier === 'deep' ? 'Deep token saved — each scan spends a credit; it is never scheduled.'
+                   : d.token_tier === 'full' ? 'Full token saved — all 65,535 ports, one scan an hour.'
+                   : 'Token saved — its tier (Full or Deep) is confirmed on its first scan.')
                 : 'No token set — using the free tier.';
-            let st = d.monitor ? 'Monitoring is on.' : 'Monitoring is off.';
-            if (d.last_run)    st += ' Last run: ' + d.last_run + '.';
+            document.getElementById('qsa-token-clear').classList.toggle('d-none', !d.has_token);
+            let st = d.monitor_active ? 'Monitoring is on.' : (d.monitor ? 'Monitoring is set, but not scheduled.' : 'Monitoring is off.');
+            if (d.last_run)    st += ' Last scan: ' + d.last_run + '.';
             if (d.last_change) st += ' Last change detected: ' + d.last_change + '.';
             document.getElementById('qsa-monitor-state').textContent = st;
 
-            // The URL itself is never returned by the API — only whether one is
-            // set — so show a placeholder rather than echoing a secret back.
+            // The URL itself is never returned — only whether one is saved.
             const wh = document.getElementById('qsa-webhook');
             wh.value = '';
             wh.placeholder = d.webhook_set
-                ? '\u2022'.repeat(24) + '  (' + (d.webhook_kind || 'saved') + ' webhook saved \u2014 type to replace)'
+                ? '•'.repeat(24) + '  (' + (d.webhook_kind || 'saved') + ' webhook saved — type to replace)'
                 : 'https://discord.com/api/webhooks/... or https://hooks.slack.com/services/...';
             document.getElementById('qsa-webhook-state').textContent = d.webhook_set
                 ? 'Change alerts are delivered to your ' + (d.webhook_kind || '') + ' webhook.'
@@ -737,11 +845,10 @@ document.getElementById('qsa-webhook-test').addEventListener('click', function (
     fetch('/api/firewall?action=qsa_webhook_test', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(d => {
-            showFwToast(d.success ? (d.message || 'Test delivered.') : (d.error || 'Delivery failed.'),
-                        d.success ? 'success' : 'danger');
+            showFwToast(qsaEsc(d.success ? (d.message || 'Test delivered.') : (d.error || 'Delivery failed.')), d.success ? 'success' : 'danger');
             if (d.success) qsaLoadSettings();
         })
-        .catch(() => showFwToast('Could not reach the panel API.', 'danger'))
+        .catch(() => showFwToast(qsaEsc('Could not reach the panel API.'), 'danger'))
         .finally(() => { btn.disabled = false; btn.textContent = 'Send test'; });
 });
 
@@ -753,7 +860,7 @@ document.getElementById('qsa-ack-btn').addEventListener('click', function () {
             // Drop the header notice without a reload.
             document.querySelectorAll('a[href="/admin/firewall#tab-qsa"].btn-danger')
                     .forEach(el => el.remove());
-            showFwToast('Dismissed.', 'success');
+            showFwToast(qsaEsc('Dismissed.'), 'success');
         });
 });
 
@@ -774,82 +881,91 @@ function qsaLoadDiff() {
         });
 }
 
-document.getElementById('qsa-run-btn').addEventListener('click', function () {
-    const btn = this;
-    const card = document.getElementById('qsa-output-card');
-    const out  = document.getElementById('qsa-output');
-    card.classList.remove('d-none');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Scanning…';
-    out.textContent = 'Contacting qsa.sh…\n\nThe free tier takes about 30 seconds, plus a 15-second\nauthorisation countdown before the scan begins.\nA token scan can take several minutes.';
-    qsaStartProgress();
+/* A scan runs in its own systemd unit on the server. The page only starts it
+   and then polls, so leaving and coming back picks the same scan up again. */
+let qsaPoll = null;
 
+function qsaSetRunning(on) {
+    const btn = document.getElementById('qsa-run-btn');
+    btn.disabled = on;
+    btn.innerHTML = on ? '<span class="spinner-border spinner-border-sm me-1"></span> Scanning…'
+                       : '<i class="fas fa-radar me-1"></i> Run scan';
+    document.getElementById('qsa-progress').classList.toggle('d-none', !on);
+}
+
+function qsaFmt(secs) {
+    return secs < 60 ? secs + 's' : Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+}
+
+function qsaPollStatus() {
+    fetch('/api/firewall?action=qsa_status')
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) {
+                qsaStop();
+                if (d.error) document.getElementById('qsa-output').textContent = d.error;
+                return;
+            }
+            const out = document.getElementById('qsa-output');
+            if (d.running) {
+                document.getElementById('qsa-output-card').classList.remove('d-none');
+                qsaSetRunning(true);
+                document.getElementById('qsa-phase').textContent = QSA_PHASE_LABEL[d.phase] || 'Running…';
+                document.getElementById('qsa-elapsed').textContent = qsaFmt(d.elapsed || 0);
+                const txt = qsaClean(d.live);
+                out.textContent = txt || 'Contacting qsa.sh…\n\nThe free tier takes about 30 seconds, plus a 15-second\n'
+                                       + 'authorisation countdown before the scan begins.\nA token scan can take several minutes.';
+                out.scrollTop = out.scrollHeight;
+                if (!qsaPoll) qsaPoll = setInterval(qsaPollStatus, 2000);
+                return;
+            }
+            const finishedNow = !!qsaPoll;
+            qsaStop();
+            if (!finishedNow) return;          // page load with nothing running
+            if (d.result) {
+                qsaRenderSummary(d.result);
+                qsaOpenScan(d.result.id, true);
+            } else {
+                qsaRenderSummary(null);
+                out.textContent = qsaClean(d.final_output) || ('Scan ended: ' + (d.status_label || 'no result') + '.');
+                if (d.state && d.state.status === 'rate_limited') {
+                    out.textContent += '\n\n— The free tier allows one scan per 24 hours. '
+                                     + 'A Full token raises this to hourly; Deep has no cooldown.';
+                }
+            }
+            qsaLoadSettings();
+            qsaLoadHistory(false);
+        })
+        .catch(() => {});
+}
+
+function qsaStop() {
+    if (qsaPoll) { clearInterval(qsaPoll); qsaPoll = null; }
+    qsaSetRunning(false);
+}
+
+document.getElementById('qsa-run-btn').addEventListener('click', function () {
+    document.getElementById('qsa-output-card').classList.remove('d-none');
+    document.getElementById('qsa-output').textContent = 'Starting the scan…';
+    qsaSetRunning(true);
     const fd = new FormData();
     fd.append('action', 'qsa_scan');
     fetch('/api/firewall', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(d => {
-            out.textContent = qsaClean(d.output) || 'No output returned.';
-            // Only offer the repair when the API confirmed the panel's own copy
-            // of inetp is current — otherwise redeploying just copies the same
-            // stale file and looks like the repair silently did nothing.
-            document.getElementById('qsa-repair-wrap')
-                    .classList.toggle('d-none', !d.repairable);
-            document.getElementById('qsa-tier-badge').textContent =
-                (d.tier === 'token' ? 'token tier' : 'free tier');
-            if (d.rate_limited) {
-                /* Expected on the free tier rather than an error — say so plainly
-                   instead of showing a failure the user cannot act on. */
-                out.textContent += '\n\n— Free tier allows one scan per 24 hours. '
-                                 + 'A token raises this to hourly (Full) or unlimited (Deep).';
+            document.getElementById('qsa-repair-wrap').classList.toggle('d-none', !d.repairable);
+            if (!d.success && !d.running) {
+                qsaSetRunning(false);
+                document.getElementById('qsa-output').textContent = d.error || 'Could not start the scan.';
+                return;
             }
+            if (!qsaPoll) qsaPoll = setInterval(qsaPollStatus, 2000);
+            qsaPollStatus();
         })
-        .catch(e => { out.textContent = 'Request failed: ' + e; })
-        .finally(() => {
-            qsaStopProgress();
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-radar me-1"></i> Run scan';
-            qsaLoadSettings();
-            qsaLoadHistory(false);
-        });
+        .catch(e => { qsaSetRunning(false); document.getElementById('qsa-output').textContent = 'Request failed: ' + e; });
 });
 
-/* Progress reporting for a request that has no readable progress.
-   qsa.sh runs a fixed pipeline, so the phase labels are keyed to its real
-   stage order and the elapsed counter is genuine. Nothing here claims a
-   percentage, because there is no percentage to report. */
-let qsaTimer = null, qsaT0 = 0;
-
-const QSA_PHASES = [
-    [0,   'Contacting qsa.sh\u2026'],
-    [3,   'Authorisation countdown (~15s) \u2014 scan has not started yet'],
-    [18,  'naabu \u2014 discovering open ports'],
-    [40,  'nmap \u2014 service and version detection'],
-    [70,  'nuclei \u2014 exposure and vulnerability checks'],
-    [150, 'Still running \u2014 token-tier scans sweep all 65,535 ports'],
-];
-
-function qsaStartProgress() {
-    qsaT0 = Date.now();
-    document.getElementById('qsa-progress').classList.remove('d-none');
-    if (qsaTimer) clearInterval(qsaTimer);
-    qsaTimer = setInterval(() => {
-        const secs = Math.floor((Date.now() - qsaT0) / 1000);
-        document.getElementById('qsa-elapsed').textContent =
-            secs < 60 ? secs + 's' : Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
-        let label = QSA_PHASES[0][1];
-        for (const ph of QSA_PHASES) { if (secs >= ph[0]) label = ph[1]; }
-        document.getElementById('qsa-phase').textContent = label;
-    }, 1000);
-}
-
-function qsaStopProgress() {
-    if (qsaTimer) { clearInterval(qsaTimer); qsaTimer = null; }
-    document.getElementById('qsa-progress').classList.add('d-none');
-}
-
-/* Scan archive. qsa.sh stores nothing, so the panel keeps its own copy and a
-   result is no longer lost by navigating away mid-scan. */
+/* Scan archive. qsa.sh stores nothing, so the panel keeps its own copy. */
 function qsaLoadHistory(autoOpenLatest) {
     fetch('/api/firewall?action=qsa_history')
         .then(r => r.json())
@@ -862,19 +978,21 @@ function qsaLoadHistory(autoOpenLatest) {
                 const a = document.createElement('a');
                 a.href = '#';
                 a.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2';
-                const ports = (sc.ports === null || sc.ports === undefined)
-                    ? '<span class="text-muted">—</span>'
-                    : (sc.ports === 0
+                const ports = (sc.open_ports === null || sc.open_ports === undefined)
+                    ? '<span class="text-muted small">—</span>'
+                    : (sc.open_ports === 0
                         ? '<span class="badge bg-success">0 open ports</span>'
-                        : '<span class="badge bg-warning text-dark">' + sc.ports + ' open port' + (sc.ports === 1 ? '' : 's') + '</span>');
-                a.innerHTML = '<span class="small"><i class="fas fa-clock me-2 text-muted"></i>'
-                            + sc.when + (i === 0 ? ' <span class="badge bg-secondary ms-1">latest</span>' : '')
-                            + '</span>' + ports;
-                a.addEventListener('click', ev => { ev.preventDefault(); qsaOpenScan(sc.id); });
+                        : '<span class="badge bg-danger">' + sc.open_ports + ' open port' + (sc.open_ports === 1 ? '' : 's') + '</span>');
+                const when = sc.ts ? new Date(sc.ts * 1000).toLocaleString() : sc.id;
+                a.innerHTML = '<span class="small"><i class="fas fa-clock me-2 text-muted"></i>' + qsaEsc(when)
+                            + (i === 0 ? ' <span class="badge bg-secondary ms-1">latest</span>' : '')
+                            + (sc.trigger === 'monitor' ? ' <span class="text-muted">· scheduled</span>' : '')
+                            + '</span><span class="d-flex gap-1">' + qsaBadge(sc.status) + ports + '</span>';
+                a.addEventListener('click', ev => { ev.preventDefault(); qsaRenderSummary(sc); qsaOpenScan(sc.id); });
                 list.appendChild(a);
             });
             card.classList.remove('d-none');
-            if (autoOpenLatest) qsaOpenScan(d.scans[0].id, true);
+            if (autoOpenLatest) { qsaRenderSummary(d.scans[0]); qsaOpenScan(d.scans[0].id, true); }
         })
         .catch(() => {});
 }
@@ -883,12 +1001,12 @@ function qsaOpenScan(id, quiet) {
     fetch('/api/firewall?action=qsa_view&id=' + encodeURIComponent(id))
         .then(r => r.json())
         .then(d => {
-            if (!d.success) { if (!quiet) showFwToast(d.error || 'Could not load that scan.', 'danger'); return; }
+            if (!d.success) { if (!quiet) showFwToast(qsaEsc(d.error || 'Could not load that scan.'), 'danger'); return; }
             document.getElementById('qsa-output-card').classList.remove('d-none');
-            document.getElementById('qsa-output').textContent =
-                '# saved scan from ' + d.when + '\n\n' + qsaClean(d.output);
+            const when = d.meta && d.meta.ts ? new Date(d.meta.ts * 1000).toLocaleString() : id;
+            document.getElementById('qsa-output').textContent = '# saved scan from ' + when + '\n\n' + qsaClean(d.output);
         })
-        .catch(() => { if (!quiet) showFwToast('Could not load that scan.', 'danger'); });
+        .catch(() => { if (!quiet) showFwToast(qsaEsc('Could not load that scan.'), 'danger'); });
 }
 
 document.getElementById('qsa-repair-btn').addEventListener('click', function () {
@@ -899,59 +1017,61 @@ document.getElementById('qsa-repair-btn').addEventListener('click', function () 
     fetch('/api/firewall', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(d => {
-            showFwToast(d.message, d.success ? 'success' : 'danger');
+            showFwToast(qsaEsc(d.message), d.success ? 'success' : 'danger');
             if (d.log) { out.textContent += '\n\n--- redeploy log ---\n' + d.log; }
             if (d.success) {
                 document.getElementById('qsa-repair-wrap').classList.add('d-none');
             }
         })
-        .catch(() => showFwToast('Repair request failed.', 'danger'))
+        .catch(() => showFwToast(qsaEsc('Repair request failed.'), 'danger'))
         .finally(() => { btn.disabled = false; btn.textContent = 'Repair CLI'; });
 });
 
-document.getElementById('qsa-save-btn').addEventListener('click', function () {
+function qsaSave(extra, okMsg) {
     const fd = new FormData();
     fd.append('action', 'qsa_settings_save');
     fd.append('monitor',  document.getElementById('qsa-monitor').checked ? '1' : '0');
     fd.append('schedule', document.getElementById('qsa-schedule').value);
     // Only send when the user typed something; an untouched field means
-    // "leave the saved webhook alone". Clearing is done by typing a space.
+    // "leave the saved webhook alone".
     const _wh = document.getElementById('qsa-webhook').value.trim();
     if (_wh !== '' || document.getElementById('qsa-webhook').dataset.cleared === '1') {
         fd.append('webhook_url', _wh);
     }
-    fetch('/api/firewall', { method: 'POST', body: fd })
+    Object.entries(extra || {}).forEach(([k, v]) => fd.append(k, v));
+    return fetch('/api/firewall', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(d => {
-            showFwToast(d.success ? 'Monitoring settings saved.' : (d.error || 'Could not save.'), d.success ? 'success' : 'danger');
+            let msg = d.success ? okMsg : (d.error || 'Could not save.');
+            if (d.success && document.getElementById('qsa-monitor').checked && !d.monitor && d.reason) {
+                msg += ' Not scheduled: ' + d.reason + '.';
+            }
+            showFwToast(qsaEsc(msg), d.success ? 'success' : 'danger');
             qsaLoadSettings();
+            return d;
         });
-});
+}
+
+document.getElementById('qsa-save-btn').addEventListener('click', () => qsaSave({}, 'Monitoring settings saved.'));
 
 document.getElementById('qsa-token-save').addEventListener('click', function () {
     const el = document.getElementById('qsa-token');
-    if (!el.value.trim()) { showFwToast('Enter a token first.', 'danger'); return; }
+    if (!el.value.trim()) { showFwToast(qsaEsc('Enter a token first.'), 'danger'); return; }
+    qsaSave({qsa_token: el.value.trim()}, 'Token saved.').then(() => { el.value = ''; });
+});
+
+document.getElementById('qsa-token-clear').addEventListener('click', function () {
+    if (!confirm('Remove the qsa.sh token? Scans fall back to the free tier.')) return;
     const fd = new FormData();
-    fd.append('action', 'qsa_settings_save');
-    fd.append('qsa_token', el.value.trim());
-    fd.append('monitor',  document.getElementById('qsa-monitor').checked ? '1' : '0');
-    fd.append('schedule', document.getElementById('qsa-schedule').value);
-    // Only send when the user typed something; an untouched field means
-    // "leave the saved webhook alone". Clearing is done by typing a space.
-    const _wh = document.getElementById('qsa-webhook').value.trim();
-    if (_wh !== '' || document.getElementById('qsa-webhook').dataset.cleared === '1') {
-        fd.append('webhook_url', _wh);
-    }
+    fd.append('action', 'qsa_clear_token');
     fetch('/api/firewall', { method: 'POST', body: fd })
         .then(r => r.json())
-        .then(d => {
-            showFwToast(d.success ? 'Token saved.' : (d.error || 'Could not save the token.'), d.success ? 'success' : 'danger');
-            el.value = '';
-            qsaLoadSettings();
-        });
+        .then(d => { showFwToast(qsaEsc(d.success ? 'Token removed.' : (d.error || 'Could not remove it.')), d.success ? 'success' : 'danger'); qsaLoadSettings(); });
 });
 
 qsaLoadSettings();
 qsaLoadHistory(true);   // restores the last scan into the pane on page load
+qsaPollStatus();        // and picks up a scan that is still running
+<?php endif; ?>
 
 </script>

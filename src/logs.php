@@ -120,6 +120,7 @@ function loadSystemLog(key) {
         .then(r => r.json())
         .then(data => {
             pre.textContent = data.content || '(empty)';
+            if (window.tsvcLinkifyIps) window.tsvcLinkifyIps(pre);
             pre.scrollTop = pre.scrollHeight;
         })
         .catch(() => { pre.textContent = '(Failed to load)'; });
@@ -134,6 +135,7 @@ function loadPanelLogs() {
         .then(r => r.json())
         .then(data => {
             pre.textContent = data.content || '(No activity logged yet.)';
+            if (window.tsvcLinkifyIps) window.tsvcLinkifyIps(pre);
             pre.scrollTop = pre.scrollHeight;
         })
         .catch(() => { pre.textContent = '(Failed to load panel logs)'; });
@@ -188,6 +190,7 @@ document.getElementById('load-domain-log-btn').addEventListener('click', functio
         .then(r => r.json())
         .then(data => {
             pre.textContent = data.content || '(empty)';
+            if (window.tsvcLinkifyIps) window.tsvcLinkifyIps(pre);
             pre.scrollTop = pre.scrollHeight;
         })
         .catch(() => { pre.textContent = 'Request failed.'; });

@@ -234,8 +234,49 @@ $isAdmin = Auth::hasFullAccess();
     </div>
 </div>
 
+<?php
+// Site details from Tuxxin Services — only the modules that are on.
+$tsvcSite = [
+    'issued'  => TuxxinServices::enabled('issued'),
+    'webshot' => TuxxinServices::enabled('webshot'),
+    'whack'   => TuxxinServices::enabled('whack'),
+];
+$tsvcAny = in_array(true, $tsvcSite, true);
+if ($tsvcAny): ?>
+<div class="modal fade" id="siteInsightsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-magnifying-glass-chart me-2"></i>Site details — <span id="site-insights-domain"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="site-insights-body"></div>
+        </div>
+    </div>
+</div>
+<script src="/assets/js/tsvc-site.js?v=<?= @filemtime(ROOT_PATH . '/public/assets/js/tsvc-site.js') ?: time() ?>"></script>
+<?php endif; ?>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
 <script>
+const TSVC_SITE = <?= json_encode($tsvcSite) ?>;
+const TSVC_ANY  = <?= $tsvcAny ? 'true' : 'false' ?>;
+
+function openSiteInsights(domain) {
+    document.getElementById('site-insights-domain').textContent = domain;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('siteInsightsModal')).show();
+    TsvcSite.render(document.getElementById('site-insights-body'), domain, {api: '/api/tuxxin', modules: TSVC_SITE});
+}
+
+function loadSiteBadges() {
+    if (!TSVC_ANY || !(TSVC_SITE.issued || TSVC_SITE.whack)) return;
+    fetch('/api/tuxxin?action=insights_summary').then(r => r.json()).then(r => {
+        if (!r.success) return;
+        document.querySelectorAll('[data-site-badges]').forEach(el => {
+            el.innerHTML = TsvcSite.badges(r.data[el.dataset.siteBadges]);
+        });
+    }).catch(() => {});
+}
+
 let pendingDeleteDomain = null;
 let wgConfigContent    = null;
 let wgConfigName       = null;
@@ -284,17 +325,21 @@ function loadAccounts() {
                 const addDomainBtn = `<a class="btn btn-sm btn-outline-primary me-1" href="/admin/add-domain?user=${encodeURIComponent(username)}" title="Add domain to ${username}"><i class="fas fa-plus-circle"></i></a>`;
                 const loginAsBtn = `<button class="btn btn-sm btn-outline-info me-1" onclick="loginAsUser('${username}')" title="Login as ${username}"><i class="fas fa-sign-in-alt"></i></button>`;
                 const pwBtn = `<button class="btn btn-sm btn-outline-dark me-1" onclick="openChangePassword('${username}')" title="Change password"><i class="fas fa-lock"></i></button>`;
+                const siteBtn = TSVC_ANY
+                    ? `<button class="btn btn-sm btn-outline-primary me-1" onclick="openSiteInsights('${a.domain_name}')" title="Site details"><i class="fas fa-magnifying-glass-chart"></i></button>`
+                    : '';
                 return `<tr class="${rowClass}">
                     <td class="ps-4">${userCell}</td>
-                    <td class="fw-semibold"><a href="https://${a.domain_name}" target="_blank" class="text-decoration-none">${a.domain_name} <i class="fas fa-external-link-alt ms-1" style="font-size:.7em;opacity:.5"></i></a></td>
+                    <td class="fw-semibold"><a href="https://${a.domain_name}" target="_blank" class="text-decoration-none">${a.domain_name} <i class="fas fa-external-link-alt ms-1" style="font-size:.7em;opacity:.5"></i></a><span data-site-badges="${a.domain_name}"></span></td>
                     <td>${a.port ?? '—'}</td>
                     <td>${a.disk ?? '—'}</td>
                     <td>${a.php_version ?? '8.4'}</td>
                     <td>${badge}</td>
                     <td>${wgBadge}</td>
-                    <td class="text-end pe-4">${loginAsBtn}${addDomainBtn}${sshKeysBtn}${pwBtn}${suspendBtn}${deleteBtn}</td>
+                    <td class="text-end pe-4">${siteBtn}${loginAsBtn}${addDomainBtn}${sshKeysBtn}${pwBtn}${suspendBtn}${deleteBtn}</td>
                 </tr>`;
             }).join('');
+            loadSiteBadges();
         })
         .catch(() => {
             document.getElementById('accounts-tbody').innerHTML =

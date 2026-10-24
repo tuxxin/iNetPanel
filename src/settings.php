@@ -27,6 +27,9 @@ function s(string $key, string $default = ''): string {
             <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-cloudflare" type="button"><i class="fab fa-cloudflare me-1"></i>Cloudflare</button></li>
             <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-ddns" type="button">DDNS</button></li>
             <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-wireguard" type="button"><i class="fas fa-shield-alt me-1"></i>WireGuard</button></li>
+            <?php if (Auth::hasFullAccess()): ?>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-tuxxin" type="button"><i class="fas fa-plug me-1"></i>Tuxxin Services</button></li>
+            <?php endif; ?>
         </ul>
     </div>
 
@@ -494,6 +497,8 @@ function s(string $key, string $default = ''): string {
 
                 <?php endif; ?>
             </div>
+
+            <?php if (Auth::hasFullAccess()) require __DIR__ . '/tuxxin_settings.php'; ?>
 
         </div>
     </div>
