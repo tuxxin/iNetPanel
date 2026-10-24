@@ -145,7 +145,9 @@ else
         since=$(systemctl show -p ActiveEnterTimestamp --value apache2 2>/dev/null)
         since_epoch=$(date -d "$since" +%s 2>/dev/null || echo 0)
         dropin_epoch=$(stat -c %Y "$DROPIN" 2>/dev/null || echo 0)
-        [ "$since_epoch" -le "$dropin_epoch" ] && NEED_RESTART=1
+        # Strictly earlier: a restart in the same second as the write (this
+        # script's own) counts as applied; both clocks have 1-second resolution.
+        [ "$since_epoch" -lt "$dropin_epoch" ] && NEED_RESTART=1
     fi
 
     if [ "$NEED_RESTART" -eq 0 ]; then
