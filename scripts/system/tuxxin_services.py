@@ -151,7 +151,10 @@ def now_str(ts=None):
     return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts) if ts else time.localtime())
 
 
-def log(msg, level='INFO', path=LOG_FILE):
+def log(msg, level='INFO', path=None):
+    # The default is read at call time, not bound at definition, so a test that
+    # points LOG_FILE elsewhere really does keep its lines out of the real log.
+    path = path or LOG_FILE
     line = '[%s] %s %s\n' % (now_str(), level, msg)
     try:
         fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
