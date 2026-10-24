@@ -491,6 +491,20 @@ if (is_file('/root/scripts/tuxxin_services.py')) {
     }
 }
 
+// Keep the panel's private files private: the database (whose directory the
+// rsync above just reset to 0755) and Apache's isolation from the panel's state.
+// Restarts Apache only when its isolation drop-in is new or changed.
+if (is_file('/root/scripts/harden_panel.sh')) {
+    $hOut = [];
+    exec('/bin/bash /root/scripts/harden_panel.sh 2>&1', $hOut, $hRc);
+    foreach ($hOut as $line) {
+        log_msg('harden_panel: ' . $line);
+    }
+    if ($hRc !== 0) {
+        log_msg('WARNING: harden_panel reported a problem (rc ' . $hRc . '); see /var/log/inetpanel_harden.log');
+    }
+}
+
 // Deletion tombstone directory. A deletion records its intent here BEFORE
 // destroying anything, and clears it only once every step has verified its own
 // post-condition — so an interrupted delete leaves a findable record instead of

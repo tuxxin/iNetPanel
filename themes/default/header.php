@@ -15,6 +15,17 @@ try {
                     && class_exists('TuxxinServices') && TuxxinServices::enabled('qsa');
         $_qsaWhen    = DB::setting('qsa_last_change', '');
 
+        // An update is installed by the previous panel_update.php, which does not
+        // know steps added since. The first admin page after an update starts the
+        // hardening pass itself (in the background; at most hourly until it
+        // succeeds, and not again after a rollback — see harden_panel.sh).
+        $__hard = (string) DB::setting('security_hardening', '');
+        if (Auth::hasFullAccess() && $__hard !== '1' && $__hard !== 'failed'
+            && time() - (int) DB::setting('security_hardening_attempt', '0') > 3600) {
+            DB::saveSetting('security_hardening_attempt', (string) time());
+            Shell::run('harden_panel', ['--detach']);
+        }
+
         // Remote (S3) backup failing. A failed off-site upload is silent
         // otherwise, and a backup nobody knows is broken is worse than none.
         // Raised by a failed or interrupted run, or by no run at all for 26 h

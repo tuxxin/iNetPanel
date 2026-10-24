@@ -264,7 +264,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             // Check 2: Is the folder writable?
             if (!is_writable($dbDir)) {
                 $user = exec('whoami');
-                throw new Exception("Permission Denied: The web user (<code>$user</code>) cannot write to <code>$dbDir</code>.<br>Please run: <code>sudo chmod 775 $dbDir</code>");
+                throw new Exception("Permission Denied: The web user (<code>$user</code>) cannot write to <code>$dbDir</code>.<br>Please run: <code>sudo chown www-data:www-data $dbDir && sudo chmod 700 $dbDir</code>");
             }
 
             // --- STEP B: CONNECT & INITIALIZE ---
@@ -276,6 +276,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             } catch (PDOException $e) {
                 throw new Exception("Database Connection Failed: " . $e->getMessage());
             }
+
+            // The panel database is the panel's alone (TiCore/DB.php keeps it so).
+            @chmod($dbDir, 0700);
+            @chmod($dbFile, 0600);
 
             $db->beginTransaction();
 

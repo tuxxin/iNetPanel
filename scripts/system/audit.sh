@@ -57,10 +57,18 @@ fi
 if [ -f "/var/www/inetpanel/db/inetpanel.db" ]; then
     DB_PERMS=$(stat -c "%a" /var/www/inetpanel/db/inetpanel.db)
     DB_OWNER=$(stat -c "%U:%G" /var/www/inetpanel/db/inetpanel.db)
-    if [ "$DB_OWNER" = "www-data:www-data" ] && [ "$DB_PERMS" = "664" ] || [ "$DB_PERMS" = "644" ] || [ "$DB_PERMS" = "660" ]; then
-        result PASS "Panel database permissions OK ($DB_PERMS, $DB_OWNER)"
+    DB_DIR_PERMS=$(stat -c "%a" /var/www/inetpanel/db)
+    if [ "$DB_OWNER" = "www-data:www-data" ] && [ "$DB_PERMS" = "600" ] && [ "$DB_DIR_PERMS" = "700" ]; then
+        result PASS "Panel database permissions OK (file $DB_PERMS, directory $DB_DIR_PERMS, $DB_OWNER)"
     else
-        result WARN "Panel database: $DB_PERMS owned by $DB_OWNER (expected www-data:www-data 664)"
+        result WARN "Panel database: file $DB_PERMS, directory $DB_DIR_PERMS, owned by $DB_OWNER (expected www-data 600 / 700) — run: inetp harden_panel"
+    fi
+fi
+if systemctl cat apache2.service >/dev/null 2>&1; then
+    if [ -f /etc/systemd/system/apache2.service.d/inetpanel-isolation.conf ]; then
+        result PASS "Apache is isolated from the panel's private files"
+    else
+        result WARN "Apache isolation drop-in missing — run: inetp harden_panel"
     fi
 fi
 echo ""

@@ -20,14 +20,34 @@ class DB
 
         $dir = dirname($dbPath);
         if (!is_dir($dir)) {
-            mkdir($dir, 0775, true);
+            mkdir($dir, 0700, true);
         }
 
         $this->pdo = new PDO('sqlite:' . $dbPath);
+        self::keepPrivate($dbPath);
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $this->pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
         $this->pdo->exec('PRAGMA journal_mode=WAL');
         $this->pdo->exec('PRAGMA foreign_keys=ON');
+    }
+
+    /**
+     * The panel database is the panel's alone: directory 0700, files 0600.
+     * An update's rsync resets the directory's mode and a file PDO creates takes
+     * the process umask, so this puts both back on every connection (a few stat
+     * calls). harden_panel.sh does the same as root.
+     */
+    private static function keepPrivate(string $dbPath): void
+    {
+        $dir = dirname($dbPath);
+        if (is_dir($dir) && !is_link($dir) && (fileperms($dir) & 0o077)) {
+            @chmod($dir, 0700);
+        }
+        foreach ([$dbPath, $dbPath . '-wal', $dbPath . '-shm'] as $f) {
+            if (is_file($f) && !is_link($f) && (fileperms($f) & 0o077)) {
+                @chmod($f, 0600);
+            }
+        }
     }
 
     public static function getInstance(): DB

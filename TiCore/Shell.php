@@ -38,6 +38,7 @@ class Shell
         'restore_helper',
         's3_backup',
         'tsvc',
+        'harden_panel',
         'list',
     ];
 

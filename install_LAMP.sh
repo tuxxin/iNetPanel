@@ -1080,7 +1080,8 @@ deploy_inetpanel() {
     mkdir -p "$PANEL_DEST/scripts"
 
     chown -R www-data:www-data "$PANEL_DEST"
-    chmod 775 "$PANEL_DEST/db"
+    # The panel database directory is the panel's alone; tenants share gid 33.
+    chmod 700 "$PANEL_DEST/db"
 
     # Suspended account page — served when an account is suspended via Apache Alias
     mkdir -p "$PANEL_DEST/suspended"
@@ -1293,6 +1294,10 @@ exec_cmd "Installing Firewalld + Fail2Ban" install_firewall
 # ==============================================================================
 exec_cmd "Final Service Reload" bash -c \
     "systemctl reload apache2 && systemctl restart php${PHP_VER}-fpm && systemctl restart vsftpd && systemctl restart lighttpd"
+
+# Keep the panel's private files private: the database directory, and Apache's
+# isolation from the panel's state (a systemd drop-in; restarts Apache once).
+exec_cmd "Isolating the panel's private files" bash "$SCRIPTS_DIR/harden_panel.sh"
 
 # ==============================================================================
 # 15. SUMMARY

@@ -20,6 +20,7 @@ users, so a broken release costs them confidence — treat every push that way.
 | `scripts/system/inetp` | CLI dispatcher, deployed to `/usr/local/bin/inetp` |
 | `scripts/system/tuxxin_services.py` | `inetp tsvc`: qsa.sh, worldip.io, issued.live, webshot.site, whack.sh (keys, cache, job queue, worker). Self-check: `inetp tsvc selftest` |
 | `TiCore/TuxxinServices.php` | Panel side of `inetp tsvc`: module switches, cache reads, port map |
+| `scripts/system/harden_panel.sh` | `inetp harden_panel`: panel DB permissions + Apache isolation drop-in. Idempotent; run by updates, the installer, and the panel after an update |
 | `scripts/panel_update.php` | The self-updater. Also writes sudoers and all crons. |
 | `install_LAMP.sh` | Installer. Also published to inetpanel.info. |
 | `release.sh` | Build + tag + publish. |
@@ -84,6 +85,17 @@ These each cost real debugging time. Do not rediscover them.
   than performing an action (a scan report, a status poll) must use
   `Shell::query()`, which logs failures only. Tuxxin Services
   (`TuxxinServices::helper()`) does this by default.
+- **The panel database is private: `db/` 0700, files 0600, www-data.** `TiCore/DB.php`
+  re-applies it on every connection (an update's rsync resets `db/` to 0755) and
+  `inetp harden_panel` does it as root. Never loosen it for convenience — tenants
+  share gid 33.
+- **Apache cannot see the panel's private paths.** `harden_panel.sh` installs a
+  systemd drop-in (`apache2.service.d/inetpanel-isolation.conf`) with
+  `InaccessiblePaths=` for `db/`, `TiCore/`, `/var/lib/inetpanel`,
+  `/var/lib/php/sessions` and `/root`. Anything new that holds secrets or state
+  belongs under one of those (or gets added to the list). Apache does still need
+  `/var/www/inetpanel/suspended`. The drop-in binds only an Apache started after
+  it; the script restarts Apache once and rolls back if it will not start.
 - **Tuxxin Services keys never touch the database.** `inetp tsvc set-secret <name>`
   reads stdin and writes `/root/.inetpanel_tsvc/<name>` (0600); the database only
   gets `<name>_set = 1`. A module that is off must not run at all — check
