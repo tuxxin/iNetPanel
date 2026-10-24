@@ -3,6 +3,7 @@
 $_updateAvailable = false;
 $_qsaChanged      = false;
 $_qsaWhen         = '';
+$_s3Failing       = false;
 $_latestVer = '';
 try {
     if (class_exists('DB') && class_exists('Version')) {
@@ -11,6 +12,22 @@ try {
         // box with no MTA has nowhere else to deliver it.
         $_qsaChanged = DB::setting('qsa_change_unacked', '0') === '1';
         $_qsaWhen    = DB::setting('qsa_last_change', '');
+
+        // Remote (S3) backup failing. A failed off-site upload is silent
+        // otherwise, and a backup nobody knows is broken is worse than none.
+        // Raised by a failed or interrupted run, or by no run at all for 26 h
+        // while nightly backups are on; clears itself on the next good run.
+        if (Auth::hasFullAccess() && DB::setting('s3_enabled', '0') === '1'
+            && DB::setting('backup_enabled', '1') === '1') {
+            $__s3 = json_decode(DB::setting('s3_status', '') ?: 'null', true);
+            if (is_array($__s3)) {
+                $__s3State = $__s3['state'] ?? '';
+                $__s3Beat  = max((int) ($__s3['heartbeat_ts'] ?? 0), (int) DB::setting('s3_heartbeat', '0'));
+                $_s3Failing = in_array($__s3State, ['failed', 'partial', 'interrupted'], true)
+                    || ($__s3State === 'running' && time() - $__s3Beat > 600)
+                    || time() - $__s3Beat > 26 * 3600;
+            }
+        }
 
         $__latestVer = DB::setting('panel_latest_ver', '');
         $__checkTs   = (int) DB::setting('panel_check_ts', '0');
@@ -98,6 +115,13 @@ try {
     <a href="/admin/firewall#tab-qsa" class="btn btn-sm btn-danger ms-3 fw-semibold"
        title="Your server's external exposure changed<?= $_qsaWhen ? ' on ' . htmlspecialchars($_qsaWhen) : '' ?>">
         <i class="fas fa-triangle-exclamation me-1"></i>Exposure changed
+    </a>
+    <?php endif; ?>
+
+    <?php if ($_s3Failing): ?>
+    <a href="/admin/backups" class="btn btn-sm btn-danger ms-3 fw-semibold"
+       title="Remote (S3) backup needs attention — see the Backups page">
+        <i class="fas fa-cloud me-1"></i>Remote backup failing
     </a>
     <?php endif; ?>
 

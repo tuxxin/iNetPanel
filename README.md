@@ -110,6 +110,7 @@ Add a domain, and iNetPanel creates the Linux user, Apache vhost, PHP-FPM pool, 
 ### Server Tools
 - Real-time dashboard with CPU, RAM, disk, and network monitoring
 - Automated backups with system config archiving
+- Off-site backup copies to any S3-compatible bucket (AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO), with optional retention
 - Image optimizer with AVIF generation
 - phpMyAdmin auto-login from admin and client portals
 - 35+ CLI commands for server management, security audits, and diagnostics

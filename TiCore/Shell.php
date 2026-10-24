@@ -36,6 +36,7 @@ class Shell
         'session_reaper',
         'qsa_scan',
         'restore_helper',
+        's3_backup',
         'list',
     ];
 
@@ -167,6 +168,62 @@ class Shell
             $outputStr,
             $exitCode
         );
+
+        return [
+            'success' => $success,
+            'output'  => $outputStr,
+            'error'   => $success ? '' : $outputStr,
+            'code'    => $exitCode,
+        ];
+    }
+
+    /**
+     * Like run(), but writes $input to the command's stdin.
+     *
+     * For secrets: a credential must not travel as an argument (run() logs its
+     * arguments, and process listings show them) nor through a Shell::stage()
+     * file. Only the arguments are logged, never $input — but the command's
+     * OUTPUT is logged like run()'s, so a command fed a secret must never echo it.
+     *
+     * @return array{success: bool, output: string, error: string, code: int}
+     */
+    public static function runWithInput(string $command, array $args, string $input): array
+    {
+        if (!in_array($command, self::$allowedCommands, true)) {
+            self::log('ERROR', $command, $args, 'Command not whitelisted', 1);
+            return [
+                'success' => false,
+                'output'  => '',
+                'error'   => "Command '{$command}' is not allowed.",
+                'code'    => 1,
+            ];
+        }
+
+        $argString = '';
+        foreach ($args as $flag => $value) {
+            if (is_int($flag)) {
+                $argString .= ' ' . escapeshellarg($value);
+            } else {
+                $argString .= ' ' . escapeshellarg($flag) . ' ' . escapeshellarg((string) $value);
+            }
+        }
+
+        $cmd  = 'sudo /usr/local/bin/inetp ' . escapeshellarg($command) . $argString . ' 2>&1';
+        $proc = proc_open($cmd, [0 => ['pipe', 'r'], 1 => ['pipe', 'w']], $pipes);
+        if (!is_resource($proc)) {
+            self::log('ERROR', $command, $args, 'proc_open failed', 1);
+            return ['success' => false, 'output' => '', 'error' => 'Could not start the command.', 'code' => 1];
+        }
+        fwrite($pipes[0], $input);
+        fclose($pipes[0]);
+        $raw = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        $exitCode = proc_close($proc);
+
+        $outputStr = preg_replace('/\x1B\[[0-9;]*[mGKHF]/', '', trim((string) $raw));
+        $success   = ($exitCode === 0);
+
+        self::log($success ? 'INFO' : 'ERROR', $command, $args, $outputStr, $exitCode);
 
         return [
             'success' => $success,

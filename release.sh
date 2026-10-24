@@ -482,6 +482,7 @@ rsync -a \
     --exclude='TiCore/.env' \
     --exclude='.installed' \
     --exclude='*.log' \
+    --exclude='__pycache__' --exclude='*.pyc' \
     --exclude='release.sh' \
     --exclude='install_LAMP.sh' \
     ./ "$PANEL_COPY/"

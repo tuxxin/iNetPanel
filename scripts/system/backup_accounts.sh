@@ -4,6 +4,7 @@
 #   - /backup/<username>_YYYY-MM-DD.tgz per hosting user (all domains at once)
 #   - Exports all MariaDB databases matching the username prefix
 #   - Retention policy: removes backups older than RETENTION_DAYS (default: 3)
+#   - Hands finished archives to s3_backup.py when remote backup is enabled
 #   - --single <username> mode: backs up one user (used by remove_domain.sh)
 # Usage: inetp backup_accounts
 #        backup_accounts.sh --single <username>
@@ -70,6 +71,16 @@ backup_user() {
     [ "$FINAL_MODE" -eq 1 ] && DEST_DIR="$FINAL_DIR"
     mkdir -p "$DEST_DIR"
     local BACKUP_FILE="${DEST_DIR}/${USERNAME}_${DATE}.tgz"
+    # Written under a hidden temporary name and renamed into place only once
+    # complete. Everything that picks archives up by name — the panel's list
+    # and download, and the S3 upload that runs after this script — would
+    # otherwise see a half-written .tgz while tar is still working on it. The
+    # rename also means a failed re-run no longer destroys the day's good copy.
+    # The PID makes the name unique per run, so two runs for the same account
+    # (the nightly run and a Run Backup Now) cannot rename each other's
+    # half-written file into place. Not mktemp: it creates the file 0600, and
+    # the panel's Download reads archives as www-data.
+    local PART_FILE="${DEST_DIR}/.${USERNAME}_${DATE}.tgz.partial.$$"
     local TMP_SQL
     TMP_SQL=$(mktemp -d)
 
@@ -109,12 +120,13 @@ backup_user() {
     # lost it while databases survive — and the databases are then the only
     # thing left worth saving, so still produce an archive.
     local TAR_RC=0
+    rm -f "$PART_FILE"
     if [ -d "/home/$USERNAME" ]; then
-        tar -czf "$BACKUP_FILE" -C / "home/$USERNAME" -C "$TMP_SQL" . 2>/dev/null
+        tar -czf "$PART_FILE" -C / "home/$USERNAME" -C "$TMP_SQL" . 2>/dev/null
         TAR_RC=$?
     elif [ "$FINAL_MODE" -eq 1 ]; then
         echo -e "    ${YELLOW}/home/$USERNAME is gone — archiving databases only${NC}"
-        tar -czf "$BACKUP_FILE" -C "$TMP_SQL" . 2>/dev/null
+        tar -czf "$PART_FILE" -C "$TMP_SQL" . 2>/dev/null
         TAR_RC=$?
     else
         rm -rf "$TMP_SQL"
@@ -129,14 +141,20 @@ backup_user() {
     # is routine on a live site; 2 and above is a real failure.
     if [ "$TAR_RC" -ge 2 ]; then
         echo -e "    ${RED}FAILED: tar exited ${TAR_RC} — removing partial archive${NC}"
-        rm -f "$BACKUP_FILE"
+        rm -f "$PART_FILE"
         log_to_panel "ERROR" "Backup failed for ${USERNAME}" "tar exit ${TAR_RC}"
         return 1
     fi
-    if [ ! -s "$BACKUP_FILE" ]; then
+    if [ ! -s "$PART_FILE" ]; then
         echo -e "    ${RED}FAILED: no archive produced${NC}"
-        rm -f "$BACKUP_FILE"
+        rm -f "$PART_FILE"
         log_to_panel "ERROR" "Backup produced no archive for ${USERNAME}" ""
+        return 1
+    fi
+    if ! mv -f "$PART_FILE" "$BACKUP_FILE"; then
+        echo -e "    ${RED}FAILED: could not move the finished archive into place${NC}"
+        rm -f "$PART_FILE"
+        log_to_panel "ERROR" "Backup failed for ${USERNAME}" "rename of the finished archive failed"
         return 1
     fi
 
@@ -151,6 +169,20 @@ backup_user() {
     return 0
 }
 
+# Off-site copy (Backups -> Remote Backup). s3_backup.py only launches the
+# upload and returns: it runs in its own systemd unit, so neither this script
+# nor remove_domain.sh's `timeout 120` around --single waits on the network.
+# Never affects this script's exit status.
+s3_upload_trigger() {
+    local S3_SCRIPT="/root/scripts/s3_backup.py" S3_ON
+    [ -f "$S3_SCRIPT" ] || return 0
+    S3_ON=$(sqlite3 "$PANEL_DB" "SELECT value FROM settings WHERE key='s3_enabled'" 2>/dev/null)
+    [ "$S3_ON" = "1" ] || return 0
+    echo ""
+    echo -e "  ${YELLOW}Remote (S3):${NC} $(python3 -I "$S3_SCRIPT" upload 2>&1 | tail -n 1)"
+    return 0
+}
+
 if [ "$SINGLE_MODE" -eq 1 ]; then
     # --final must proceed even with no home directory: it is the last-chance
     # backup before deletion, and a resumed deletion may already have removed
@@ -160,16 +192,29 @@ if [ "$SINGLE_MODE" -eq 1 ]; then
         exit 1
     fi
     backup_user "$SINGLE_ACCOUNT" || exit 1
+    s3_upload_trigger
     exit 0
 else
     echo -e "${BOLD}--- Account Backup ---${NC}"
     echo -e "  Date: $DATE  |  Retention: ${RETENTION_DAYS} days  |  Destination: $BACKUP_DIR"
     echo ""
 
-    # System configuration backup
+    # A run killed mid-archive leaves its .partial behind, and nothing else
+    # would ever remove it: every sweep matches *.tgz. Age-gated so that a
+    # --single or --final run writing one right now is left alone. The
+    # trailing slashes make find descend into /backup when it is a symlink.
+    find "$BACKUP_DIR/" "$FINAL_DIR/" -maxdepth 1 -type f -name '.*.tgz.partial*' -mmin +720 -delete 2>/dev/null
+
+    # System configuration backup (same write-then-rename as account archives)
     SYS_BACKUP="$BACKUP_DIR/system_config_${DATE}.tgz"
+    SYS_PART="$BACKUP_DIR/.system_config_${DATE}.tgz.partial.$$"
     echo -e "  ${YELLOW}Backing up system configuration files...${NC}"
-    tar -czf "$SYS_BACKUP" \
+    # Exit status deliberately ignored: several of these paths only exist on
+    # some installs (lighttpd, wireguard), and tar exits 2 for a missing one
+    # while still writing a good archive of the rest. So the archive itself is
+    # checked instead (gzip -t) before it is renamed into place.
+    rm -f "$SYS_PART"
+    tar -czf "$SYS_PART" \
         /etc/apache2/ \
         /etc/php/ \
         /etc/mysql/ \
@@ -182,8 +227,14 @@ else
         /etc/cron.d/ \
         /var/www/inetpanel/db/inetpanel.db \
         2>/dev/null || true
-    SYS_SIZE=$(du -sh "$SYS_BACKUP" 2>/dev/null | cut -f1)
-    echo -e "    ${GREEN}Saved: $SYS_BACKUP ($SYS_SIZE)${NC}"
+    if [ -s "$SYS_PART" ] && gzip -t "$SYS_PART" 2>/dev/null && mv -f "$SYS_PART" "$SYS_BACKUP"; then
+        SYS_SIZE=$(du -sh "$SYS_BACKUP" 2>/dev/null | cut -f1)
+        echo -e "    ${GREEN}Saved: $SYS_BACKUP ($SYS_SIZE)${NC}"
+    else
+        rm -f "$SYS_PART"
+        echo -e "    ${RED}FAILED: no system configuration archive was produced${NC}"
+        log_to_panel "ERROR" "System configuration backup failed" "no archive was produced"
+    fi
     echo ""
 
     COUNT=0
@@ -248,6 +299,7 @@ else
     # the only surviving copy of a deleted account and must never be swept.
     done < <(find "$BACKUP_DIR" -maxdepth 1 -name "*.tgz" -mtime +"$MTIME_DAYS" -print0)
     echo -e "  Removed $REMOVED old backup(s)."
+    s3_upload_trigger
 fi
 
 echo ""
