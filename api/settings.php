@@ -169,6 +169,25 @@ switch ($action) {
             . ' /var/www/inetpanel/scripts/panel_update.php --force', 'panel-update');
         $output = trim($updateResult['output'] ?? '');
 
+        // The update replaced the panel's PHP files, but PHP-FPM's opcode cache
+        // only re-checks a file every opcache.revalidate_freq seconds (60 in
+        // Debian's php.ini). Until then the next page still runs the old code:
+        // it shows the old version and offers the same update again. Drop the
+        // panel's own files from the cache; hosted sites are not touched.
+        if (function_exists('opcache_invalidate')) {
+            try {
+                $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(
+                    '/var/www/inetpanel', FilesystemIterator::SKIP_DOTS));
+                foreach ($it as $f) {
+                    if ($f->isFile() && str_ends_with($f->getFilename(), '.php')) {
+                        @opcache_invalidate($f->getPathname(), true);
+                    }
+                }
+            } catch (\Throwable) {
+                // Worst case is the old behaviour: the new code shows within a minute.
+            }
+        }
+
         // The exit status alone is not enough. panel_update.php can complete
         // successfully overall while individual deploy steps fail and log an
         // ERROR line — that is exactly how a failed inetp deploy went unnoticed.
