@@ -74,6 +74,11 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'Missing key.']);
             break;
         }
+        // One key, one line (the script validates it fully)
+        if (preg_match('/[\x00-\x1F\x7F]/', $key . $comment)) {
+            echo json_encode(['success' => false, 'error' => 'Paste one public key, on a single line.']);
+            break;
+        }
         // Validate public key format
         if (!preg_match('/^(ssh-(rsa|dss|ed25519|ecdsa)|ecdsa-sha2-nistp(256|384|521))\s+[A-Za-z0-9+\/]+=*/', $key)) {
             echo json_encode(['success' => false, 'error' => 'Invalid public key format. Must start with ssh-ed25519, ssh-rsa, etc.']);

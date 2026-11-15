@@ -47,28 +47,48 @@ else
         echo '{"success":false,"error":"Home directory not found"}' >&2
         exit 1
     fi
+    if ! SSH_GID=$(id -g "$SSH_USER" 2>/dev/null); then
+        echo '{"success":false,"error":"Account user not found"}' >&2
+        exit 1
+    fi
 fi
 
 SSH_DIR="${HOME_DIR}/.ssh"
 AUTH_KEYS="${SSH_DIR}/authorized_keys"
 
-# Ensure .ssh directory and authorized_keys file exist with correct permissions
-ensure_ssh_dir() {
-    if [[ ! -d "$SSH_DIR" ]]; then
-        mkdir -p "$SSH_DIR"
-    fi
-    if [[ ! -f "$AUTH_KEYS" ]]; then
-        touch "$AUTH_KEYS"
-    fi
+# An account's ~/.ssh belongs to the account: read and write it as the account
+# itself, with the account's own permissions.
+as_owner() {
     if [[ "$DOMAIN" == "root" ]]; then
-        chmod 700 "$SSH_DIR"
-        chmod 600 "$AUTH_KEYS"
+        "$@"
     else
-        chown -R "${SSH_USER}:www-data" "$SSH_DIR"
-        chmod 700 "$SSH_DIR"
-        chmod 600 "$AUTH_KEYS"
+        setpriv --reuid="$SSH_USER" --regid="$SSH_GID" --init-groups -- "$@"
     fi
 }
+
+# Ensure .ssh directory and authorized_keys file exist with correct permissions
+ensure_ssh_dir() {
+    if ! as_owner sh -c 'umask 077 && mkdir -p "$1" && chmod 700 "$1" && touch "$2" && chmod 600 "$2"' \
+            sh "$SSH_DIR" "$AUTH_KEYS" 2>/dev/null; then
+        echo '{"success":false,"error":"Cannot open ~/.ssh/authorized_keys as this account. Check that the account owns ~/.ssh and the file."}' >&2
+        exit 1
+    fi
+}
+
+# Print authorized_keys (as the owner, see above)
+read_auth_keys() {
+    as_owner cat -- "$AUTH_KEYS"
+}
+
+# Reject control characters (newlines included): one key is one line
+has_control_chars() {
+    [[ "$1" == *[[:cntrl:]]* ]]
+}
+
+if has_control_chars "$COMMENT"; then
+    echo '{"success":false,"error":"The comment must be a single line of text"}' >&2
+    exit 1
+fi
 
 # Get fingerprint of a key string
 get_fingerprint() {
@@ -90,7 +110,8 @@ case "$ACTION" in
 
     list)
         ensure_ssh_dir
-        if [[ ! -s "$AUTH_KEYS" ]]; then
+        CONTENT=$(read_auth_keys)
+        if [[ -z "$CONTENT" ]]; then
             echo '{"success":true,"data":[]}'
             exit 0
         fi
@@ -116,7 +137,7 @@ case "$ACTION" in
             echo -n "{\"index\":${idx},\"type\":\"${TYPE_ESC}\",\"fingerprint\":\"${FP_ESC}\",\"comment\":\"${CMT_ESC}\",\"raw\":\"${LINE_ESC}\"}"
             first=0
             ((idx++)) || true
-        done < "$AUTH_KEYS"
+        done <<< "$CONTENT"
         echo ']}'
         ;;
 
@@ -124,8 +145,11 @@ case "$ACTION" in
         if [[ -z "$KEY_DATA" ]]; then
             echo '{"success":false,"error":"Missing --key"}' >&2; exit 1
         fi
-        # Basic key format validation
-        if ! echo "$KEY_DATA" | grep -qP '^(ssh-(rsa|dss|ed25519|ecdsa)|ecdsa-sha2-nistp(256|384|521))\s+[A-Za-z0-9+/]+=*'; then
+        # One line: <type> <base64> [comment]. No options prefix, no second line.
+        if has_control_chars "$KEY_DATA"; then
+            echo '{"success":false,"error":"The key must be a single line"}' >&2; exit 1
+        fi
+        if ! [[ "$KEY_DATA" =~ ^(ssh-(rsa|dss|ed25519|ecdsa)|ecdsa-sha2-nistp(256|384|521))\ +[A-Za-z0-9+/]+={0,3}(\ .*)?$ ]]; then
             echo '{"success":false,"error":"Invalid public key format"}' >&2; exit 1
         fi
 
@@ -137,19 +161,29 @@ case "$ACTION" in
             KEY_DATA="${KEY_DATA} ${COMMENT}"
         fi
 
+        # Must be exactly one key ssh-keygen accepts
+        NEW_FP=$(get_fingerprint "$KEY_DATA") || NEW_FP=""
+        if [[ -z "$NEW_FP" || "$NEW_FP" == *$'\n'* ]]; then
+            echo '{"success":false,"error":"Invalid public key"}' >&2; exit 1
+        fi
+
         # Check if key already exists (by fingerprint)
-        NEW_FP=$(get_fingerprint "$KEY_DATA")
-        if grep -q . "$AUTH_KEYS" 2>/dev/null; then
+        CONTENT=$(read_auth_keys)
+        if [[ -n "$CONTENT" ]]; then
             while IFS= read -r line; do
                 [[ -z "$line" || "$line" =~ ^# ]] && continue
                 EXISTING_FP=$(get_fingerprint "$line")
                 if [[ "$EXISTING_FP" == "$NEW_FP" ]]; then
                     echo '{"success":false,"error":"Key already exists"}' >&2; exit 1
                 fi
-            done < "$AUTH_KEYS"
+            done <<< "$CONTENT"
         fi
 
-        echo "$KEY_DATA" >> "$AUTH_KEYS"
+        # Start on a fresh line if the file does not end with one
+        if [[ -n "$(as_owner tail -c1 -- "$AUTH_KEYS")" ]]; then
+            KEY_DATA=$'\n'"$KEY_DATA"
+        fi
+        printf '%s\n' "$KEY_DATA" | as_owner tee -a -- "$AUTH_KEYS" >/dev/null
         ensure_ssh_dir  # re-apply permissions
 
         FP_ESC="${NEW_FP//\"/\\\"}"
@@ -164,28 +198,29 @@ case "$ACTION" in
         ensure_ssh_dir
         TARGET_FP="$KEY_DATA"
 
-        TMP_FILE=$(mktemp)
+        CONTENT=$(read_auth_keys)
+        KEPT=""
         DELETED=0
 
         while IFS= read -r line || [[ -n "$line" ]]; do
             if [[ -z "$line" || "$line" =~ ^# ]]; then
-                echo "$line" >> "$TMP_FILE"
+                KEPT+="${line}"$'\n'
                 continue
             fi
             EXISTING_FP=$(get_fingerprint "$line")
             if [[ "$EXISTING_FP" == "$TARGET_FP" ]]; then
                 DELETED=1
             else
-                echo "$line" >> "$TMP_FILE"
+                KEPT+="${line}"$'\n'
             fi
-        done < "$AUTH_KEYS"
+        done <<< "$CONTENT"
 
         if [[ $DELETED -eq 0 ]]; then
-            rm -f "$TMP_FILE"
             echo '{"success":false,"error":"Key not found"}' >&2; exit 1
         fi
 
-        mv "$TMP_FILE" "$AUTH_KEYS"
+        # Write beside the file and rename over it, as the owner
+        printf '%s' "$KEPT" | as_owner sh -c 'umask 077 && cat > "$1.inetp-new" && mv -f -- "$1.inetp-new" "$1"' sh "$AUTH_KEYS"
         ensure_ssh_dir  # re-apply permissions
         echo '{"success":true}'
         ;;
@@ -194,7 +229,10 @@ case "$ACTION" in
         ensure_ssh_dir
 
         LABEL="${COMMENT:-inetpanel-$(date +%Y%m%d)}"
-        TMP_KEY="/tmp/inetp_sshkey_$$"
+        # Private, unpredictable directory (mktemp -d is 0700)
+        TMP_DIR=$(mktemp -d)
+        trap 'rm -rf "$TMP_DIR"' EXIT
+        TMP_KEY="${TMP_DIR}/key"
 
         # Generate ed25519 keypair
         ssh-keygen -t ed25519 -N "" -C "$LABEL" -f "$TMP_KEY" -q
@@ -202,14 +240,17 @@ case "$ACTION" in
         PUB_KEY=$(cat "${TMP_KEY}.pub")
         PRIV_KEY=$(cat "$TMP_KEY")
 
-        # Add public key to authorized_keys
-        echo "$PUB_KEY" >> "$AUTH_KEYS"
+        # Clean up temp key files immediately
+        rm -rf "$TMP_DIR"
+
+        # Add public key to authorized_keys (as the owner, on a fresh line)
+        if [[ -n "$(as_owner tail -c1 -- "$AUTH_KEYS")" ]]; then
+            printf '\n' | as_owner tee -a -- "$AUTH_KEYS" >/dev/null
+        fi
+        printf '%s\n' "$PUB_KEY" | as_owner tee -a -- "$AUTH_KEYS" >/dev/null
         ensure_ssh_dir  # re-apply permissions
 
         FP=$(get_fingerprint "$PUB_KEY")
-
-        # Clean up temp key files immediately
-        rm -f "$TMP_KEY" "${TMP_KEY}.pub"
 
         # Return private key (one-time) + fingerprint in JSON
         # Escape private key for JSON

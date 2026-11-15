@@ -601,6 +601,9 @@ function openSshKeys(domain) {
     new bootstrap.Modal(document.getElementById('sshKeysModal')).show();
 }
 
+// Text for table cells
+const sshEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
 function loadSshKeys() {
     document.getElementById('ssh-keys-tbody').innerHTML =
         '<tr><td colspan="4" class="text-muted text-center py-3 small">Loading…</td></tr>';
@@ -609,7 +612,7 @@ function loadSshKeys() {
         .then(data => {
             const tbody = document.getElementById('ssh-keys-tbody');
             if (!data.success) {
-                tbody.innerHTML = `<tr><td colspan="4" class="text-danger text-center py-3 small">${data.error || 'Error loading keys.'}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="4" class="text-danger text-center py-3 small">${sshEsc(data.error || 'Error loading keys.')}</td></tr>`;
                 return;
             }
             if (!data.data || !data.data.length) {
@@ -617,12 +620,12 @@ function loadSshKeys() {
                 return;
             }
             tbody.innerHTML = data.data.map(k => `<tr>
-                <td class="ps-3 font-monospace small text-muted" style="font-size:0.75rem">${k.fingerprint}</td>
-                <td class="small">${k.comment || '<span class="text-muted">—</span>'}</td>
-                <td><span class="badge bg-secondary small">${k.type}</span></td>
+                <td class="ps-3 font-monospace small text-muted" style="font-size:0.75rem">${sshEsc(k.fingerprint)}</td>
+                <td class="small">${k.comment ? sshEsc(k.comment) : '<span class="text-muted">—</span>'}</td>
+                <td><span class="badge bg-secondary small">${sshEsc(k.type)}</span></td>
                 <td class="text-end pe-3">
                     <button class="btn btn-sm btn-outline-danger py-0 px-1"
-                            onclick='deleteSshKey(${JSON.stringify(k.fingerprint)})' title="Delete">
+                            data-fp="${sshEsc(k.fingerprint)}" onclick="deleteSshKey(this.dataset.fp)" title="Delete">
                         <i class="fas fa-trash"></i>
                     </button>
                 </td>

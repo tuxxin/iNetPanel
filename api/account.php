@@ -452,6 +452,10 @@ switch ($action) {
     case 'ssh_keys_add':
         $key = trim($_POST['key'] ?? '');
         if (!$key) { echo json_encode(['success' => false, 'error' => 'No key provided.']); break; }
+        if (preg_match('/[\x00-\x1F\x7F]/', $key)) {
+            echo json_encode(['success' => false, 'error' => 'Paste one public key, on a single line.']);
+            break;
+        }
         $result = runAccountKeyScript($username, 'add', ['--key' => $key]);
         echo json_encode($result);
         break;

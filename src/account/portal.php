@@ -705,6 +705,9 @@ function apiFetch(url, opts) {
     });
 }
 
+// Text for table cells
+const sshEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
 function loadKeys() {
     const tbody = document.getElementById('ssh-keys-tbody');
     if (!tbody) return;
@@ -713,15 +716,15 @@ function loadKeys() {
         .then(data => {
             const keys = data.data || data.keys || [];
             if (!data.success || !keys.length) {
-                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3 small">' + (data.error || 'No SSH keys found.') + '</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3 small">' + sshEsc(data.error || 'No SSH keys found.') + '</td></tr>';
                 return;
             }
             tbody.innerHTML = keys.map(k => `<tr>
-                <td class="ps-4 small font-monospace">${k.fingerprint || '—'}</td>
-                <td class="small">${k.comment || '—'}</td>
-                <td class="small"><span class="badge bg-secondary">${k.type || '—'}</span></td>
+                <td class="ps-4 small font-monospace">${sshEsc(k.fingerprint || '—')}</td>
+                <td class="small">${sshEsc(k.comment || '—')}</td>
+                <td class="small"><span class="badge bg-secondary">${sshEsc(k.type || '—')}</span></td>
                 <td class="text-end pe-4">
-                    <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="deleteKey('${k.fingerprint}')" title="Delete"><i class="fas fa-trash"></i></button>
+                    <button class="btn btn-sm btn-outline-danger py-0 px-1" data-fp="${sshEsc(k.fingerprint)}" onclick="deleteKey(this.dataset.fp)" title="Delete"><i class="fas fa-trash"></i></button>
                 </td>
             </tr>`).join('');
         })
