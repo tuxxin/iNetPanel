@@ -422,18 +422,18 @@ switch ($action) {
     case 'optimize_images':
         $dir = trim($_POST['dir'] ?? 'www/');
         // Build the full path: /home/{username}/{domain}/{dir}
-        $siteDir = "/home/{$username}/{$reqDomain}";
+        $siteDir = rtrim("/home/{$username}/{$reqDomain}", '/');
         $targetDir = realpath($siteDir . '/' . $dir);
-        if (!$targetDir || !str_starts_with($targetDir, $siteDir)) {
+        if (!$targetDir || ($targetDir !== $siteDir && !str_starts_with($targetDir, $siteDir . '/'))) {
             echo json_encode(['success' => false, 'error' => 'Invalid directory.']);
             break;
         }
         // Build flags
-        $args = ['--dir' => $targetDir];
+        $args = ['--dir' => $targetDir, '--account' => $username];
         if (($_POST['dry_run'] ?? '0') === '1') $args[] = '--dry-run';
         if (($_POST['verbose'] ?? '0') === '1') $args[] = '--verbose';
 
-        // Run optimize_images via inetp (runs as root via sudo)
+        // Run optimize_images via inetp; it works as the account, not as root
         $result = Shell::run('optimize_images', $args);
         echo json_encode([
             'success' => $result['success'],

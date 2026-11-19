@@ -10,8 +10,10 @@
 #   - Large images (>2560px) are resized before optimization
 #   - Already-optimized files are skipped on re-runs
 #   - File ownership is preserved after each operation
+#   - Runs as the account that owns the directory, never as root; files that
+#     account cannot write are skipped
 # Quality: JPEG=85%, PNG=65-80, WebP=80%, AVIF=63, GIF=O3
-# Usage: inetp optimize_images --dir /path [--dry-run] [--verbose]
+# Usage: inetp optimize_images --dir /path [--account user1] [--dry-run] [--verbose]
 #        inetp optimize_images --username user1 [--domain example.com]
 # ==============================================================================
 
@@ -33,16 +35,20 @@ NON_INTERACTIVE=0
 USERNAME=""
 DOMAIN=""
 TARGET_DIR=""
+ACCOUNT=""
 DRY_RUN=0
 VERBOSE=0
+NO_BANNER=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --username)  USERNAME="$2"; shift 2 ;;
         --domain)    DOMAIN="$2";   shift 2 ;;
         --dir)       TARGET_DIR="$2"; shift 2 ;;
+        --account)   ACCOUNT="$2"; shift 2 ;;
         --dry-run)   DRY_RUN=1; shift ;;
         --verbose)   VERBOSE=1; shift ;;
+        --no-banner) NO_BANNER=1; shift ;;
         *) shift ;;
     esac
 done
@@ -73,20 +79,22 @@ HAS_AVIF=0; command -v avifenc &>/dev/null && HAS_AVIF=1
 HAS_SVGO=0; command -v svgo &>/dev/null && HAS_SVGO=1
 HAS_CONVERT=0; command -v convert &>/dev/null && HAS_CONVERT=1
 
-echo -e "${BOLD}═══════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}  Image Optimizer${NC}"
-echo -e "${BOLD}═══════════════════════════════════════════════════${NC}"
-echo -e "  ${BLUE}JPEG:${NC} ${JPEG_QUALITY}%  ${BLUE}PNG:${NC} ${PNG_QUALITY}  ${BLUE}WebP:${NC} ${WEBP_QUALITY}%  ${BLUE}GIF:${NC} O${GIF_OPT_LEVEL}"
-if [ "$HAS_AVIF" -eq 1 ]; then
-    echo -e "  ${BLUE}AVIF:${NC} ${AVIF_QUALITY}  ${BLUE}Max width:${NC} ${MAX_WIDTH}px"
-else
-    echo -e "  ${DIM}AVIF: not available (install libavif-bin for AVIF support)${NC}"
+if [ "$NO_BANNER" -eq 0 ]; then
+    echo -e "${BOLD}═══════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}  Image Optimizer${NC}"
+    echo -e "${BOLD}═══════════════════════════════════════════════════${NC}"
+    echo -e "  ${BLUE}JPEG:${NC} ${JPEG_QUALITY}%  ${BLUE}PNG:${NC} ${PNG_QUALITY}  ${BLUE}WebP:${NC} ${WEBP_QUALITY}%  ${BLUE}GIF:${NC} O${GIF_OPT_LEVEL}"
+    if [ "$HAS_AVIF" -eq 1 ]; then
+        echo -e "  ${BLUE}AVIF:${NC} ${AVIF_QUALITY}  ${BLUE}Max width:${NC} ${MAX_WIDTH}px"
+    else
+        echo -e "  ${DIM}AVIF: not available (install libavif-bin for AVIF support)${NC}"
+    fi
+    if [ "$HAS_SVGO" -eq 1 ]; then
+        echo -e "  ${BLUE}SVG:${NC} enabled"
+    fi
+    [ "$DRY_RUN" -eq 1 ] && echo -e "  ${YELLOW}Mode: DRY RUN (no files will be modified)${NC}"
+    echo ""
 fi
-if [ "$HAS_SVGO" -eq 1 ]; then
-    echo -e "  ${BLUE}SVG:${NC} enabled"
-fi
-[ "$DRY_RUN" -eq 1 ] && echo -e "  ${YELLOW}Mode: DRY RUN (no files will be modified)${NC}"
-echo ""
 
 if [ "$NON_INTERACTIVE" -eq 0 ]; then
     read -p "Enter target directory path: " TARGET_DIR
@@ -95,12 +103,56 @@ if [ -z "$TARGET_DIR" ] || [ ! -d "$TARGET_DIR" ]; then
     echo -e "${RED}Invalid directory: $TARGET_DIR${NC}"; exit 1
 fi
 
-# Optimization tracking dir (skip already-optimized files)
-OPT_TRACK="/tmp/inetp_img_optimized"
-mkdir -p "$OPT_TRACK" 2>/dev/null
+# The images belong to an account: optimize them as that account, never as
+# root. Everything below writes, replaces and chowns files inside a directory
+# the account controls, so as root the account could point those writes at any
+# file on the host. Run as root, re-run this script as the owner of the
+# directory (or --account), with that account's own permissions.
+if [ "$(id -u)" -eq 0 ]; then
+    REAL_DIR=$(realpath -e -- "$TARGET_DIR" 2>/dev/null)
+    if [ -z "$REAL_DIR" ] || [ ! -d "$REAL_DIR" ]; then
+        echo -e "${RED}Invalid directory: $TARGET_DIR${NC}"; exit 1
+    fi
+    if [ -n "$ACCOUNT" ]; then
+        RUN_AS="$ACCOUNT"
+    else
+        RUN_AS=$(getent passwd "$(stat -c %u -- "$REAL_DIR")" | cut -d: -f1)
+    fi
+    if ! [[ "$RUN_AS" =~ ^[a-z_][a-z0-9_.-]*$ ]] || ! RUN_UID=$(id -u -- "$RUN_AS" 2>/dev/null); then
+        echo -e "${RED}Cannot tell which account owns $REAL_DIR.${NC}"; exit 1
+    fi
+    if [ "$RUN_UID" -eq 0 ]; then
+        echo -e "${RED}$REAL_DIR belongs to root. Images are optimized as the account that owns them, never as root.${NC}"
+        echo "Choose a site directory instead, e.g. --username user1 --domain example.com"
+        exit 1
+    fi
+    if [ -n "$ACCOUNT" ]; then
+        ACCT_HOME=$(getent passwd "$ACCOUNT" | cut -d: -f6)
+        ACCT_HOME="${ACCT_HOME%/}"
+        if [ -z "$ACCT_HOME" ] || [[ "$REAL_DIR/" != "$ACCT_HOME/"* ]]; then
+            echo -e "${RED}$REAL_DIR is not inside ${ACCOUNT}'s home directory.${NC}"; exit 1
+        fi
+    fi
+    PASS=(--dir "$REAL_DIR" --no-banner)
+    [ "$DRY_RUN" -eq 1 ] && PASS+=(--dry-run)
+    [ "$VERBOSE" -eq 1 ] && PASS+=(--verbose)
+    # The account cannot read /root/scripts, so hand it the script's text.
+    SELF_TEXT=$(cat -- "${BASH_SOURCE[0]}") || exit 1
+    exec setpriv --reuid="$RUN_AS" --regid="$(id -g -- "$RUN_AS")" --init-groups --reset-env \
+        -- /bin/bash -c "$SELF_TEXT" optimize_images "${PASS[@]}"
+    echo -e "${RED}Could not switch to account $RUN_AS.${NC}"; exit 1
+fi
+
+# Optimization tracking dir (skip already-optimized files), in the account's
+# own home. Caching is skipped if it cannot be created.
+OPT_TRACK="${HOME:-/nonexistent}/.cache/inetp_img_optimized"
+if ! mkdir -p -m 700 "$OPT_TRACK" 2>/dev/null || [ ! -w "$OPT_TRACK" ]; then
+    OPT_TRACK=""
+fi
 
 is_optimized() {
     local file="$1"
+    [ -n "$OPT_TRACK" ] || return 1
     local mtime=$(stat -c%Y "$file" 2>/dev/null)
     local hash=$(echo "$file" | md5sum | cut -d' ' -f1)
     local marker="$OPT_TRACK/${hash}"
@@ -112,6 +164,7 @@ is_optimized() {
 
 mark_optimized() {
     local file="$1"
+    [ -n "$OPT_TRACK" ] || return 0
     local mtime=$(stat -c%Y "$file" 2>/dev/null)
     local hash=$(echo "$file" | md5sum | cut -d' ' -f1)
     echo "$mtime" > "$OPT_TRACK/${hash}"
@@ -135,6 +188,7 @@ resize_if_needed() {
 TOTAL_BEFORE=0
 TOTAL_AFTER=0
 SKIPPED=0
+NO_ACCESS=0
 COUNT_JPEG=0; COUNT_PNG=0; COUNT_GIF=0; COUNT_WEBP=0; COUNT_AVIF=0; COUNT_SVG=0
 
 echo -e "${YELLOW}Processing: $TARGET_DIR${NC}"
@@ -147,6 +201,10 @@ while IFS= read -r -d '' file; do
         SKIPPED=$((SKIPPED + 1))
         continue
     fi
+    if [ ! -w "$file" ]; then
+        NO_ACCESS=$((NO_ACCESS + 1))
+        continue
+    fi
 
     OWNER=$(stat -c "%u:%g" "$file")
     BEFORE=$(stat -c%s "$file")
@@ -154,16 +212,16 @@ while IFS= read -r -d '' file; do
     if [ "$DRY_RUN" -eq 0 ]; then
         resize_if_needed "$file"
         jpegoptim --max="$JPEG_QUALITY" --strip-com --strip-exif --quiet "$file"
-        chown "$OWNER" "$file"
+        chown "$OWNER" "$file" 2>/dev/null
 
         WEBP_OUT="${file%.*}.webp"
         cwebp -q "$WEBP_QUALITY" "$file" -o "$WEBP_OUT" -quiet 2>/dev/null
-        if [ -f "$WEBP_OUT" ]; then chown "$OWNER" "$WEBP_OUT"; COUNT_WEBP=$((COUNT_WEBP + 1)); fi
+        if [ -f "$WEBP_OUT" ]; then chown "$OWNER" "$WEBP_OUT" 2>/dev/null; COUNT_WEBP=$((COUNT_WEBP + 1)); fi
 
         if [ "$HAS_AVIF" -eq 1 ]; then
             AVIF_OUT="${file%.*}.avif"
             avifenc -q "$AVIF_QUALITY" -s 6 "$file" "$AVIF_OUT" 2>/dev/null
-            if [ -f "$AVIF_OUT" ]; then chown "$OWNER" "$AVIF_OUT"; COUNT_AVIF=$((COUNT_AVIF + 1)); fi
+            if [ -f "$AVIF_OUT" ]; then chown "$OWNER" "$AVIF_OUT" 2>/dev/null; COUNT_AVIF=$((COUNT_AVIF + 1)); fi
         fi
 
         mark_optimized "$file"
@@ -190,6 +248,10 @@ while IFS= read -r -d '' file; do
         SKIPPED=$((SKIPPED + 1))
         continue
     fi
+    if [ ! -w "$file" ]; then
+        NO_ACCESS=$((NO_ACCESS + 1))
+        continue
+    fi
 
     OWNER=$(stat -c "%u:%g" "$file")
     BEFORE=$(stat -c%s "$file")
@@ -202,16 +264,16 @@ while IFS= read -r -d '' file; do
         else
             rm -f "$TMP_PNG"
         fi
-        chown "$OWNER" "$file"
+        chown "$OWNER" "$file" 2>/dev/null
 
         WEBP_OUT="${file%.*}.webp"
         cwebp -q "$WEBP_QUALITY" "$file" -o "$WEBP_OUT" -quiet 2>/dev/null
-        if [ -f "$WEBP_OUT" ]; then chown "$OWNER" "$WEBP_OUT"; COUNT_WEBP=$((COUNT_WEBP + 1)); fi
+        if [ -f "$WEBP_OUT" ]; then chown "$OWNER" "$WEBP_OUT" 2>/dev/null; COUNT_WEBP=$((COUNT_WEBP + 1)); fi
 
         if [ "$HAS_AVIF" -eq 1 ]; then
             AVIF_OUT="${file%.*}.avif"
             avifenc -q "$AVIF_QUALITY" -s 6 "$file" "$AVIF_OUT" 2>/dev/null
-            if [ -f "$AVIF_OUT" ]; then chown "$OWNER" "$AVIF_OUT"; COUNT_AVIF=$((COUNT_AVIF + 1)); fi
+            if [ -f "$AVIF_OUT" ]; then chown "$OWNER" "$AVIF_OUT" 2>/dev/null; COUNT_AVIF=$((COUNT_AVIF + 1)); fi
         fi
 
         mark_optimized "$file"
@@ -238,13 +300,17 @@ while IFS= read -r -d '' file; do
         SKIPPED=$((SKIPPED + 1))
         continue
     fi
+    if [ ! -w "$file" ]; then
+        NO_ACCESS=$((NO_ACCESS + 1))
+        continue
+    fi
 
     OWNER=$(stat -c "%u:%g" "$file")
     BEFORE=$(stat -c%s "$file")
 
     if [ "$DRY_RUN" -eq 0 ]; then
         gifsicle -O"$GIF_OPT_LEVEL" --batch "$file" 2>/dev/null
-        chown "$OWNER" "$file"
+        chown "$OWNER" "$file" 2>/dev/null
         mark_optimized "$file"
     fi
 
@@ -270,13 +336,17 @@ if [ "$HAS_SVGO" -eq 1 ]; then
             SKIPPED=$((SKIPPED + 1))
             continue
         fi
+        if [ ! -w "$file" ]; then
+            NO_ACCESS=$((NO_ACCESS + 1))
+            continue
+        fi
 
         OWNER=$(stat -c "%u:%g" "$file")
         BEFORE=$(stat -c%s "$file")
 
         if [ "$DRY_RUN" -eq 0 ]; then
             svgo --quiet -i "$file" -o "$file" 2>/dev/null
-            chown "$OWNER" "$file"
+            chown "$OWNER" "$file" 2>/dev/null
             mark_optimized "$file"
         fi
 
@@ -319,6 +389,7 @@ echo -e "  GIF processed:   $COUNT_GIF"
 echo -e "  WebP generated:  $COUNT_WEBP"
 [ "$HAS_AVIF" -eq 1 ] && echo -e "  AVIF generated:  $COUNT_AVIF"
 echo -e "  Skipped (cached): $SKIPPED"
+[ "$NO_ACCESS" -gt 0 ] && echo -e "  Skipped (no write access): $NO_ACCESS"
 echo -e "  Original size:   $BEFORE_HR"
 echo -e "  Space saved:     ${GREEN}${SAVED_HR} (${PCT}%)${NC}"
 echo ""
